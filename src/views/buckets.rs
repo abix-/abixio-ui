@@ -4,7 +4,7 @@ use iced::{Element, Length};
 use crate::app::{App, Message};
 
 impl App {
-    pub fn browse_view(&self) -> Element<Message> {
+    pub fn browse_view(&self) -> Element<'_, Message> {
         let bucket_panel = self.bucket_list_view();
         let object_panel = self.object_list_view();
 
@@ -14,7 +14,7 @@ impl App {
             .into()
     }
 
-    fn bucket_list_view(&self) -> Element<Message> {
+    fn bucket_list_view(&self) -> Element<'_, Message> {
         let mut col = column![text("Buckets").size(14), iced::widget::rule::horizontal(1)]
             .spacing(4)
             .padding(8);

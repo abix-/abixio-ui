@@ -20,7 +20,8 @@ impl App {
                 let auth_label = if has_keys { "auth" } else { "anon" };
                 let status = if is_active { " [connected]" } else { "" };
                 let label = format!(
-                    "{} - {} ({}, {}){}", conn.name, conn.endpoint, conn.region, auth_label, status
+                    "{} - {} ({}, {}){}",
+                    conn.name, conn.endpoint, conn.region, auth_label, status
                 );
 
                 let mut r = row![text(label).size(11)].spacing(4);
@@ -57,7 +58,11 @@ impl App {
 
         // form header
         let is_editing = self.editing_connection.is_some();
-        let form_title = if is_editing { "Edit connection" } else { "Add connection" };
+        let form_title = if is_editing {
+            "Edit connection"
+        } else {
+            "Add connection"
+        };
         let save_label = if is_editing { "save" } else { "add" };
 
         layout = layout.push(text(form_title).size(13));

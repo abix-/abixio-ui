@@ -76,7 +76,7 @@ Each connection stores two keychain entries:
 
 The service name for all entries is `abixio-ui`.
 
-If neither entry exists for a connection, the connection is anonymous.
+If the saved key pair is missing, the connection is treated as anonymous.
 
 ## Connect flow
 
@@ -92,7 +92,9 @@ When you click "connect" on a connection profile:
 
 When you add a new connection:
 
-1. Validate the name (alphanumeric, starts with letter)
+1. Validate the name:
+   - first character must be a letter
+   - remaining characters may be letters, digits, `-`, or `_`
 2. Validate the endpoint (must be http:// or https://)
 3. If access key and secret key are provided:
    - Store both in the OS keychain under the connection name
@@ -100,6 +102,18 @@ When you add a new connection:
 
 If you leave the access key and secret key fields empty, the connection is
 saved as anonymous -- no keychain entries are created.
+
+## Edit flow
+
+When you edit an existing connection:
+
+1. The saved endpoint and region are loaded into the form
+2. The access key and secret key fields start blank
+3. If you enter both new keys, they replace the stored keychain entries
+4. If you leave both key fields blank, the existing keychain entries are kept
+
+There is no separate in-app action yet to clear stored keys and convert an
+existing saved connection back to anonymous.
 
 ## Delete flow
 

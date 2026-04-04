@@ -1,10 +1,10 @@
-use iced::widget::{button, column, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, space, text};
 use iced::{Element, Length};
 
 use crate::app::{App, Message, Selection};
 
 impl App {
-    pub fn detail_view(&self) -> Element<Message> {
+    pub fn detail_view(&self) -> Element<'_, Message> {
         let mut col = column![].spacing(4).padding(8);
 
         match &self.selection {
@@ -48,6 +48,66 @@ impl App {
                         ]
                         .spacing(4),
                     );
+
+                    if self.is_abixio {
+                        col = col.push(section("AbixIO"));
+
+                        if self.loading_object_inspect {
+                            col = col.push(text("Loading shard inspection...").size(11));
+                        } else if let Some(Ok(inspect)) = &self.object_inspect {
+                            col = col.push(meta_row(
+                                "Erasure",
+                                &format!(
+                                    "{} data + {} parity",
+                                    inspect.erasure.data, inspect.erasure.parity
+                                ),
+                            ));
+                            col = col.push(meta_row(
+                                "Distribution",
+                                &inspect
+                                    .erasure
+                                    .distribution
+                                    .iter()
+                                    .map(|disk| disk.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            ));
+                            col = col.push(text("Shards").size(11));
+
+                            for shard in &inspect.shards {
+                                col = col.push(meta_row(
+                                    &format!("Shard {}", shard.index),
+                                    &format!("disk {} ({})", shard.disk, shard.status),
+                                ));
+                                col = col.push(meta_row(
+                                    "Checksum",
+                                    shard.checksum.as_deref().unwrap_or("-"),
+                                ));
+                            }
+                        } else if let Some(Err(error)) = &self.object_inspect {
+                            col = col.push(text(format!("Inspect error: {}", error)).size(11));
+                        } else {
+                            col = col.push(text("Shard inspection not loaded.").size(11));
+                        }
+
+                        if let Some(result) = &self.heal_result {
+                            col = col.push(text(result).size(11));
+                        }
+
+                        let refresh_button = if self.loading_object_inspect {
+                            button(text("Refresh Inspect").size(11))
+                        } else {
+                            button(text("Refresh Inspect").size(11))
+                                .on_press(Message::RefreshObjectInspect)
+                        };
+                        let heal_button = if self.healing_object {
+                            button(text("Heal Object").size(11))
+                        } else {
+                            button(text("Heal Object").size(11)).on_press(Message::OpenHealConfirm)
+                        };
+
+                        col = col.push(row![refresh_button, heal_button].spacing(4));
+                    }
                 } else if let Some(Err(e)) = &self.detail {
                     col = col.push(text(format!("Error: {}", e)).size(11));
                 }
@@ -62,6 +122,46 @@ impl App {
         );
 
         scrollable(col).height(Length::Fill).into()
+    }
+
+    pub fn heal_confirm_modal(&self) -> Element<'_, Message> {
+        let Some((bucket, key)) = &self.heal_confirm_target else {
+            return container(text("")).width(Length::Shrink).into();
+        };
+
+        let card = container(
+            column![
+                text("Confirm Heal").size(16),
+                text("This will ask AbixIO to heal the selected object.").size(11),
+                meta_row("Bucket", bucket),
+                meta_row("Key", key),
+                row![
+                    button(text("Cancel").size(11)).on_press(Message::CancelHealConfirm),
+                    button(text("Heal Object").size(11)).on_press(Message::ConfirmHealObject),
+                ]
+                .spacing(8),
+            ]
+            .spacing(8)
+            .padding(12),
+        )
+        .width(360);
+
+        container(
+            row![
+                space::horizontal().width(Length::Fill),
+                column![
+                    space::vertical().height(Length::Fill),
+                    card,
+                    space::vertical().height(Length::Fill),
+                ],
+                space::horizontal().width(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 }
 

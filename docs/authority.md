@@ -6,79 +6,95 @@ Who owns what data, where it lives, and how it flows.
 
 | Data | Authoritative source | Local storage |
 |------|---------------------|---------------|
-| Buckets, objects, metadata | S3 endpoint (server) | None -- always fetched live |
-| Disk health, shard info | AbixIO server (/_abixio/ API) | None -- always fetched live |
-| Connection list | `~/.abixio-ui/settings.json` | Name, endpoint URL, region |
-| Access keys | OS keychain | Never written to disk |
-| Secret keys | OS keychain | Never written to disk |
-| UI preferences | `~/.abixio-ui/settings.json` (planned) | Window size, theme, last connection |
+| Buckets, objects, metadata | S3 endpoint | None |
+| AbixIO status, disks, heal data | AbixIO `/_admin/*` API | None |
+| Saved connection list | `~/.abixio-ui/settings.json` | Name, endpoint, region |
+| Saved access keys | OS keychain | Never written to disk |
+| Saved secret keys | OS keychain | Never written to disk |
+| CLI credentials | Process memory only | Not persisted |
+| Theme and transient UI state | In-memory only | Not persisted |
 
 ## Rules
 
-1. **The S3 endpoint is the single source of truth for all object data.**
-   The UI never caches bucket listings, object data, or metadata locally.
-   Every navigation action triggers a live fetch from the server.
+1. **The server is authoritative.**
+   Bucket listings, object listings, object metadata, and AbixIO admin data are
+   fetched live from the connected endpoint. The app does not keep a local data
+   cache.
 
-2. **Keys never touch the filesystem.**
-   Both access keys and secret keys are stored in the OS keychain only
-   (Windows Credential Manager, macOS Keychain, Linux secret-service).
-   `settings.json` stores connection names, endpoints, and regions -- never
-   any keys.
+2. **Saved secrets stay in the keychain.**
+   `settings.json` stores only non-secret connection metadata. Access keys and
+   secret keys for saved profiles live in the OS keychain.
 
-3. **No optimistic updates.**
-   All mutations (upload, delete, create bucket) go directly to the server.
-   The UI waits for the server response, then re-fetches the listing.
-   If the server says it failed, the UI shows an error. No local state divergence.
+3. **CLI secrets are session-only.**
+   Credentials passed with `--access-key` and `--secret-key` are used to build
+   the initial client for that process and are not written to disk or keychain.
+
+4. **Writes are server-first.**
+   Upload, delete, and create-bucket operations wait for the server result and
+   then refresh the relevant listing. On failure, the app shows the error in
+   the bottom status bar.
 
 ## Read path
 
+```text
+user selects a bucket
+  -> App::update sets loading state
+  -> Task::perform calls S3 list_objects(...)
+  -> ObjectsLoaded updates state
+  -> UI renders the returned listing
+
+user selects an object
+  -> App::update sets loading_detail = true
+  -> Task::perform calls S3 head_object(...)
+  -> if AbixIO: Task::perform also calls /_admin/object?bucket=...&key=...
+  -> DetailLoaded and ObjectInspectLoaded update state
+  -> UI renders the object detail panel
+
+user connects to an AbixIO server
+  -> Task::perform probes GET /_admin/status
+  -> if server == "abixio", app fetches /_admin/disks and /_admin/heal
 ```
-user clicks bucket "test"
-  -> UI sends Request::ListObjects to background thread
-  -> background: GET /test?list-type=2 (live HTTP call)
-  -> background sends Response::Objects back to UI
-  -> UI renders object table
 
-user clicks prefix "logs/"
-  -> GET /test?list-type=2&prefix=logs/&delimiter=/
-  -> render filtered table
-
-user clicks refresh
-  -> re-fetch current listing from server
-```
-
-No caching. No background polling. Simple and always consistent.
-
-Tradeoff: one network round-trip per navigation click. For home/personal use
-with local servers this is <10ms. For remote endpoints (AWS), it's the same
-latency as any S3 client.
+There is no background polling and no local cache invalidation logic because
+the app re-reads the authoritative source when the user asks for data.
 
 ## Write path
 
-```
+```text
 upload:
-  user picks file via native dialog
-  -> PUT /bucket/key (await server response)
-  -> 200: re-fetch listing, show success toast
-  -> error: show error toast, listing unchanged
+  user picks a file in a native dialog
+  -> PUT object
+  -> on success: refresh current object listing
+  -> on error: show bottom status/error bar
 
 delete:
-  user clicks delete, confirms in dialog
-  -> DELETE /bucket/key (await server response)
-  -> 204: re-fetch listing
-  -> error: show error toast
+  user clicks Delete in the object detail panel
+  -> DELETE object
+  -> on success: clear selection and refresh current listing
+  -> on error: show bottom status/error bar
 
 create bucket:
-  user types name, clicks create
-  -> PUT /bucket (await server response)
-  -> 200: re-fetch bucket list
-  -> error: show error toast
+  user enters a bucket name
+  -> PUT bucket
+  -> on success: refresh bucket list
+  -> on error: show bottom status/error bar
+
+manual heal:
+  user clicks Heal Object in the AbixIO object detail panel
+  -> modal confirmation opens
+  -> POST /_admin/heal?bucket=...&key=...
+  -> on success: refresh object inspection and heal-status data
+  -> on error: show inline heal error and bottom status/error bar
 ```
+
+The current UI does not show success toasts. It does ask for confirmation
+before object heal, but it still does not ask for confirmation before
+dispatching object delete.
 
 ## Credential storage
 
-```
-~/.abixio-ui/settings.json (on disk, not secret):
+```text
+~/.abixio-ui/settings.json
   {
     "connections": [
       {"name": "home", "endpoint": "http://nas:10000", "region": "us-east-1"},
@@ -86,31 +102,18 @@ create bucket:
     ]
   }
 
-OS keychain (encrypted by OS, per-connection):
-  service "abixio-ui":
-    "home.access-key" -> "mykey"
-    "home.secret-key" -> "secret-key-here"
-    "aws.access-key"  -> "AKIA..."
-    "aws.secret-key"  -> "aws-secret-key"
+OS keychain service "abixio-ui"
+  "home.access-key" -> "mykey"
+  "home.secret-key" -> "secret-key-here"
+  "aws.access-key"  -> "AKIA..."
+  "aws.secret-key"  -> "aws-secret-key"
 ```
 
-On connect:
-1. Read `settings.json` for endpoint URL + region
-2. Read access key and secret key from OS keychain by connection name
-3. If both keys present: sign requests with AWS Signature V4
-4. If no keys: connect without auth (anonymous)
+See [docs/credentials.md](credentials.md) for the connection and edit flows.
 
-See [docs/credentials.md](credentials.md) for full details.
+## What is not stored locally
 
-Keychain backends:
-- Windows: Credential Manager
-- macOS: Keychain
-- Linux: secret-service (GNOME Keyring / KWallet)
-
-## What is NOT stored locally
-
-- Object data (never cached, always streamed from server)
-- Bucket listings (fetched live every time)
-- Server configuration (read from /_abixio/status on demand)
-- Disk health data (fetched from /_abixio/disks on demand)
-- Shard/erasure details (fetched from /_abixio/object-info on demand)
+- Object data
+- Bucket listings
+- AbixIO status, disk, heal, and object-inspection responses
+- Persisted UI preferences such as theme, window size, or last active connection

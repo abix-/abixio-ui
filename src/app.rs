@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
 use iced::keyboard;
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, column, container, row, stack, text};
 use iced::{Element, Length, Subscription, Task, Theme};
 
 use crate::abixio::client::AdminClient;
-use crate::abixio::types::{DisksResponse, HealStatusResponse, StatusResponse};
+use crate::abixio::types::{
+    DisksResponse, HealResponse, HealStatusResponse, ObjectInspectResponse, StatusResponse,
+};
 use crate::config::{self, Connection, Settings};
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, S3Client};
+use crate::views::testing::TestResult;
 
 // -- messages --
 
@@ -54,8 +57,26 @@ pub enum Message {
     AbixioDetected(Option<StatusResponse>),
     DisksLoaded(Result<DisksResponse, String>),
     HealStatusLoaded(Result<HealStatusResponse, String>),
+    ObjectInspectLoaded {
+        bucket: String,
+        key: String,
+        result: Result<ObjectInspectResponse, String>,
+    },
     RefreshDisks,
     RefreshHealStatus,
+    RefreshObjectInspect,
+    OpenHealConfirm,
+    CancelHealConfirm,
+    ConfirmHealObject,
+    HealObjectFinished {
+        bucket: String,
+        key: String,
+        result: Result<HealResponse, String>,
+    },
+
+    // testing
+    RunTests,
+    TestsComplete(Vec<TestResult>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,6 +87,7 @@ pub enum Section {
     Healing,
     Connections,
     Settings,
+    Testing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -116,6 +138,13 @@ pub struct App {
     pub server_status: Option<StatusResponse>,
     pub disks_data: Option<Result<DisksResponse, String>>,
     pub heal_data: Option<Result<HealStatusResponse, String>>,
+    pub object_inspect: Option<Result<ObjectInspectResponse, String>>,
+    pub loading_object_inspect: bool,
+    pub object_inspect_target: Option<(String, String)>,
+    pub heal_confirm_target: Option<(String, String)>,
+    pub healing_object: bool,
+    pub healing_target: Option<(String, String)>,
+    pub heal_result: Option<String>,
 
     // connection form
     pub new_conn_name: String,
@@ -123,6 +152,11 @@ pub struct App {
     pub new_conn_region: String,
     pub new_conn_access_key: String,
     pub new_conn_secret_key: String,
+
+    // testing
+    pub test_results: Vec<TestResult>,
+    pub test_running: bool,
+    pub test_progress: String,
 }
 
 impl App {
@@ -138,15 +172,24 @@ impl App {
                 Ok(client) => (Arc::new(client), ep.clone(), Section::Browse, true),
                 Err(e) => {
                     tracing::error!("failed to create s3 client: {}", e);
-                    let fallback = S3Client::anonymous("http://localhost:10000")
-                        .expect("fallback client");
-                    (Arc::new(fallback), String::new(), Section::Connections, false)
+                    let fallback =
+                        S3Client::anonymous("http://localhost:10000").expect("fallback client");
+                    (
+                        Arc::new(fallback),
+                        String::new(),
+                        Section::Connections,
+                        false,
+                    )
                 }
             }
         } else {
-            let fallback =
-                S3Client::anonymous("http://localhost:10000").expect("fallback client");
-            (Arc::new(fallback), String::new(), Section::Connections, false)
+            let fallback = S3Client::anonymous("http://localhost:10000").expect("fallback client");
+            (
+                Arc::new(fallback),
+                String::new(),
+                Section::Connections,
+                false,
+            )
         };
 
         let app = Self {
@@ -174,11 +217,21 @@ impl App {
             server_status: None,
             disks_data: None,
             heal_data: None,
+            object_inspect: None,
+            loading_object_inspect: false,
+            object_inspect_target: None,
+            heal_confirm_target: None,
+            healing_object: false,
+            healing_target: None,
+            heal_result: None,
             new_conn_name: String::new(),
             new_conn_endpoint: String::new(),
             new_conn_region: "us-east-1".to_string(),
             new_conn_access_key: String::new(),
             new_conn_secret_key: String::new(),
+            test_results: Vec::new(),
+            test_running: false,
+            test_progress: String::new(),
         };
 
         let task = if loading_buckets {
@@ -229,26 +282,39 @@ impl App {
                 self.selected_bucket = Some(name.clone());
                 self.current_prefix.clear();
                 self.selection = Selection::Bucket(name);
+                self.clear_object_admin_state();
                 self.loading_objects = true;
                 self.cmd_fetch_objects()
             }
             Message::NavigatePrefix(prefix) => {
                 self.current_prefix = prefix;
                 self.selection = Selection::None;
+                self.clear_object_admin_state();
                 self.loading_objects = true;
                 self.cmd_fetch_objects()
             }
             Message::SelectObject(key) => {
                 let bucket = self.selected_bucket.clone().unwrap_or_default();
+                self.clear_object_admin_state();
                 self.selection = Selection::Object {
                     bucket: bucket.clone(),
                     key: key.clone(),
                 };
                 self.loading_detail = true;
-                self.cmd_fetch_detail(&bucket, &key)
+                if self.is_abixio && self.admin_client.is_some() {
+                    self.loading_object_inspect = true;
+                    self.object_inspect_target = Some((bucket.clone(), key.clone()));
+                    Task::batch(vec![
+                        self.cmd_fetch_detail(&bucket, &key),
+                        self.cmd_fetch_object_inspect(&bucket, &key),
+                    ])
+                } else {
+                    self.cmd_fetch_detail(&bucket, &key)
+                }
             }
             Message::ClearSelection => {
                 self.selection = Selection::None;
+                self.clear_object_admin_state();
                 Task::none()
             }
 
@@ -277,6 +343,7 @@ impl App {
             }
             Message::DeleteDone(Ok(())) => {
                 self.selection = Selection::None;
+                self.clear_object_admin_state();
                 self.loading_objects = true;
                 self.cmd_fetch_objects()
             }
@@ -418,6 +485,7 @@ impl App {
                         self.detail = None;
                         self.selected_bucket = None;
                         self.current_prefix.clear();
+                        self.clear_object_admin_state();
                         self.loading_buckets = true;
                         self.is_abixio = false;
                         self.server_status = None;
@@ -543,9 +611,7 @@ impl App {
                 };
                 let conn_name = name.clone();
                 Task::perform(
-                    async move {
-                        client.list_buckets().await.map(|_| ())
-                    },
+                    async move { client.list_buckets().await.map(|_| ()) },
                     move |result| Message::TestConnectionResult(conn_name.clone(), result),
                 )
             }
@@ -632,6 +698,19 @@ impl App {
                 self.heal_data = Some(result);
                 Task::none()
             }
+            Message::ObjectInspectLoaded {
+                bucket,
+                key,
+                result,
+            } => {
+                if !self.selected_object_matches(&bucket, &key) {
+                    return Task::none();
+                }
+                self.loading_object_inspect = false;
+                self.object_inspect_target = None;
+                self.object_inspect = Some(result);
+                Task::none()
+            }
             Message::RefreshDisks => {
                 let admin = self.admin_client.clone();
                 Task::perform(
@@ -658,16 +737,114 @@ impl App {
                     Message::HealStatusLoaded,
                 )
             }
+            Message::RefreshObjectInspect => {
+                let Some((bucket, key)) = self.current_selected_object() else {
+                    return Task::none();
+                };
+                if !self.is_abixio || self.admin_client.is_none() {
+                    return Task::none();
+                }
+                self.loading_object_inspect = true;
+                self.object_inspect_target = Some((bucket.clone(), key.clone()));
+                self.cmd_fetch_object_inspect(&bucket, &key)
+            }
+            Message::OpenHealConfirm => {
+                let Some((bucket, key)) = self.current_selected_object() else {
+                    return Task::none();
+                };
+                if !self.is_abixio || self.admin_client.is_none() || self.healing_object {
+                    return Task::none();
+                }
+                self.heal_confirm_target = Some((bucket, key));
+                Task::none()
+            }
+            Message::CancelHealConfirm => {
+                self.heal_confirm_target = None;
+                Task::none()
+            }
+            Message::ConfirmHealObject => {
+                let Some((bucket, key)) = self.heal_confirm_target.take() else {
+                    return Task::none();
+                };
+                self.healing_object = true;
+                self.healing_target = Some((bucket.clone(), key.clone()));
+                self.heal_result = Some("Healing object...".to_string());
+                self.cmd_heal_object(&bucket, &key)
+            }
+            Message::HealObjectFinished {
+                bucket,
+                key,
+                result,
+            } => {
+                let healing_matches =
+                    self.healing_target.as_ref() == Some(&(bucket.clone(), key.clone()));
+                if healing_matches {
+                    self.healing_object = false;
+                    self.healing_target = None;
+                }
+                if !self.selected_object_matches(&bucket, &key) {
+                    return Task::none();
+                }
+                match result {
+                    Ok(heal) => {
+                        let suffix = heal
+                            .shards_fixed
+                            .map(|count| format!(" ({} shards fixed)", count))
+                            .unwrap_or_default();
+                        self.heal_result = Some(format!("{}{}", heal.result, suffix));
+                        self.loading_object_inspect = true;
+                        self.object_inspect_target = Some((bucket.clone(), key.clone()));
+                        Task::batch(vec![
+                            self.cmd_fetch_object_inspect(&bucket, &key),
+                            self.refresh_heal_status_task(),
+                        ])
+                    }
+                    Err(error) => {
+                        self.heal_result = Some(format!("Heal failed: {}", error));
+                        self.error = Some(format!("Heal failed: {}", error));
+                        Task::none()
+                    }
+                }
+            }
+
+            // -- testing --
+            Message::RunTests => {
+                if self.test_running || self.endpoint.is_empty() {
+                    return Task::none();
+                }
+                self.test_running = true;
+                self.test_results.clear();
+                self.test_progress = "running tests...".to_string();
+                let client = self.client.clone();
+                let admin = if self.is_abixio {
+                    self.admin_client.clone()
+                } else {
+                    None
+                };
+                Task::perform(
+                    async move { crate::views::testing::run_e2e_tests(client, admin).await },
+                    Message::TestsComplete,
+                )
+            }
+            Message::TestsComplete(results) => {
+                self.test_running = false;
+                let passed = results.iter().filter(|r| r.passed).count();
+                let total = results.len();
+                self.test_progress = format!("done: {}/{} passed", passed, total);
+                self.test_results = results;
+                Task::none()
+            }
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let sidebar = self.sidebar_view();
-        let content: Element<Message> = match self.section {
+        let content: Element<'_, Message> = match self.section {
             Section::Browse => self.browse_view(),
             Section::Connections => self.connections_view(),
             Section::Disks if self.is_abixio => self.disks_view(),
             Section::Healing if self.is_abixio => self.healing_view(),
+            Section::Testing => self.testing_view(),
             Section::Settings => self.settings_view(),
             _ => container(text("Coming soon").size(14)).padding(20).into(),
         };
@@ -715,7 +892,12 @@ impl App {
             );
         }
 
-        layout.into()
+        let base: Element<'_, Message> = layout.into();
+        if self.heal_confirm_target.is_some() {
+            stack![base, self.heal_confirm_modal()].into()
+        } else {
+            base
+        }
     }
 
     // -- commands --
@@ -749,5 +931,196 @@ impl App {
             async move { client.head_object(&bucket, &key).await },
             Message::DetailLoaded,
         )
+    }
+
+    fn cmd_fetch_object_inspect(&self, bucket: &str, key: &str) -> Task<Message> {
+        let admin = self.admin_client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        Task::perform(
+            async move {
+                let result = if let Some(a) = admin.as_ref() {
+                    a.inspect_object(&bucket, &key).await
+                } else {
+                    Err("no admin client".to_string())
+                };
+                (bucket, key, result)
+            },
+            |(bucket, key, result)| Message::ObjectInspectLoaded {
+                bucket,
+                key,
+                result,
+            },
+        )
+    }
+
+    fn cmd_heal_object(&self, bucket: &str, key: &str) -> Task<Message> {
+        let admin = self.admin_client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        Task::perform(
+            async move {
+                let result = if let Some(a) = admin.as_ref() {
+                    a.heal_object(&bucket, &key).await
+                } else {
+                    Err("no admin client".to_string())
+                };
+                (bucket, key, result)
+            },
+            |(bucket, key, result)| Message::HealObjectFinished {
+                bucket,
+                key,
+                result,
+            },
+        )
+    }
+
+    fn refresh_heal_status_task(&self) -> Task<Message> {
+        let admin = self.admin_client.clone();
+        Task::perform(
+            async move {
+                if let Some(a) = admin.as_ref() {
+                    a.heal_status().await
+                } else {
+                    Err("no admin client".to_string())
+                }
+            },
+            Message::HealStatusLoaded,
+        )
+    }
+
+    fn current_selected_object(&self) -> Option<(String, String)> {
+        match &self.selection {
+            Selection::Object { bucket, key } => Some((bucket.clone(), key.clone())),
+            _ => None,
+        }
+    }
+
+    fn selected_object_matches(&self, bucket: &str, key: &str) -> bool {
+        matches!(
+            &self.selection,
+            Selection::Object {
+                bucket: selected_bucket,
+                key: selected_key,
+            } if selected_bucket == bucket && selected_key == key
+        )
+    }
+
+    fn clear_object_admin_state(&mut self) {
+        self.object_inspect = None;
+        self.loading_object_inspect = false;
+        self.object_inspect_target = None;
+        self.heal_confirm_target = None;
+        self.healing_object = false;
+        self.healing_target = None;
+        self.heal_result = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{App, Message, Selection};
+    use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
+
+    fn sample_inspect(bucket: &str, key: &str) -> ObjectInspectResponse {
+        ObjectInspectResponse {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            size: 128,
+            etag: "etag".to_string(),
+            content_type: "application/octet-stream".to_string(),
+            created_at: 1,
+            erasure: ErasureInfo {
+                data: 2,
+                parity: 1,
+                distribution: vec![0, 1, 2],
+            },
+            shards: vec![ShardInfo {
+                index: 0,
+                disk: 0,
+                status: "ok".to_string(),
+                checksum: Some("abc".to_string()),
+            }],
+        }
+    }
+
+    #[test]
+    fn ignores_stale_object_inspect_result() {
+        let (mut app, _) = App::new(None, None);
+        app.selection = Selection::Object {
+            bucket: "bucket-a".to_string(),
+            key: "new-key".to_string(),
+        };
+        app.loading_object_inspect = true;
+        app.object_inspect_target = Some(("bucket-a".to_string(), "new-key".to_string()));
+
+        let _ = app.update(Message::ObjectInspectLoaded {
+            bucket: "bucket-a".to_string(),
+            key: "old-key".to_string(),
+            result: Ok(sample_inspect("bucket-a", "old-key")),
+        });
+
+        assert!(app.object_inspect.is_none());
+        assert!(app.loading_object_inspect);
+        assert_eq!(
+            app.object_inspect_target,
+            Some(("bucket-a".to_string(), "new-key".to_string()))
+        );
+    }
+
+    #[test]
+    fn applies_matching_object_inspect_result() {
+        let (mut app, _) = App::new(None, None);
+        app.selection = Selection::Object {
+            bucket: "bucket-a".to_string(),
+            key: "key-a".to_string(),
+        };
+        app.loading_object_inspect = true;
+        app.object_inspect_target = Some(("bucket-a".to_string(), "key-a".to_string()));
+
+        let inspect = sample_inspect("bucket-a", "key-a");
+        let _ = app.update(Message::ObjectInspectLoaded {
+            bucket: "bucket-a".to_string(),
+            key: "key-a".to_string(),
+            result: Ok(inspect.clone()),
+        });
+
+        assert!(!app.loading_object_inspect);
+        assert!(app.object_inspect_target.is_none());
+        match app.object_inspect {
+            Some(Ok(saved)) => {
+                assert_eq!(saved.bucket, inspect.bucket);
+                assert_eq!(saved.key, inspect.key);
+            }
+            _ => panic!("expected matching inspect result to be stored"),
+        }
+    }
+
+    #[test]
+    fn ignores_stale_heal_completion() {
+        let (mut app, _) = App::new(None, None);
+        app.selection = Selection::Object {
+            bucket: "bucket-a".to_string(),
+            key: "new-key".to_string(),
+        };
+        app.healing_object = true;
+        app.healing_target = Some(("bucket-a".to_string(), "new-key".to_string()));
+
+        let _ = app.update(Message::HealObjectFinished {
+            bucket: "bucket-a".to_string(),
+            key: "old-key".to_string(),
+            result: Ok(HealResponse {
+                result: "heal complete".to_string(),
+                shards_fixed: Some(1),
+                error: None,
+            }),
+        });
+
+        assert!(app.heal_result.is_none());
+        assert!(app.healing_object);
+        assert_eq!(
+            app.healing_target,
+            Some(("bucket-a".to_string(), "new-key".to_string()))
+        );
     }
 }

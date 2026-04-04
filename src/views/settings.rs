@@ -4,7 +4,7 @@ use iced::{Element, Length};
 use crate::app::{App, AppTheme, Message};
 
 impl App {
-    pub fn settings_view(&self) -> Element<Message> {
+    pub fn settings_view(&self) -> Element<'_, Message> {
         let p = &self.perf;
 
         column![
@@ -36,7 +36,8 @@ impl App {
             row![
                 text("Active").size(11),
                 text(self.active_connection.as_deref().unwrap_or("none")).size(11)
-            ].spacing(8),
+            ]
+            .spacing(8),
             row![text("Endpoint").size(11), text(&self.endpoint).size(11)].spacing(8),
             iced::widget::rule::horizontal(1),
             // performance

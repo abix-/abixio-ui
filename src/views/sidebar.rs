@@ -5,7 +5,9 @@ use crate::app::{App, Message, Section};
 
 impl App {
     pub fn sidebar_view(&self) -> Element<'_, Message> {
-        let mut col = column![self.nav_btn("B", Section::Browse),].spacing(4).padding(4);
+        let mut col = column![self.nav_btn("B", Section::Browse),]
+            .spacing(4)
+            .padding(4);
 
         if self.is_abixio {
             col = col.push(self.nav_btn("D", Section::Disks));
@@ -13,6 +15,7 @@ impl App {
         }
 
         col = col.push(self.nav_btn("+", Section::Connections));
+        col = col.push(self.nav_btn("T", Section::Testing));
         col = col.push(iced::widget::space::vertical());
         col = col.push(self.nav_btn("S", Section::Settings));
 

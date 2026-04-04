@@ -1,6 +1,8 @@
 # abixio-ui
 
-Native desktop S3 manager and AbixIO server admin. Browse, upload, download, and manage objects on any S3-compatible endpoint. Full server management when connected to AbixIO.
+Native desktop S3 manager and AbixIO admin UI. Browse, upload, download, and
+manage objects on any S3-compatible endpoint. When connected to AbixIO, the
+app exposes the current Disks and Healing views.
 
 ## Features
 
@@ -10,14 +12,18 @@ Native desktop S3 manager and AbixIO server admin. Browse, upload, download, and
 - **OS keychain** -- access keys and secret keys stored in Windows Credential Manager / macOS Keychain / Linux secret-service. Zero secrets on disk
 - **AbixIO admin** -- when connected to an AbixIO server, the UI auto-detects it and enables:
   - **Disk health dashboard** -- per-disk status, space usage, bucket/object counts
-  - **Healing monitor** -- MRF queue depth, integrity scanner stats, manual heal trigger
-  - **Object shard inspector** -- per-shard status, checksums, erasure distribution
+  - **Healing monitor** -- MRF queue depth, integrity scanner stats, refresh-on-demand
+  - **Object admin detail panel** -- shard inspection, manual inspect refresh, confirmed manual heal
+- **Built-in smoke tests** -- a Testing tab can run end-to-end checks against the current server
 
 ## How it works
 
 Built with [iced](https://iced.rs) 0.14 (reactive rendering, Elm architecture). Connects via [rust-s3](https://github.com/durch/rust-s3) for S3 operations with full Sig V4 signing.
 
-When connected to an [AbixIO](https://github.com/abix-/abixio) server, the UI probes `/_admin/status`. If it responds with `"server": "abixio"`, admin tabs (Disks, Healing) appear in the sidebar. Non-AbixIO S3 endpoints work fine -- admin tabs are simply hidden.
+When connected to an [AbixIO](https://github.com/abix-/abixio) server, the UI
+probes `/_admin/status`. If it responds with `"server": "abixio"`, admin tabs
+(Disks, Healing) appear in the sidebar. Non-AbixIO S3 endpoints work fine --
+admin tabs are simply hidden.
 
 ### Data authority
 
@@ -41,30 +47,35 @@ abixio-ui --endpoint https://s3.us-west-2.amazonaws.com --access-key AKIA... --s
 
 ## Quick test
 
-```bash
+```powershell
 # start AbixIO server (4 disks, 2+2 erasure, no auth)
-mkdir -p /tmp/abixio/{d1,d2,d3,d4}
-abixio --listen 0.0.0.0:10000 \
-  --disks /tmp/abixio/d1,/tmp/abixio/d2,/tmp/abixio/d3,/tmp/abixio/d4 \
+New-Item -ItemType Directory -Force -Path `
+  C:\tmp\abixio\d1, `
+  C:\tmp\abixio\d2, `
+  C:\tmp\abixio\d3, `
+  C:\tmp\abixio\d4 | Out-Null
+
+abixio --listen 0.0.0.0:10000 `
+  --disks C:\tmp\abixio\d1,C:\tmp\abixio\d2,C:\tmp\abixio\d3,C:\tmp\abixio\d4 `
   --data 2 --parity 2 --no-auth
 
 # launch UI
 abixio-ui --endpoint http://localhost:10000
 
-# create a bucket and upload via curl
-curl -X PUT http://localhost:10000/testbucket
-curl -X PUT -d "hello world" http://localhost:10000/testbucket/hello.txt
+# create a bucket and upload via curl.exe
+curl.exe -X PUT http://localhost:10000/testbucket
+curl.exe -X PUT -d "hello world" http://localhost:10000/testbucket/hello.txt
 
 # verify admin API
-curl http://localhost:10000/_admin/status
-curl http://localhost:10000/_admin/disks
-curl "http://localhost:10000/_admin/object?bucket=testbucket&key=hello.txt"
+curl.exe http://localhost:10000/_admin/status
+curl.exe http://localhost:10000/_admin/disks
+curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=hello.txt"
 ```
 
 ## Build
 
 ```bash
-cargo build --release    # produces target/release/abixio-ui (~18 MB)
+cargo build --release    # release binary goes to Cargo's target dir
 ```
 
 ## What works
@@ -77,24 +88,29 @@ cargo build --release    # produces target/release/abixio-ui (~18 MB)
 - Bucket list with create bucket
 - Object browser with breadcrumb navigation and prefix drilling
 - Object detail panel: full metadata from HEAD request
+- AbixIO object detail section: erasure summary, shard status, inspect refresh, confirmed manual heal
 - Upload/download via native file dialogs
 - Delete with error display
 - AbixIO auto-detection on connect
 - Disk health dashboard (AbixIO only)
 - Healing status monitor (AbixIO only)
 - Admin API client with Sig V4 signing for `/_admin/*` endpoints
+- Built-in Testing tab for end-to-end smoke checks
 - ESC to close detail panel, error bar with dismiss
-- Performance stats (5m sliding window)
+- Basic performance stats view (update counters; network counters not yet wired)
 - CLI args: `--endpoint`, `--access-key`, `--secret-key`
 
 ## Not yet implemented
 
-- Object shard inspector in detail panel
 - Auto-refresh timer for admin views
+- Delete bucket action
+- Persisted UI preferences (theme, window size, last active connection)
+- Success toasts and delete confirmation dialogs for object deletion
 - Custom theme colors (using stock iced Dark/Light for now)
 - Multipart upload progress
 
-See [docs/](docs/) for architecture, credential storage, data authority, and more.
+See [docs/features.md](docs/features.md) for the current feature set, plus
+[docs/](docs/) for architecture, credential storage, data authority, and more.
 
 ## License
 

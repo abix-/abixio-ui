@@ -4,7 +4,7 @@
 
 abixio-ui is a native desktop app built with [iced](https://iced.rs) 0.14.
 It connects to any S3-compatible endpoint over HTTP. When connected to an
-AbixIO server, additional management features are enabled automatically.
+AbixIO server, additional management views are enabled automatically.
 
 ```
 +-------------------+     HTTP/S3      +-------------------+
@@ -14,8 +14,9 @@ AbixIO server, additional management features are enabled automatically.
 ```
 
 When connected to an AbixIO server, the UI also communicates via `/_admin/*`
-JSON endpoints for disk health, healing status, and object shard inspection.
-These endpoints are auto-detected on connect via `/_admin/status`.
+JSON endpoints for disk health, healing status, and per-object inspection/heal
+actions from the selected-object detail panel. AbixIO is auto-detected on
+connect via `/_admin/status`.
 
 ## Components
 
@@ -42,17 +43,19 @@ src/
     disks.rs          # disk health dashboard (AbixIO only)
     healing.rs        # healing status + scanner stats (AbixIO only)
     objects.rs        # object table with prefix navigation
-    detail.rs         # right context panel (object/bucket metadata)
+    detail.rs         # right context panel (selected object metadata + AbixIO object admin)
     settings.rs       # settings view (theme, perf stats, about)
+    testing.rs        # in-app end-to-end smoke tests
 ```
 
 ## Elm architecture (iced pattern)
 
 iced uses the Elm architecture: Model-View-Update (MVU).
 
-**Boot:** `App::new(endpoint) -> (App, Task<Message>)`
+**Boot:** `App::new(endpoint, creds) -> (App, Task<Message>)`
 - Creates initial state
-- Returns initial Task to fetch bucket list
+- Returns an initial bucket-list Task only when an endpoint is provided on the CLI
+- Without a CLI endpoint, starts on the Connections view with no startup network request
 
 **Update:** `App::update(&mut self, Message) -> Task<Message>`
 - Receives a Message (user action or async result)
@@ -60,7 +63,7 @@ iced uses the Elm architecture: Model-View-Update (MVU).
 - Returns Task for any async work needed
 - Never blocks -- file dialogs are the one exception (known limitation)
 
-**View:** `App::view(&self) -> Element<Message>`
+**View:** `App::view(&self) -> Element<'_, Message>`
 - Pure function of state, no mutation
 - Returns widget tree that iced diffs against previous frame
 - Only redraws widgets whose output actually changed (reactive rendering)
@@ -137,6 +140,8 @@ Each connection is a single profile stored in `~/.abixio-ui/settings.json`:
 - **OS keychain**: access key + secret key (encrypted by OS)
 
 If a connection has no keychain entries, it connects anonymously.
+Editing an existing connection with blank key fields keeps the existing
+keychain entries; there is not yet a separate "clear stored keys" UI.
 See [docs/credentials.md](credentials.md) for full details.
 
 ## AbixIO detection
@@ -147,6 +152,9 @@ On connect, the UI probes `GET /_admin/status`:
 - 404 or error: generic S3 server, admin tabs hidden
 
 The admin client (`src/abixio/client.rs`) signs requests with Sig V4 using the same credentials as S3.
+The app exposes the Disks and Healing views in normal UI flow. For selected
+objects on AbixIO connections, the detail panel also fetches `/_admin/object`
+and exposes a confirmed manual heal action via `POST /_admin/heal`.
 
 ### Admin API endpoints (served by AbixIO server)
 
@@ -155,8 +163,8 @@ The admin client (`src/abixio/client.rs`) signs requests with Sig V4 using the s
 | `/_admin/status` | GET | Server identity, version, uptime, erasure config |
 | `/_admin/disks` | GET | Per-disk status, space, bucket/object counts |
 | `/_admin/heal` | GET | MRF queue depth, scanner stats |
-| `/_admin/heal?bucket=X&key=Y` | POST | Trigger manual heal for one object |
-| `/_admin/object?bucket=X&key=Y` | GET | Per-shard status for one object |
+| `/_admin/heal?bucket=X&key=Y` | POST | Trigger manual heal for one object from the detail panel |
+| `/_admin/object?bucket=X&key=Y` | GET | Per-shard status for one selected object |
 
 ## Layout
 
@@ -169,15 +177,18 @@ Three-panel layout:
 |   | browser, or admin   | metadata panel        |
 |   | dashboard           |                       |
 | + |                     | appears on selection  |
+| T |                     |                       |
 | S |                     | hides on ESC/close    |
 +---+---------------------+-----------------------+
 40px     flexible              280px
 ```
 
-- **Left**: icon rail (40px). B=Browse, +=Connections, S=Settings
+- **Left**: icon rail (40px). B=Browse, +=Connections, T=Testing, S=Settings.
+  D=Disks and H=Healing appear only for AbixIO connections.
 - **Center**: main content, changes based on selected section
-- **Right**: detail panel, shows full metadata for selected object/bucket.
-  Hidden when nothing selected. Fires HEAD request on selection.
+- **Right**: detail panel, shows metadata for the selected object.
+  Hidden when nothing is selected. Fires a HEAD request on object selection,
+  and on AbixIO connections also fetches object inspection in parallel.
 
 ## Design rules
 
@@ -200,14 +211,22 @@ Three-panel layout:
 
 ### Detail panel
 
-When an object is selected, the right panel fires a HEAD request to get full
-HTTP headers, then displays:
+When an object is selected, the right panel fires a HEAD request, then
+displays:
 
 1. **Filename** (large) + full path (small)
 2. **Overview**: size, content type, last modified, ETag
 3. **Storage**: bucket, key
-4. **HTTP Headers**: all raw response headers
+4. **HTTP Headers**: selected response headers plus object metadata entries
 5. **Actions**: Download, Delete
+6. **AbixIO** (when applicable): erasure summary, shard distribution,
+   per-shard status/checksum, Refresh Inspect, Heal Object
+
+## Testing tab
+
+The Testing tab runs end-to-end smoke checks against the currently connected
+server. For AbixIO endpoints it also exercises the status, disks, healing, and
+object-inspection admin calls.
 
 ## Dependencies
 

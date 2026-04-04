@@ -115,12 +115,14 @@ fn sig_v4_headers(
     region: &str,
 ) -> Vec<(String, String)> {
     let now = OffsetDateTime::now_utc();
-    let date_stamp = now.format(&time::macros::format_description!("[year][month][day]"))
+    let date_stamp = now
+        .format(&time::macros::format_description!("[year][month][day]"))
         .unwrap_or_default();
-    let amz_date = now.format(&time::macros::format_description!(
-        "[year][month][day]T[hour][minute][second]Z"
-    ))
-    .unwrap_or_default();
+    let amz_date = now
+        .format(&time::macros::format_description!(
+            "[year][month][day]T[hour][minute][second]Z"
+        ))
+        .unwrap_or_default();
 
     // parse url
     let parsed = reqwest::Url::parse(url).expect("valid url");
@@ -165,7 +167,10 @@ fn sig_v4_headers(
     );
 
     // signing key
-    let k_date = hmac_sha256(format!("AWS4{}", secret_key).as_bytes(), date_stamp.as_bytes());
+    let k_date = hmac_sha256(
+        format!("AWS4{}", secret_key).as_bytes(),
+        date_stamp.as_bytes(),
+    );
     let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, b"s3");
     let k_signing = hmac_sha256(&k_service, b"aws4_request");

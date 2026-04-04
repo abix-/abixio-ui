@@ -6,3 +6,4 @@ pub mod healing;
 pub mod objects;
 pub mod settings;
 pub mod sidebar;
+pub mod testing;

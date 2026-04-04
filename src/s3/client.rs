@@ -1,7 +1,7 @@
+use s3::BucketConfiguration;
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
-use s3::BucketConfiguration;
 
 #[derive(Clone)]
 pub struct S3Client {
@@ -11,7 +11,11 @@ pub struct S3Client {
 }
 
 impl S3Client {
-    pub fn new(endpoint: &str, creds: Option<(&str, &str)>, region_name: &str) -> Result<Self, String> {
+    pub fn new(
+        endpoint: &str,
+        creds: Option<(&str, &str)>,
+        region_name: &str,
+    ) -> Result<Self, String> {
         let region = Region::Custom {
             region: region_name.to_string(),
             endpoint: endpoint.trim_end_matches('/').to_string(),

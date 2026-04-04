@@ -12,10 +12,14 @@ fn secret_key_label(cred_name: &str) -> String {
 
 pub fn store_keys(cred_name: &str, access_key: &str, secret_key: &str) -> Result<(), String> {
     let ak_entry = Entry::new(SERVICE, &access_key_label(cred_name)).map_err(|e| e.to_string())?;
-    ak_entry.set_password(access_key).map_err(|e| e.to_string())?;
+    ak_entry
+        .set_password(access_key)
+        .map_err(|e| e.to_string())?;
 
     let sk_entry = Entry::new(SERVICE, &secret_key_label(cred_name)).map_err(|e| e.to_string())?;
-    sk_entry.set_password(secret_key).map_err(|e| e.to_string())?;
+    sk_entry
+        .set_password(secret_key)
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

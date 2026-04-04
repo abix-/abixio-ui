@@ -6,7 +6,7 @@ How to test abixio-ui with a local AbixIO server.
 
 Build both binaries:
 
-```bash
+```powershell
 # in abixio repo
 cd C:\code\abixio && cargo build --release
 
@@ -14,19 +14,23 @@ cd C:\code\abixio && cargo build --release
 cd C:\code\abixio-ui && cargo build --release
 ```
 
-Binaries:
-- `target/release/abixio.exe` (2.3 MB) -- server
-- `target/release/abixio-ui.exe` (18 MB) -- desktop UI
+The exact output path depends on your Cargo target directory. In this
+environment Cargo uses a shared target dir, so do not assume the binaries land
+under this repo's local `target/` folder.
 
 ## Start the server
 
-```bash
+```powershell
 # create disk directories
-mkdir -p C:/tmp/abixio/{d1,d2,d3,d4}
+New-Item -ItemType Directory -Force -Path `
+  C:\tmp\abixio\d1, `
+  C:\tmp\abixio\d2, `
+  C:\tmp\abixio\d3, `
+  C:\tmp\abixio\d4 | Out-Null
 
 # start with 4 disks, 2 data + 2 parity, no auth
-abixio --listen 0.0.0.0:10000 \
-  --disks C:/tmp/abixio/d1,C:/tmp/abixio/d2,C:/tmp/abixio/d3,C:/tmp/abixio/d4 \
+abixio --listen 0.0.0.0:10000 `
+  --disks C:\tmp\abixio\d1,C:\tmp\abixio\d2,C:\tmp\abixio\d3,C:\tmp\abixio\d4 `
   --data 2 --parity 2 --no-auth
 ```
 
@@ -34,7 +38,7 @@ Server is ready when you see `abixio listening on 0.0.0.0:10000`.
 
 ## Launch the UI
 
-```bash
+```powershell
 # option 1: connect directly
 abixio-ui --endpoint http://localhost:10000
 
@@ -42,55 +46,58 @@ abixio-ui --endpoint http://localhost:10000
 abixio-ui
 ```
 
-When connecting to AbixIO, the UI auto-detects it and shows admin tabs (D=Disks, H=Healing) in the sidebar.
+When connecting to AbixIO, the UI auto-detects it and shows admin tabs
+(`D`=Disks, `H`=Healing) in the sidebar. Selecting an object also adds an
+AbixIO section in the detail panel with shard inspection, `Refresh Inspect`,
+and `Heal Object`.
 
-## Test S3 operations via curl
+## Test S3 operations via curl.exe
 
-```bash
+```powershell
 # create bucket
-curl -X PUT http://localhost:10000/testbucket
+curl.exe -X PUT http://localhost:10000/testbucket
 
 # upload objects
-curl -X PUT -d "hello world" http://localhost:10000/testbucket/hello.txt
-curl -X PUT -d "second file" http://localhost:10000/testbucket/docs/readme.txt
-curl -X PUT -d "nested object" http://localhost:10000/testbucket/docs/deep/file.txt
+curl.exe -X PUT -d "hello world" http://localhost:10000/testbucket/hello.txt
+curl.exe -X PUT -d "second file" http://localhost:10000/testbucket/docs/readme.txt
+curl.exe -X PUT -d "nested object" http://localhost:10000/testbucket/docs/deep/file.txt
 
 # list buckets (XML)
-curl http://localhost:10000/
+curl.exe http://localhost:10000/
 
 # list objects
-curl "http://localhost:10000/testbucket?list-type=2"
+curl.exe "http://localhost:10000/testbucket?list-type=2"
 
 # list with prefix + delimiter
-curl "http://localhost:10000/testbucket?list-type=2&prefix=docs/&delimiter=/"
+curl.exe "http://localhost:10000/testbucket?list-type=2&prefix=docs/&delimiter=/"
 
 # get object
-curl http://localhost:10000/testbucket/hello.txt
+curl.exe http://localhost:10000/testbucket/hello.txt
 
 # head object (metadata only)
-curl -I http://localhost:10000/testbucket/hello.txt
+curl.exe -I http://localhost:10000/testbucket/hello.txt
 
 # delete object
-curl -X DELETE http://localhost:10000/testbucket/hello.txt
+curl.exe -X DELETE http://localhost:10000/testbucket/hello.txt
 ```
 
 ## Test admin API
 
-```bash
+```powershell
 # server status (AbixIO detection endpoint)
-curl http://localhost:10000/_admin/status
+curl.exe http://localhost:10000/_admin/status
 # expected: {"server":"abixio","version":"0.1.0","uptime_secs":...}
 
 # disk health
-curl http://localhost:10000/_admin/disks
+curl.exe http://localhost:10000/_admin/disks
 # expected: per-disk path, online status, space usage, bucket/object counts
 
 # healing status
-curl http://localhost:10000/_admin/heal
+curl.exe http://localhost:10000/_admin/heal
 # expected: mrf_pending, scanner stats
 
 # inspect object shards
-curl "http://localhost:10000/_admin/object?bucket=testbucket&key=hello.txt"
+curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=hello.txt"
 # expected: per-shard status (ok/missing/corrupt), checksums, distribution map
 ```
 
@@ -98,31 +105,31 @@ curl "http://localhost:10000/_admin/object?bucket=testbucket&key=hello.txt"
 
 This proves data survives disk failures. With 2 data + 2 parity, you can lose any 2 disks.
 
-```bash
+```powershell
 # upload a test object
-curl -X PUT -d "important data" http://localhost:10000/testbucket/resilience-test.txt
+curl.exe -X PUT -d "important data" http://localhost:10000/testbucket/resilience-test.txt
 
 # verify all 4 shards are ok
-curl "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test.txt"
+curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test.txt"
 
 # delete shards on 2 of 4 disks (simulating disk failure)
-rm -rf C:/tmp/abixio/d3/testbucket/resilience-test.txt
-rm -rf C:/tmp/abixio/d4/testbucket/resilience-test.txt
+Remove-Item -Recurse -Force C:\tmp\abixio\d3\testbucket\resilience-test.txt
+Remove-Item -Recurse -Force C:\tmp\abixio\d4\testbucket\resilience-test.txt
 
 # data is still readable (Reed-Solomon reconstruction)
-curl http://localhost:10000/testbucket/resilience-test.txt
+curl.exe http://localhost:10000/testbucket/resilience-test.txt
 # expected: "important data"
 
 # inspect shows missing shards
-curl "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test.txt"
+curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test.txt"
 # expected: 2 shards "ok", 2 shards "missing"
 
 # trigger manual heal to rebuild missing shards
-curl -X POST "http://localhost:10000/_admin/heal?bucket=testbucket&key=resilience-test.txt"
+curl.exe -X POST "http://localhost:10000/_admin/heal?bucket=testbucket&key=resilience-test.txt"
 # expected: {"result":"repaired","shards_fixed":2}
 
 # verify all shards restored
-curl "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test.txt"
+curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test.txt"
 # expected: all 4 shards "ok"
 ```
 
@@ -132,22 +139,48 @@ curl "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-test
 2. Click "+" (Connections) in the sidebar
 3. Add a connection: name=`local`, endpoint=`http://localhost:10000`, region=`us-east-1`, leave keys empty
 4. Click "add"
-5. Click "test" -- should show "connection ok"
+5. Click "test" -- should show "connection ok" in the bottom status bar
 6. Click "connect" -- switches to Browse view, admin tabs appear
 7. Click "D" (Disks) -- shows disk table
 8. Click "H" (Healing) -- shows MRF queue + scanner stats
+9. Browse to an object and select it -- the right detail panel should show
+   object metadata plus an AbixIO section with shard status
+10. Click `Refresh Inspect` -- shard inspection reloads
+11. Click `Heal Object` -- confirmation modal appears before the heal request is sent
+
+## In-app smoke tests
+
+1. Connect to a server first
+2. Click `T` in the sidebar
+3. Click `run tests`
+4. Review the PASS/FAIL table
+
+For AbixIO endpoints the Testing tab also checks the admin status, disks,
+healing, and object-inspection APIs.
+
+## In-app AbixIO object admin
+
+1. Connect to AbixIO and select an object in Browse
+2. Confirm the right detail panel shows:
+   erasure summary, shard distribution, per-shard status, and checksums
+3. Click `Refresh Inspect`
+4. Confirm the AbixIO section reloads without clearing the normal S3 metadata
+5. Click `Heal Object`
+6. Confirm the modal opens and the request is not sent until confirmation
+7. Confirm a successful heal updates the inline result text and refreshes both
+   shard inspection and the Healing view data
 
 ## Test with non-AbixIO S3
 
 Connect to any S3-compatible endpoint (AWS, MinIO, Backblaze). Admin tabs will NOT appear since `/_admin/status` returns 404. S3 browsing works normally.
 
-```bash
+```powershell
 # example: connect to AWS
 abixio-ui --endpoint https://s3.us-west-2.amazonaws.com --access-key AKIA... --secret-key wJalr...
 ```
 
 ## Clean up
 
-```bash
-rm -rf C:/tmp/abixio
+```powershell
+Remove-Item -Recurse -Force C:\tmp\abixio
 ```

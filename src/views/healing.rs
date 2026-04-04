@@ -108,13 +108,8 @@ impl App {
         if let Some(status) = &self.server_status {
             layout = layout.push(iced::widget::rule::horizontal(1));
             layout = layout.push(text("Server").size(14));
-            layout = layout.push(
-                row![
-                    text("Version").size(11),
-                    text(&status.version).size(11),
-                ]
-                .spacing(8),
-            );
+            layout = layout
+                .push(row![text("Version").size(11), text(&status.version).size(11),].spacing(8));
             layout = layout.push(
                 row![
                     text("Uptime").size(11),

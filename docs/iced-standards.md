@@ -23,8 +23,8 @@ Reference: `todos` example, `pane_grid` example.
 |---|---|---|
 | Model | `App` struct | State struct with all data |
 | Update | `App::update(&mut self, Message) -> Task<Message>` | Match on Message, mutate state, return Task |
-| View | `App::view(&self) -> Element<Message>` | Pure function of state, no mutation |
-| Boot | `App::new(endpoint) -> (Self, Task<Message>)` | Initial state + initial async tasks |
+| View | `App::view(&self) -> Element<'_, Message>` | Pure function of state, no mutation |
+| Boot | `App::new(endpoint, creds) -> (Self, Task<Message>)` | Initial state + optional initial async task |
 
 ## Messages
 
@@ -95,11 +95,11 @@ Silently dropping errors is a bug.
 
 ## View composition
 
-Views are pure functions that return `Element<Message>`. No mutation in views.
+Views are pure functions that return `Element<'_, Message>`. No mutation in views.
 Decompose complex UIs into methods on App:
 
 ```rust
-fn view(&self) -> Element<Message> {
+fn view(&self) -> Element<'_, Message> {
     column![
         self.top_bar(),
         self.main_content(),

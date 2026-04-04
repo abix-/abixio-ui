@@ -84,7 +84,9 @@ pub fn remove_connection(settings: &mut Settings, name: &str) -> Result<(), Stri
 pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.as_bytes()[0].is_ascii_alphabetic()
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 pub fn is_valid_endpoint(url: &str) -> bool {

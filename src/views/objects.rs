@@ -4,7 +4,7 @@ use iced::{Element, Length};
 use crate::app::{App, Message, Selection};
 
 impl App {
-    pub fn object_list_view(&self) -> Element<Message> {
+    pub fn object_list_view(&self) -> Element<'_, Message> {
         let bucket = match &self.selected_bucket {
             Some(b) => b.clone(),
             None => {

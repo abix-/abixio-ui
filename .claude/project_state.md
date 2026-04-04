@@ -3,31 +3,28 @@
 ## last session: 2026-04-04
 
 ### what we worked on
-- object search and filter feature matching mc find patterns
-- local instant filter: text_input in toolbar filters loaded objects/folders by case-insensitive substring
-- recursive find: "Find" button lists all objects under current prefix recursively, filters by wildcard or substring
-- wildcard matching: supports `*` and `?` patterns, falls back to substring when no wildcards present
-- docs updated: features.md parity score 3/10 -> 6/10, README, architecture
+- object filter and recursive find (substring + wildcard matching)
+- backend trait extraction in abixio server (storage layer now generic)
+- multi-select and bulk delete for objects
 
 ### decisions made
-- **two-level approach**: local filter (instant, no network) + recursive find (network call) -- mirrors mc find's recursive list + client-side filter
-- **wildcard syntax**: `*` matches any sequence, `?` matches one char, no wildcards = substring match. case-insensitive always
-- **no external crate**: wildcard_match is ~30 lines, same approach as minio/pkg/wildcard
-- **filter clears on navigation**: SelectBucket, NavigatePrefix, ConnectTo, Refresh, CreateBucketDone, BucketDeleted all clear filter and find results
-- **find results as separate state**: `find_results` is independent of `objects`, shown as flat list with full key paths
+- **multi-select via HashSet**: `selected_keys: HashSet<String>` tracks which object keys are checked
+- **BulkDeleteState**: same step-by-step async pattern as BucketDeleteState. Sequential delete, one at a time, with progress
+- **checkboxes in object list**: each object row gets a checkbox column. Folders do not get checkboxes
+- **select all respects filter**: SelectAllObjects only selects currently visible (filtered) objects
+- **selection clears on navigation**: same clear points as object_filter (SelectBucket, NavigatePrefix, Refresh, ConnectTo, ClearFind)
+- **confirmation modal**: shows first 10 keys, "and N more...", cancel/delete buttons, progress during delete
 
 ### current state
-- ui compiles clean, all tests pass (5 new wildcard tests)
-- new in src/app.rs: wildcard_match(), ObjectFilterChanged/Find/FindComplete/ClearFind messages, object_filter/find_results/finding fields
-- new in src/s3/client.rs: list_objects_recursive() method
-- rewritten src/views/objects.rs: filter input + find button in toolbar, local filter on objects/folders, find results view with clear button, match count display
-- not yet committed or tested against a live server
+- ui compiles clean, all 25 tests pass
+- multi-select: checkboxes on all object rows, "Select All"/"Clear sel"/"Delete N selected" buttons in toolbar
+- bulk delete: confirmation modal with key preview, sequential async delete, auto-refresh on completion
+- object filter + find: working with wildcard support
+- not yet tested against a live server
 
 ### next steps
-- run against live abixio server to verify filter and find work
-- run against live server to verify all existing e2e tests still pass
-- object shard inspector (per-object view showing shard status on each disk)
-- manual heal button in object detail panel
-- bulk delete (multi-select)
+- run against live abixio server to verify all features
+- move and rename objects (copy+delete pattern)
+- presigned share URLs
 - auto-refresh for disks/healing views (iced subscription timer)
 - custom theme colors

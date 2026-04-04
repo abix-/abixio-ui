@@ -22,7 +22,7 @@ MinIO.
 | Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
 | Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
 | Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
-| Bulk delete and batch object workflows | Single-object delete only | Recursive `mc rm`, batch-oriented workflows | 1/10 | None | No multi-select or recursive bulk workflow. |
+| Bulk delete and batch object workflows | Multi-select checkboxes with bulk delete, select all, confirmation modal, progress feedback | Recursive `mc rm`, batch-oriented workflows | 5/10 | Partial | Multi-select and bulk delete with confirmation. No recursive prefix delete, no time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
 | Tags | Not implemented | `mc tag` | 0/10 | None | No bucket-tag or object-tag UI. |
 | Bucket policy and anonymous access | Not implemented | `mc anonymous` | 0/10 | None | No bucket policy or public-access management UI. |
@@ -45,7 +45,7 @@ MinIO.
 | Core S3 | Browse objects | Yes | 7/10 | Prefix navigation and breadcrumbs are implemented. |
 | Core S3 | Upload files | Yes | 8/10 | Uses a native file picker. |
 | Core S3 | Download files | Yes | 8/10 | Uses a native save dialog. |
-| Core S3 | Delete objects | Yes | 3/10 | Single-object delete only. |
+| Core S3 | Delete objects | Yes | 5/10 | Single and bulk delete with multi-select. |
 | Core S3 | View object metadata | Yes | 8/10 | Uses HEAD metadata in the detail panel. |
 | Core S3 | Copy object | Yes | 6/10 | Single-object copy works, including overwrite handling. |
 | Core S3 | Import local folder recursively | Yes | 6/10 | Recursive local-to-S3 copy is implemented. |
@@ -72,7 +72,7 @@ MinIO.
 | Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
 | Gaps | Versioning and recovery | No | 0/10 | No version browser, restore, or undo flow. |
-| Gaps | Bulk object operations | No | 1/10 | No multi-select or recursive bulk workflow. |
+| Gaps | Bulk object operations | Partial | 5/10 | Multi-select bulk delete exists. No recursive prefix delete or time/size filtering yet. |
 | Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
 | Gaps | Tags | No | 0/10 | No bucket-tag or object-tag UI. |
 | Gaps | Policy and anonymous access | No | 0/10 | No bucket policy or public access controls. |

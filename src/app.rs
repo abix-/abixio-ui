@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -122,6 +123,15 @@ pub enum Message {
     FindComplete(Result<ListObjectsResult, String>),
     ClearFind,
 
+    // multi-select / bulk delete
+    ToggleObjectSelected(String),
+    SelectAllObjects,
+    ClearObjectSelection,
+    OpenBulkDeleteModal,
+    CloseBulkDeleteModal,
+    ConfirmBulkDelete,
+    BulkDeleteStepFinished(Result<String, String>),
+
     // testing
     RunTests,
     TestsComplete(Vec<TestResult>),
@@ -236,6 +246,17 @@ pub enum BucketDeleteStepResult {
     BucketDeleted(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct BulkDeleteState {
+    pub bucket: String,
+    pub keys: Vec<String>,
+    pub total: usize,
+    pub deleted: usize,
+    pub next_index: usize,
+    pub deleting: bool,
+    pub summary: Option<String>,
+}
+
 // -- state --
 
 pub struct App {
@@ -294,6 +315,10 @@ pub struct App {
     pub object_filter: String,
     pub find_results: Option<Result<ListObjectsResult, String>>,
     pub finding: bool,
+
+    // multi-select / bulk delete
+    pub selected_keys: HashSet<String>,
+    pub bulk_delete: Option<BulkDeleteState>,
 
     // testing
     pub test_results: Vec<TestResult>,
@@ -390,6 +415,8 @@ impl App {
             object_filter: String::new(),
             find_results: None,
             finding: false,
+            selected_keys: HashSet::new(),
+            bulk_delete: None,
             test_results: Vec::new(),
             test_running: false,
             test_progress: String::new(),
@@ -459,6 +486,7 @@ impl App {
                 self.selected_bucket = Some(name.clone());
                 self.current_prefix.clear();
                 self.object_filter.clear();
+                self.selected_keys.clear();
                 self.find_results = None;
                 self.selection = Selection::Bucket(name);
                 self.clear_object_admin_state();
@@ -468,6 +496,7 @@ impl App {
             Message::NavigatePrefix(prefix) => {
                 self.current_prefix = prefix;
                 self.object_filter.clear();
+                self.selected_keys.clear();
                 self.find_results = None;
                 self.selection = Selection::None;
                 self.clear_object_admin_state();
@@ -542,6 +571,7 @@ impl App {
                 self.selection = Selection::Bucket(bucket);
                 self.current_prefix.clear();
                 self.object_filter.clear();
+                self.selected_keys.clear();
                 self.find_results = None;
                 self.objects = None;
                 self.detail = None;
@@ -601,11 +631,99 @@ impl App {
             }
             Message::ClearFind => {
                 self.find_results = None;
+                self.selected_keys.clear();
                 Task::none()
+            }
+
+            Message::ToggleObjectSelected(key) => {
+                if !self.selected_keys.remove(&key) {
+                    self.selected_keys.insert(key);
+                }
+                Task::none()
+            }
+            Message::SelectAllObjects => {
+                if let Some(Ok(result)) = &self.objects {
+                    let filter = self.object_filter.to_ascii_lowercase();
+                    for obj in &result.objects {
+                        let display = obj
+                            .key
+                            .strip_prefix(&self.current_prefix)
+                            .unwrap_or(&obj.key);
+                        if filter.is_empty()
+                            || display.to_ascii_lowercase().contains(&filter)
+                        {
+                            self.selected_keys.insert(obj.key.clone());
+                        }
+                    }
+                }
+                if let Some(Ok(result)) = &self.find_results {
+                    for obj in &result.objects {
+                        self.selected_keys.insert(obj.key.clone());
+                    }
+                }
+                Task::none()
+            }
+            Message::ClearObjectSelection => {
+                self.selected_keys.clear();
+                Task::none()
+            }
+            Message::OpenBulkDeleteModal => {
+                let bucket = match &self.selected_bucket {
+                    Some(b) => b.clone(),
+                    None => return Task::none(),
+                };
+                if self.selected_keys.is_empty() {
+                    return Task::none();
+                }
+                let keys: Vec<String> = self.selected_keys.iter().cloned().collect();
+                let total = keys.len();
+                self.bulk_delete = Some(BulkDeleteState {
+                    bucket,
+                    keys,
+                    total,
+                    deleted: 0,
+                    next_index: 0,
+                    deleting: false,
+                    summary: None,
+                });
+                Task::none()
+            }
+            Message::CloseBulkDeleteModal => {
+                self.bulk_delete = None;
+                Task::none()
+            }
+            Message::ConfirmBulkDelete => {
+                self.cmd_process_next_bulk_delete_step()
+            }
+            Message::BulkDeleteStepFinished(result) => {
+                let Some(state) = self.bulk_delete.as_mut() else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(key) => {
+                        state.deleted += 1;
+                        state.next_index += 1;
+                        state.summary = Some(format!(
+                            "Deleting: {}/{} done. Last: {}",
+                            state.deleted, state.total, key
+                        ));
+                        self.cmd_process_next_bulk_delete_step()
+                    }
+                    Err(error) => {
+                        state.deleting = false;
+                        state.summary = Some(format!(
+                            "Stopped after {}/{}: {}",
+                            state.deleted, state.total, error
+                        ));
+                        self.error = Some(format!("Bulk delete failed: {}", error));
+                        Task::none()
+                    }
+                }
             }
 
             Message::Refresh => {
                 self.find_results = None;
+                self.selected_keys.clear();
                 self.loading_objects = true;
                 self.cmd_fetch_objects()
             }
@@ -1042,6 +1160,7 @@ impl App {
                             self.selection = Selection::None;
                             self.current_prefix.clear();
                             self.object_filter.clear();
+                            self.selected_keys.clear();
                             self.find_results = None;
                             self.objects = None;
                             self.detail = None;
@@ -1116,6 +1235,7 @@ impl App {
                         self.selected_bucket = None;
                         self.current_prefix.clear();
                         self.object_filter.clear();
+                        self.selected_keys.clear();
                         self.find_results = None;
                         self.clear_object_admin_state();
                         self.loading_buckets = true;
@@ -1571,10 +1691,15 @@ impl App {
         } else {
             with_delete
         };
-        if self.transfer.is_some() {
+        let with_transfer = if self.transfer.is_some() {
             stack![with_create, self.transfer_modal()].into()
         } else {
             with_create
+        };
+        if self.bulk_delete.is_some() {
+            stack![with_transfer, self.bulk_delete_modal()].into()
+        } else {
+            with_transfer
         }
     }
 
@@ -1937,6 +2062,37 @@ impl App {
             },
             Message::BucketDeleteStepFinished,
         )
+    }
+
+    fn cmd_process_next_bulk_delete_step(&mut self) -> Task<Message> {
+        let Some(state) = self.bulk_delete.as_mut() else {
+            return Task::none();
+        };
+        state.deleting = true;
+
+        if state.next_index < state.keys.len() {
+            let client = self.client.clone();
+            let bucket = state.bucket.clone();
+            let key = state.keys[state.next_index].clone();
+            return Task::perform(
+                async move {
+                    client.delete_object(&bucket, &key).await?;
+                    Ok(key)
+                },
+                Message::BulkDeleteStepFinished,
+            );
+        }
+
+        // all done
+        let deleted = state.deleted;
+        let total = state.total;
+        self.bulk_delete = None;
+        self.selected_keys.clear();
+        self.loading_objects = true;
+        self.error = None;
+        let summary = format!("Deleted {} of {} objects", deleted, total);
+        self.error = Some(summary);
+        self.cmd_fetch_objects()
     }
 
     fn make_client_for_connection(&self, connection_id: &str) -> Result<Arc<S3Client>, String> {

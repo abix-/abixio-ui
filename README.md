@@ -86,7 +86,7 @@ cargo build --release    # release binary goes to Cargo's target dir
 - Connection manager: add, edit, remove, test, switch
 - OS keychain credential storage (both access key + secret key)
 - Bucket list with create bucket modal and recursive bucket delete
-- Object browser with breadcrumb navigation, prefix drilling, filter, and recursive find
+- Object browser with breadcrumb navigation, prefix drilling, filter, recursive find, and multi-select bulk delete
 - Bucket detail panel with bucket overview and recursive delete action
 - Object detail panel: full metadata from HEAD request
 - AbixIO object detail section: erasure summary, shard status, inspect refresh, confirmed manual heal

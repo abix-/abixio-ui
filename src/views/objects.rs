@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{App, Message, Selection};
@@ -51,15 +51,35 @@ impl App {
             find_btn = find_btn.on_press(Message::Find);
         }
 
-        let actions = row![
+        let mut actions = row![
             filter_input,
             find_btn,
-            button(text("Upload").size(11)).on_press(Message::Upload),
-            button(text("Import Folder").size(11)).on_press(Message::OpenImportFolder),
-            button(text("Export Prefix").size(11)).on_press(Message::OpenExportPrefix),
-            button(text("Refresh").size(11)).on_press(Message::Refresh),
         ]
         .spacing(4);
+
+        // selection controls
+        let sel_count = self.selected_keys.len();
+        if sel_count > 0 {
+            actions = actions.push(
+                button(text(format!("Delete {} selected", sel_count)).size(11))
+                    .on_press(Message::OpenBulkDeleteModal),
+            );
+            actions = actions.push(
+                button(text("Clear sel").size(11))
+                    .on_press(Message::ClearObjectSelection),
+            );
+        } else {
+            actions = actions.push(
+                button(text("Select All").size(11))
+                    .on_press(Message::SelectAllObjects),
+            );
+        }
+
+        actions = actions
+            .push(button(text("Upload").size(11)).on_press(Message::Upload))
+            .push(button(text("Import Folder").size(11)).on_press(Message::OpenImportFolder))
+            .push(button(text("Export Prefix").size(11)).on_press(Message::OpenExportPrefix))
+            .push(button(text("Refresh").size(11)).on_press(Message::Refresh));
 
         let toolbar = row![breadcrumbs, iced::widget::space::horizontal(), actions]
             .spacing(8)
@@ -85,6 +105,7 @@ impl App {
                 // header
                 content = content.push(
                     row![
+                        text("").size(11).width(20),
                         text("Key").size(11).width(Length::FillPortion(4)),
                         text("Size").size(11).width(Length::FillPortion(1)),
                         text("Modified").size(11).width(Length::FillPortion(2)),
@@ -99,26 +120,36 @@ impl App {
                         Selection::Object { key, .. } if *key == obj.key
                     );
                     let key = obj.key.clone();
+                    let key_for_check = obj.key.clone();
+                    let checked = self.selected_keys.contains(&obj.key);
                     content = content.push(
-                        button(
-                            row![
-                                text(&obj.key).size(11).width(Length::FillPortion(4)),
-                                text(format_size(obj.size))
-                                    .size(11)
-                                    .width(Length::FillPortion(1)),
-                                text(&obj.last_modified)
-                                    .size(11)
-                                    .width(Length::FillPortion(2)),
-                            ]
-                            .spacing(8),
-                        )
-                        .width(Length::Fill)
-                        .style(if is_selected {
-                            button::primary
-                        } else {
-                            button::text
-                        })
-                        .on_press(Message::SelectObject(key)),
+                        row![
+                            checkbox(checked)
+                                .on_toggle(move |_| Message::ToggleObjectSelected(
+                                    key_for_check.clone()
+                                ))
+                                .size(14),
+                            button(
+                                row![
+                                    text(&obj.key).size(11).width(Length::FillPortion(4)),
+                                    text(format_size(obj.size))
+                                        .size(11)
+                                        .width(Length::FillPortion(1)),
+                                    text(&obj.last_modified)
+                                        .size(11)
+                                        .width(Length::FillPortion(2)),
+                                ]
+                                .spacing(8),
+                            )
+                            .width(Length::Fill)
+                            .style(if is_selected {
+                                button::primary
+                            } else {
+                                button::text
+                            })
+                            .on_press(Message::SelectObject(key)),
+                        ]
+                        .spacing(4),
                     );
                 }
             }
@@ -137,7 +168,7 @@ impl App {
             let filter = self.object_filter.to_ascii_lowercase();
             let has_filter = !filter.is_empty();
 
-            // folders
+            // folders (no checkboxes on folders)
             let mut folder_count = 0;
             for cp in &result.common_prefixes {
                 let display = cp.strip_prefix(&self.current_prefix).unwrap_or(cp);
@@ -157,6 +188,7 @@ impl App {
             // header
             content = content.push(
                 row![
+                    text("").size(11).width(20),
                     text("Name").size(11).width(Length::FillPortion(4)),
                     text("Size").size(11).width(Length::FillPortion(1)),
                     text("Modified").size(11).width(Length::FillPortion(2)),
@@ -165,7 +197,7 @@ impl App {
                 .padding([2, 4]),
             );
 
-            // objects
+            // objects with checkboxes
             let mut obj_shown = 0;
             for obj in &result.objects {
                 let display_key = obj
@@ -181,26 +213,36 @@ impl App {
                     Selection::Object { key, .. } if *key == obj.key
                 );
                 let key = obj.key.clone();
+                let key_for_check = obj.key.clone();
+                let checked = self.selected_keys.contains(&obj.key);
                 content = content.push(
-                    button(
-                        row![
-                            text(display_key).size(11).width(Length::FillPortion(4)),
-                            text(format_size(obj.size))
-                                .size(11)
-                                .width(Length::FillPortion(1)),
-                            text(&obj.last_modified)
-                                .size(11)
-                                .width(Length::FillPortion(2)),
-                        ]
-                        .spacing(8),
-                    )
-                    .width(Length::Fill)
-                    .style(if is_selected {
-                        button::primary
-                    } else {
-                        button::text
-                    })
-                    .on_press(Message::SelectObject(key)),
+                    row![
+                        checkbox(checked)
+                            .on_toggle(move |_| Message::ToggleObjectSelected(
+                                key_for_check.clone()
+                            ))
+                            .size(14),
+                        button(
+                            row![
+                                text(display_key).size(11).width(Length::FillPortion(4)),
+                                text(format_size(obj.size))
+                                    .size(11)
+                                    .width(Length::FillPortion(1)),
+                                text(&obj.last_modified)
+                                    .size(11)
+                                    .width(Length::FillPortion(2)),
+                            ]
+                            .spacing(8),
+                        )
+                        .width(Length::Fill)
+                        .style(if is_selected {
+                            button::primary
+                        } else {
+                            button::text
+                        })
+                        .on_press(Message::SelectObject(key)),
+                    ]
+                    .spacing(4),
                 );
             }
 

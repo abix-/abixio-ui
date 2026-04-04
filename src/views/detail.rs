@@ -271,6 +271,58 @@ impl App {
 
         modal_card(body, 420)
     }
+
+    pub fn bulk_delete_modal(&self) -> Element<'_, Message> {
+        let Some(state) = &self.bulk_delete else {
+            return container(text("")).width(Length::Shrink).into();
+        };
+
+        let delete_button = if !state.deleting {
+            button(text("Delete").size(11)).on_press(Message::ConfirmBulkDelete)
+        } else {
+            button(text("Deleting...").size(11))
+        };
+
+        let mut body = column![
+            text("Delete Selected Objects").size(16),
+            text(format!(
+                "Delete {} objects from {}?",
+                state.total, state.bucket
+            ))
+            .size(11),
+        ]
+        .spacing(8)
+        .padding(12);
+
+        // show first 10 keys
+        let show_count = state.keys.len().min(10);
+        for key in &state.keys[..show_count] {
+            body = body.push(text(format!("  {}", key)).size(10));
+        }
+        if state.keys.len() > 10 {
+            body = body.push(
+                text(format!("  and {} more...", state.keys.len() - 10)).size(10),
+            );
+        }
+
+        if let Some(summary) = &state.summary {
+            body = body.push(text(summary).size(11));
+        }
+
+        body = body.push(
+            row![
+                if state.deleting {
+                    button(text("Cancel").size(11))
+                } else {
+                    button(text("Cancel").size(11)).on_press(Message::CloseBulkDeleteModal)
+                },
+                delete_button,
+            ]
+            .spacing(8),
+        );
+
+        modal_card(body, 420)
+    }
 }
 
 fn section(label: &str) -> Element<'static, Message> {

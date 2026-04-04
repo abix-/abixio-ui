@@ -43,6 +43,8 @@ impl App {
 
         let actions = row![
             button(text("Upload").size(11)).on_press(Message::Upload),
+            button(text("Import Folder").size(11)).on_press(Message::OpenImportFolder),
+            button(text("Export Prefix").size(11)).on_press(Message::OpenExportPrefix),
             button(text("Refresh").size(11)).on_press(Message::Refresh),
         ]
         .spacing(4);

@@ -43,6 +43,7 @@ impl App {
                         row![
                             button(text("Download").size(11))
                                 .on_press(Message::Download(bucket.clone(), key.clone())),
+                            button(text("Copy").size(11)).on_press(Message::OpenCopyObject),
                             button(text("Delete").size(11))
                                 .on_press(Message::Delete(bucket.clone(), key.clone())),
                         ]

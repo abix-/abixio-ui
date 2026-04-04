@@ -21,6 +21,8 @@ tracing-subscriber = "0.3"
 anyhow = "1"
 keyring = "3"
 dirs = "6"
+walkdir = "2"
+mime_guess = "2"
 
 [dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }

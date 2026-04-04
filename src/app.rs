@@ -1,8 +1,11 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::keyboard;
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{Element, Length, Subscription, Task, Theme};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::abixio::client::AdminClient;
 use crate::abixio::types::{
@@ -11,6 +14,16 @@ use crate::abixio::types::{
 use crate::config::{self, Connection, Settings};
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, S3Client};
 use crate::views::testing::TestResult;
+
+pub(crate) const CURRENT_CONNECTION_ID: &str = "__current__";
+
+#[derive(Debug, Clone)]
+pub struct StartupOptions {
+    pub endpoint: Option<String>,
+    pub creds: Option<(String, String)>,
+    pub auto_run_tests: bool,
+    pub test_report_path: Option<PathBuf>,
+}
 
 // -- messages --
 
@@ -35,6 +48,21 @@ pub enum Message {
     Upload,
     Delete(String, String),
     Download(String, String),
+    OpenCopyObject,
+    OpenImportFolder,
+    OpenExportPrefix,
+    CloseTransferModal,
+    TransferDestinationConnectionChanged(String),
+    TransferDestinationBucketChanged(String),
+    TransferDestinationKeyChanged(String),
+    TransferDestinationBucketsLoaded(Result<Vec<BucketInfo>, String>),
+    StartTransfer,
+    TransferPrepared(Result<Vec<TransferItem>, String>),
+    TransferStepFinished(Result<TransferStepResult, String>),
+    TransferConflictOverwrite,
+    TransferConflictSkip,
+    TransferConflictOverwriteAll,
+    TransferConflictSkipAll,
     CreateBucket,
     SetTheme(AppTheme),
     NewBucketNameChanged(String),
@@ -77,6 +105,8 @@ pub enum Message {
     // testing
     RunTests,
     TestsComplete(Vec<TestResult>),
+    AutoStartTests,
+    TestReportWritten(Result<PathBuf, String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +131,70 @@ pub enum Selection {
     None,
     Bucket(String),
     Object { bucket: String, key: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferMode {
+    CopyObject,
+    ImportFolder,
+    ExportPrefix,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverwritePolicy {
+    Ask,
+    OverwriteAll,
+    SkipAll,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferEndpoint {
+    S3 {
+        connection_id: String,
+        bucket: String,
+        key: String,
+    },
+    Local {
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferItem {
+    pub source: TransferEndpoint,
+    pub destination: TransferEndpoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferStepResult {
+    Conflict(TransferItem),
+    Copied(String),
+    Skipped(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct TransferState {
+    pub mode: TransferMode,
+    pub destination_connection_id: String,
+    pub destination_bucket: String,
+    pub destination_key: String,
+    pub destination_buckets: Option<Result<Vec<BucketInfo>, String>>,
+    pub loading_destination_buckets: bool,
+    pub local_path: Option<PathBuf>,
+    pub source_bucket: Option<String>,
+    pub source_key: Option<String>,
+    pub source_prefix: Option<String>,
+    pub items: Vec<TransferItem>,
+    pub next_index: usize,
+    pub completed: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub current_item: Option<String>,
+    pub pending_conflict: Option<TransferItem>,
+    pub overwrite_policy: OverwritePolicy,
+    pub preparing: bool,
+    pub running: bool,
+    pub summary: Option<String>,
 }
 
 // -- state --
@@ -145,6 +239,7 @@ pub struct App {
     pub healing_object: bool,
     pub healing_target: Option<(String, String)>,
     pub heal_result: Option<String>,
+    pub transfer: Option<TransferState>,
 
     // connection form
     pub new_conn_name: String,
@@ -157,11 +252,17 @@ pub struct App {
     pub test_results: Vec<TestResult>,
     pub test_running: bool,
     pub test_progress: String,
+    pub auto_run_tests: bool,
+    pub auto_test_started: bool,
+    pub test_report_path: Option<PathBuf>,
+    pub test_started_at: Option<String>,
 }
 
 impl App {
-    pub fn new(endpoint: Option<String>, creds: Option<(String, String)>) -> (Self, Task<Message>) {
+    pub fn new(startup: StartupOptions) -> (Self, Task<Message>) {
         let settings = config::load().unwrap_or_default();
+        let endpoint = startup.endpoint;
+        let creds = startup.creds;
 
         let (client, start_endpoint, section, loading_buckets) = if let Some(ref ep) = endpoint {
             let c = match &creds {
@@ -192,10 +293,16 @@ impl App {
             )
         };
 
+        let start_section = if startup.auto_run_tests && loading_buckets {
+            Section::Testing
+        } else {
+            section
+        };
+
         let app = Self {
             client: client.clone(),
-            endpoint: start_endpoint,
-            section,
+            endpoint: start_endpoint.clone(),
+            section: start_section,
             selection: Selection::None,
             theme: AppTheme::Dark,
             buckets: None,
@@ -224,6 +331,7 @@ impl App {
             healing_object: false,
             healing_target: None,
             heal_result: None,
+            transfer: None,
             new_conn_name: String::new(),
             new_conn_endpoint: String::new(),
             new_conn_region: "us-east-1".to_string(),
@@ -232,14 +340,30 @@ impl App {
             test_results: Vec::new(),
             test_running: false,
             test_progress: String::new(),
+            auto_run_tests: startup.auto_run_tests,
+            auto_test_started: false,
+            test_report_path: startup.test_report_path,
+            test_started_at: None,
         };
 
         let task = if loading_buckets {
+            let mut tasks = vec![];
             let c = client.clone();
-            Task::perform(
+            tasks.push(Task::perform(
                 async move { c.list_buckets().await },
                 Message::BucketsLoaded,
-            )
+            ));
+            let admin = Arc::new(AdminClient::new(
+                &start_endpoint,
+                creds.as_ref().map(|(a, s)| (a.as_str(), s.as_str())),
+                "us-east-1",
+            ));
+            let mut app = app;
+            app.admin_client = Some(admin.clone());
+            let probe_task =
+                Task::perform(async move { admin.probe().await }, Message::AbixioDetected);
+            tasks.push(probe_task);
+            return (app, Task::batch(tasks));
         } else {
             Task::none()
         };
@@ -426,6 +550,262 @@ impl App {
                     Message::DownloadDone,
                 )
             }
+            Message::OpenCopyObject => {
+                let Some((bucket, key)) = self.current_selected_object() else {
+                    return Task::none();
+                };
+                let destination_connection_id = self.current_connection_id();
+                let destination_buckets = if destination_connection_id == CURRENT_CONNECTION_ID {
+                    self.buckets.clone()
+                } else {
+                    None
+                };
+                self.transfer = Some(TransferState {
+                    mode: TransferMode::CopyObject,
+                    destination_connection_id: destination_connection_id.clone(),
+                    destination_bucket: bucket.clone(),
+                    destination_key: key.clone(),
+                    destination_buckets,
+                    loading_destination_buckets: false,
+                    local_path: None,
+                    source_bucket: Some(bucket),
+                    source_key: Some(key),
+                    source_prefix: None,
+                    items: Vec::new(),
+                    next_index: 0,
+                    completed: 0,
+                    skipped: 0,
+                    failed: 0,
+                    current_item: None,
+                    pending_conflict: None,
+                    overwrite_policy: OverwritePolicy::Ask,
+                    preparing: false,
+                    running: false,
+                    summary: None,
+                });
+                if destination_connection_id == CURRENT_CONNECTION_ID {
+                    Task::none()
+                } else {
+                    if let Some(transfer) = self.transfer.as_mut() {
+                        transfer.loading_destination_buckets = true;
+                    }
+                    self.cmd_fetch_transfer_buckets(&destination_connection_id)
+                }
+            }
+            Message::OpenImportFolder => {
+                let Some(bucket) = self.selected_bucket.clone() else {
+                    return Task::none();
+                };
+                let Some(path) = rfd::FileDialog::new().pick_folder() else {
+                    return Task::none();
+                };
+                self.transfer = Some(TransferState {
+                    mode: TransferMode::ImportFolder,
+                    destination_connection_id: self.current_connection_id(),
+                    destination_bucket: bucket,
+                    destination_key: self.current_prefix.clone(),
+                    destination_buckets: self.buckets.clone(),
+                    loading_destination_buckets: false,
+                    local_path: Some(path),
+                    source_bucket: None,
+                    source_key: None,
+                    source_prefix: None,
+                    items: Vec::new(),
+                    next_index: 0,
+                    completed: 0,
+                    skipped: 0,
+                    failed: 0,
+                    current_item: None,
+                    pending_conflict: None,
+                    overwrite_policy: OverwritePolicy::Ask,
+                    preparing: false,
+                    running: false,
+                    summary: None,
+                });
+                Task::none()
+            }
+            Message::OpenExportPrefix => {
+                let Some(bucket) = self.selected_bucket.clone() else {
+                    return Task::none();
+                };
+                let Some(path) = rfd::FileDialog::new().pick_folder() else {
+                    return Task::none();
+                };
+                self.transfer = Some(TransferState {
+                    mode: TransferMode::ExportPrefix,
+                    destination_connection_id: self.current_connection_id(),
+                    destination_bucket: bucket.clone(),
+                    destination_key: self.current_prefix.clone(),
+                    destination_buckets: None,
+                    loading_destination_buckets: false,
+                    local_path: Some(path),
+                    source_bucket: Some(bucket),
+                    source_key: None,
+                    source_prefix: Some(self.current_prefix.clone()),
+                    items: Vec::new(),
+                    next_index: 0,
+                    completed: 0,
+                    skipped: 0,
+                    failed: 0,
+                    current_item: None,
+                    pending_conflict: None,
+                    overwrite_policy: OverwritePolicy::Ask,
+                    preparing: false,
+                    running: false,
+                    summary: None,
+                });
+                Task::none()
+            }
+            Message::CloseTransferModal => {
+                if self.transfer.as_ref().is_some_and(|t| t.running) {
+                    return Task::none();
+                }
+                self.transfer = None;
+                Task::none()
+            }
+            Message::TransferDestinationConnectionChanged(connection_id) => {
+                let Some(transfer) = self.transfer.as_mut() else {
+                    return Task::none();
+                };
+                transfer.destination_connection_id = connection_id.clone();
+                transfer.destination_buckets = None;
+                transfer.loading_destination_buckets = true;
+                transfer.destination_bucket.clear();
+                transfer.summary = None;
+                self.cmd_fetch_transfer_buckets(&connection_id)
+            }
+            Message::TransferDestinationBucketChanged(bucket) => {
+                if let Some(transfer) = self.transfer.as_mut() {
+                    transfer.destination_bucket = bucket;
+                    transfer.summary = None;
+                }
+                Task::none()
+            }
+            Message::TransferDestinationKeyChanged(key) => {
+                if let Some(transfer) = self.transfer.as_mut() {
+                    transfer.destination_key = key;
+                    transfer.summary = None;
+                }
+                Task::none()
+            }
+            Message::TransferDestinationBucketsLoaded(result) => {
+                if let Some(transfer) = self.transfer.as_mut() {
+                    transfer.loading_destination_buckets = false;
+                    transfer.destination_buckets = Some(result);
+                }
+                Task::none()
+            }
+            Message::StartTransfer => {
+                if !self.transfer_can_start() {
+                    return Task::none();
+                }
+                let Some(transfer) = self.transfer.as_mut() else {
+                    return Task::none();
+                };
+                transfer.preparing = true;
+                transfer.summary = None;
+                match transfer.mode {
+                    TransferMode::CopyObject => {
+                        let item = TransferItem {
+                            source: TransferEndpoint::S3 {
+                                connection_id: CURRENT_CONNECTION_ID.to_string(),
+                                bucket: transfer.source_bucket.clone().unwrap_or_default(),
+                                key: transfer.source_key.clone().unwrap_or_default(),
+                            },
+                            destination: TransferEndpoint::S3 {
+                                connection_id: transfer.destination_connection_id.clone(),
+                                bucket: transfer.destination_bucket.clone(),
+                                key: transfer.destination_key.clone(),
+                            },
+                        };
+                        Task::perform(async move { Ok(vec![item]) }, Message::TransferPrepared)
+                    }
+                    TransferMode::ImportFolder => {
+                        let root = transfer.local_path.clone().unwrap_or_default();
+                        let bucket = transfer.destination_bucket.clone();
+                        let prefix = transfer.destination_key.clone();
+                        Task::perform(
+                            async move { prepare_import_items(root, &bucket, &prefix) },
+                            Message::TransferPrepared,
+                        )
+                    }
+                    TransferMode::ExportPrefix => {
+                        let client = self.client.clone();
+                        let bucket = transfer.source_bucket.clone().unwrap_or_default();
+                        let prefix = transfer.source_prefix.clone().unwrap_or_default();
+                        let root = transfer.local_path.clone().unwrap_or_default();
+                        Task::perform(
+                            async move { prepare_export_items(client, &bucket, &prefix, &root).await },
+                            Message::TransferPrepared,
+                        )
+                    }
+                }
+            }
+            Message::TransferPrepared(result) => {
+                let Some(transfer) = self.transfer.as_mut() else {
+                    return Task::none();
+                };
+                transfer.preparing = false;
+                match result {
+                    Ok(items) => {
+                        transfer.items = items;
+                        transfer.next_index = 0;
+                        transfer.completed = 0;
+                        transfer.skipped = 0;
+                        transfer.failed = 0;
+                        transfer.running = true;
+                        transfer.pending_conflict = None;
+                        transfer.current_item = None;
+                        if transfer.items.is_empty() {
+                            transfer.running = false;
+                            transfer.summary = Some("Nothing to copy.".to_string());
+                            Task::none()
+                        } else {
+                            self.cmd_process_next_transfer_step()
+                        }
+                    }
+                    Err(error) => {
+                        transfer.running = false;
+                        transfer.summary = Some(format!("Transfer preparation failed: {}", error));
+                        Task::none()
+                    }
+                }
+            }
+            Message::TransferStepFinished(result) => {
+                let Some(transfer) = self.transfer.as_mut() else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(TransferStepResult::Conflict(item)) => {
+                        transfer.pending_conflict = Some(item);
+                        transfer.current_item = None;
+                        transfer.running = false;
+                        Task::none()
+                    }
+                    Ok(TransferStepResult::Copied(label)) => {
+                        transfer.completed += 1;
+                        transfer.next_index += 1;
+                        transfer.current_item = Some(label);
+                        self.cmd_process_next_transfer_step()
+                    }
+                    Ok(TransferStepResult::Skipped(label)) => {
+                        transfer.skipped += 1;
+                        transfer.next_index += 1;
+                        transfer.current_item = Some(label);
+                        self.cmd_process_next_transfer_step()
+                    }
+                    Err(error) => {
+                        transfer.failed += 1;
+                        transfer.next_index += 1;
+                        self.error = Some(format!("Transfer failed: {}", error));
+                        self.cmd_process_next_transfer_step()
+                    }
+                }
+            }
+            Message::TransferConflictOverwrite => self.resolve_transfer_conflict(false, false),
+            Message::TransferConflictSkip => self.resolve_transfer_conflict(true, false),
+            Message::TransferConflictOverwriteAll => self.resolve_transfer_conflict(false, true),
+            Message::TransferConflictSkipAll => self.resolve_transfer_conflict(true, true),
             Message::CreateBucket => {
                 if self.new_bucket_name.is_empty() {
                     return Task::none();
@@ -659,7 +1039,7 @@ impl App {
                     self.server_status = Some(s);
                     // auto-fetch disks + heal status
                     let admin = self.admin_client.clone();
-                    return Task::batch(vec![
+                    let mut tasks = vec![
                         Task::perform(
                             async move {
                                 if let Some(a) = admin.as_ref() {
@@ -683,10 +1063,17 @@ impl App {
                                 Message::HealStatusLoaded,
                             )
                         },
-                    ]);
+                    ];
+                    if self.auto_run_tests && !self.auto_test_started {
+                        tasks.push(Task::perform(async {}, |_| Message::AutoStartTests));
+                    }
+                    return Task::batch(tasks);
                 } else {
                     self.is_abixio = false;
                     self.server_status = None;
+                    if self.auto_run_tests && !self.auto_test_started {
+                        return Task::perform(async {}, |_| Message::AutoStartTests);
+                    }
                 }
                 Task::none()
             }
@@ -808,32 +1195,53 @@ impl App {
             }
 
             // -- testing --
-            Message::RunTests => {
-                if self.test_running || self.endpoint.is_empty() {
-                    return Task::none();
-                }
-                self.test_running = true;
-                self.test_results.clear();
-                self.test_progress = "running tests...".to_string();
-                let client = self.client.clone();
-                let admin = if self.is_abixio {
-                    self.admin_client.clone()
-                } else {
-                    None
-                };
-                Task::perform(
-                    async move { crate::views::testing::run_e2e_tests(client, admin).await },
-                    Message::TestsComplete,
-                )
-            }
+            Message::RunTests => self.begin_tests(),
             Message::TestsComplete(results) => {
                 self.test_running = false;
                 let passed = results.iter().filter(|r| r.passed).count();
                 let total = results.len();
                 self.test_progress = format!("done: {}/{} passed", passed, total);
                 self.test_results = results;
-                Task::none()
+                if let Some(path) = self.test_report_path.clone() {
+                    let report = crate::views::testing::TestReport {
+                        app_version: env!("CARGO_PKG_VERSION").to_string(),
+                        endpoint: self.endpoint.clone(),
+                        started_at: self
+                            .test_started_at
+                            .clone()
+                            .unwrap_or_else(|| now_rfc3339()),
+                        finished_at: now_rfc3339(),
+                        total,
+                        passed,
+                        failed: total - passed,
+                        results: self.test_results.clone(),
+                    };
+                    Task::perform(
+                        async move { crate::views::testing::write_test_report(path, report).await },
+                        Message::TestReportWritten,
+                    )
+                } else {
+                    Task::none()
+                }
             }
+            Message::AutoStartTests => {
+                if self.auto_run_tests && !self.auto_test_started {
+                    self.auto_test_started = true;
+                    self.begin_tests()
+                } else {
+                    Task::none()
+                }
+            }
+            Message::TestReportWritten(result) => match result {
+                Ok(path) => {
+                    println!("{}", path.display());
+                    Task::none()
+                }
+                Err(error) => {
+                    self.error = Some(format!("Failed to write test report: {}", error));
+                    Task::none()
+                }
+            },
         }
     }
 
@@ -893,10 +1301,15 @@ impl App {
         }
 
         let base: Element<'_, Message> = layout.into();
-        if self.heal_confirm_target.is_some() {
+        let with_heal = if self.heal_confirm_target.is_some() {
             stack![base, self.heal_confirm_modal()].into()
         } else {
             base
+        };
+        if self.transfer.is_some() {
+            stack![with_heal, self.transfer_modal()].into()
+        } else {
+            with_heal
         }
     }
 
@@ -1015,11 +1428,412 @@ impl App {
         self.healing_target = None;
         self.heal_result = None;
     }
+
+    fn begin_tests(&mut self) -> Task<Message> {
+        if self.test_running || self.endpoint.is_empty() {
+            return Task::none();
+        }
+        self.test_running = true;
+        self.test_results.clear();
+        self.test_progress = "running tests...".to_string();
+        self.test_started_at = Some(now_rfc3339());
+        let client = self.client.clone();
+        let admin = if self.is_abixio {
+            self.admin_client.clone()
+        } else {
+            None
+        };
+        Task::perform(
+            async move { crate::views::testing::run_e2e_tests(client, admin).await },
+            Message::TestsComplete,
+        )
+    }
+
+    pub fn current_connection_id(&self) -> String {
+        self.active_connection
+            .clone()
+            .unwrap_or_else(|| CURRENT_CONNECTION_ID.to_string())
+    }
+
+    pub fn current_connection_label(&self) -> String {
+        self.active_connection
+            .clone()
+            .unwrap_or_else(|| "Current connection".to_string())
+    }
+
+    pub fn available_connection_options(&self) -> Vec<String> {
+        let mut options = vec![self.current_connection_label()];
+        for conn in &self.settings.connections {
+            if self.active_connection.as_deref() != Some(&conn.name) {
+                options.push(conn.name.clone());
+            }
+        }
+        options
+    }
+
+    pub fn selected_transfer_connection_label(&self) -> Option<String> {
+        let transfer = self.transfer.as_ref()?;
+        if transfer.destination_connection_id == CURRENT_CONNECTION_ID {
+            Some(self.current_connection_label())
+        } else {
+            Some(transfer.destination_connection_id.clone())
+        }
+    }
+
+    pub fn transfer_can_start(&self) -> bool {
+        let Some(transfer) = &self.transfer else {
+            return false;
+        };
+        if transfer.preparing || transfer.running || transfer.loading_destination_buckets {
+            return false;
+        }
+        match transfer.mode {
+            TransferMode::CopyObject => {
+                !transfer.destination_bucket.is_empty()
+                    && !transfer.destination_key.is_empty()
+                    && !self.transfer_points_to_same_object(transfer)
+            }
+            TransferMode::ImportFolder | TransferMode::ExportPrefix => {
+                transfer.local_path.is_some()
+            }
+        }
+    }
+
+    fn transfer_points_to_same_object(&self, transfer: &TransferState) -> bool {
+        matches!(
+            (&transfer.source_bucket, &transfer.source_key),
+            (Some(bucket), Some(key))
+                if transfer.destination_connection_id == CURRENT_CONNECTION_ID
+                    && transfer.destination_bucket == *bucket
+                    && transfer.destination_key == *key
+        )
+    }
+
+    fn cmd_fetch_transfer_buckets(&self, connection_id: &str) -> Task<Message> {
+        let connection_id = connection_id.to_string();
+        let result = self.make_client_for_connection(&connection_id);
+        match result {
+            Ok(client) => Task::perform(
+                async move { client.list_buckets().await },
+                Message::TransferDestinationBucketsLoaded,
+            ),
+            Err(error) => Task::perform(
+                async move { Err(error) },
+                Message::TransferDestinationBucketsLoaded,
+            ),
+        }
+    }
+
+    fn cmd_process_next_transfer_step(&mut self) -> Task<Message> {
+        let Some(transfer) = self.transfer.as_mut() else {
+            return Task::none();
+        };
+        if transfer.next_index >= transfer.items.len() {
+            transfer.running = false;
+            transfer.pending_conflict = None;
+            transfer.current_item = None;
+            transfer.summary = Some(format!(
+                "Done. Copied: {}. Skipped: {}. Failed: {}.",
+                transfer.completed, transfer.skipped, transfer.failed
+            ));
+            let should_refresh = matches!(
+                transfer.mode,
+                TransferMode::ImportFolder | TransferMode::CopyObject
+            ) && transfer.destination_connection_id == CURRENT_CONNECTION_ID;
+            return if should_refresh {
+                self.loading_objects = true;
+                self.cmd_fetch_objects()
+            } else {
+                Task::none()
+            };
+        }
+        transfer.running = true;
+        transfer.pending_conflict = None;
+        let item = transfer.items[transfer.next_index].clone();
+        transfer.current_item = Some(item.label());
+        let overwrite_policy = transfer.overwrite_policy;
+        let source_client = self.client.clone();
+        let destination_client = match &item.destination {
+            TransferEndpoint::S3 { connection_id, .. } => match self
+                .make_client_for_connection(connection_id)
+            {
+                Ok(client) => Some(client),
+                Err(error) => {
+                    return Task::perform(async move { Err(error) }, Message::TransferStepFinished);
+                }
+            },
+            TransferEndpoint::Local { .. } => None,
+        };
+        Task::perform(
+            async move {
+                run_transfer_step(source_client, destination_client, item, overwrite_policy).await
+            },
+            Message::TransferStepFinished,
+        )
+    }
+
+    fn resolve_transfer_conflict(&mut self, skip: bool, remember: bool) -> Task<Message> {
+        let Some(transfer) = self.transfer.as_mut() else {
+            return Task::none();
+        };
+        let Some(item) = transfer.pending_conflict.take() else {
+            return Task::none();
+        };
+        if remember {
+            transfer.overwrite_policy = if skip {
+                OverwritePolicy::SkipAll
+            } else {
+                OverwritePolicy::OverwriteAll
+            };
+        }
+        if skip {
+            transfer.skipped += 1;
+            transfer.next_index += 1;
+            transfer.current_item = Some(item.label());
+            self.cmd_process_next_transfer_step()
+        } else {
+            transfer.running = true;
+            let source_client = self.client.clone();
+            let destination_client = match &item.destination {
+                TransferEndpoint::S3 { connection_id, .. } => {
+                    match self.make_client_for_connection(connection_id) {
+                        Ok(client) => Some(client),
+                        Err(error) => {
+                            return Task::perform(
+                                async move { Err(error) },
+                                Message::TransferStepFinished,
+                            );
+                        }
+                    }
+                }
+                TransferEndpoint::Local { .. } => None,
+            };
+            Task::perform(
+                async move {
+                    run_transfer_step(
+                        source_client,
+                        destination_client,
+                        item,
+                        OverwritePolicy::OverwriteAll,
+                    )
+                    .await
+                },
+                Message::TransferStepFinished,
+            )
+        }
+    }
+
+    fn make_client_for_connection(&self, connection_id: &str) -> Result<Arc<S3Client>, String> {
+        if connection_id == CURRENT_CONNECTION_ID {
+            return Ok(self.client.clone());
+        }
+        let conn = self
+            .settings
+            .connections
+            .iter()
+            .find(|c| c.name == connection_id)
+            .ok_or_else(|| format!("connection '{}' not found", connection_id))?;
+        let creds = conn.resolve_keys()?;
+        let client = S3Client::new(
+            &conn.endpoint,
+            creds.as_ref().map(|(a, s)| (a.as_str(), s.as_str())),
+            &conn.region,
+        )?;
+        Ok(Arc::new(client))
+    }
+}
+
+fn now_rfc3339() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+impl TransferItem {
+    pub(crate) fn label(&self) -> String {
+        match (&self.source, &self.destination) {
+            (
+                TransferEndpoint::S3 { bucket, key, .. },
+                TransferEndpoint::S3 {
+                    bucket: dest_bucket,
+                    key: dest_key,
+                    ..
+                },
+            ) => format!("{}/{} -> {}/{}", bucket, key, dest_bucket, dest_key),
+            (TransferEndpoint::Local { path }, TransferEndpoint::S3 { bucket, key, .. }) => {
+                format!("{} -> {}/{}", path.display(), bucket, key)
+            }
+            (TransferEndpoint::S3 { bucket, key, .. }, TransferEndpoint::Local { path }) => {
+                format!("{}/{} -> {}", bucket, key, path.display())
+            }
+            (TransferEndpoint::Local { path }, TransferEndpoint::Local { path: dest }) => {
+                format!("{} -> {}", path.display(), dest.display())
+            }
+        }
+    }
+}
+
+fn relative_key(root: &Path, path: &Path) -> Result<String, String> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(relative)
+}
+
+fn join_s3_key(prefix: &str, relative: &str) -> String {
+    if prefix.is_empty() {
+        relative.to_string()
+    } else {
+        format!("{}{}", prefix, relative)
+    }
+}
+
+fn guess_content_type(path: &Path) -> String {
+    mime_guess::from_path(path)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+        .to_string()
+}
+
+pub(crate) fn prepare_import_items(
+    root: PathBuf,
+    bucket: &str,
+    prefix: &str,
+) -> Result<Vec<TransferItem>, String> {
+    let mut items = Vec::new();
+    for entry in walkdir::WalkDir::new(&root) {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let path = entry.path().to_path_buf();
+        let relative = relative_key(&root, &path)?;
+        items.push(TransferItem {
+            source: TransferEndpoint::Local { path },
+            destination: TransferEndpoint::S3 {
+                connection_id: CURRENT_CONNECTION_ID.to_string(),
+                bucket: bucket.to_string(),
+                key: join_s3_key(prefix, &relative),
+            },
+        });
+    }
+    Ok(items)
+}
+
+pub(crate) async fn prepare_export_items(
+    client: Arc<S3Client>,
+    bucket: &str,
+    prefix: &str,
+    root: &Path,
+) -> Result<Vec<TransferItem>, String> {
+    let listing = client.list_objects(bucket, prefix, "").await?;
+    let mut items = Vec::new();
+    for object in listing.objects {
+        let relative = object
+            .key
+            .strip_prefix(prefix)
+            .unwrap_or(&object.key)
+            .replace('/', "\\");
+        items.push(TransferItem {
+            source: TransferEndpoint::S3 {
+                connection_id: CURRENT_CONNECTION_ID.to_string(),
+                bucket: bucket.to_string(),
+                key: object.key,
+            },
+            destination: TransferEndpoint::Local {
+                path: root.join(relative),
+            },
+        });
+    }
+    Ok(items)
+}
+
+pub(crate) async fn run_transfer_step(
+    source_client: Arc<S3Client>,
+    destination_client: Option<Arc<S3Client>>,
+    item: TransferItem,
+    overwrite_policy: OverwritePolicy,
+) -> Result<TransferStepResult, String> {
+    match &item.destination {
+        TransferEndpoint::S3 { bucket, key, .. } => {
+            let dest_client = destination_client.ok_or("missing destination client")?;
+            let exists = dest_client.head_object(bucket, key).await.is_ok();
+            if exists {
+                match overwrite_policy {
+                    OverwritePolicy::Ask => return Ok(TransferStepResult::Conflict(item)),
+                    OverwritePolicy::SkipAll => {
+                        return Ok(TransferStepResult::Skipped(item.label()));
+                    }
+                    OverwritePolicy::OverwriteAll => {}
+                }
+            }
+            let data = match &item.source {
+                TransferEndpoint::S3 {
+                    bucket: src_bucket,
+                    key: src_key,
+                    ..
+                } => source_client.get_object(src_bucket, src_key).await?,
+                TransferEndpoint::Local { path } => {
+                    tokio::fs::read(path).await.map_err(|e| e.to_string())?
+                }
+            };
+            let content_type = match &item.source {
+                TransferEndpoint::Local { path } => guess_content_type(path),
+                TransferEndpoint::S3 {
+                    bucket: src_bucket,
+                    key: src_key,
+                    ..
+                } => source_client
+                    .head_object(src_bucket, src_key)
+                    .await
+                    .ok()
+                    .map(|detail| detail.content_type)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+            };
+            dest_client
+                .put_object(bucket, key, data, &content_type)
+                .await?;
+            Ok(TransferStepResult::Copied(item.label()))
+        }
+        TransferEndpoint::Local { path } => {
+            let exists = path.exists();
+            if exists {
+                match overwrite_policy {
+                    OverwritePolicy::Ask => return Ok(TransferStepResult::Conflict(item)),
+                    OverwritePolicy::SkipAll => {
+                        return Ok(TransferStepResult::Skipped(item.label()));
+                    }
+                    OverwritePolicy::OverwriteAll => {}
+                }
+            }
+            let TransferEndpoint::S3 { bucket, key, .. } = &item.source else {
+                return Err("local to local transfer is unsupported".to_string());
+            };
+            let data = source_client.get_object(bucket, key).await?;
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            tokio::fs::write(path, data)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(TransferStepResult::Copied(item.label()))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{App, Message, Selection};
+    use std::fs;
+
+    use super::{
+        App, CURRENT_CONNECTION_ID, Message, Selection, StartupOptions, TransferMode,
+        TransferState, prepare_import_items,
+    };
     use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
 
     fn sample_inspect(bucket: &str, key: &str) -> ObjectInspectResponse {
@@ -1044,9 +1858,18 @@ mod tests {
         }
     }
 
+    fn empty_startup() -> StartupOptions {
+        StartupOptions {
+            endpoint: None,
+            creds: None,
+            auto_run_tests: false,
+            test_report_path: None,
+        }
+    }
+
     #[test]
     fn ignores_stale_object_inspect_result() {
-        let (mut app, _) = App::new(None, None);
+        let (mut app, _) = App::new(empty_startup());
         app.selection = Selection::Object {
             bucket: "bucket-a".to_string(),
             key: "new-key".to_string(),
@@ -1070,7 +1893,7 @@ mod tests {
 
     #[test]
     fn applies_matching_object_inspect_result() {
-        let (mut app, _) = App::new(None, None);
+        let (mut app, _) = App::new(empty_startup());
         app.selection = Selection::Object {
             bucket: "bucket-a".to_string(),
             key: "key-a".to_string(),
@@ -1098,7 +1921,7 @@ mod tests {
 
     #[test]
     fn ignores_stale_heal_completion() {
-        let (mut app, _) = App::new(None, None);
+        let (mut app, _) = App::new(empty_startup());
         app.selection = Selection::Object {
             bucket: "bucket-a".to_string(),
             key: "new-key".to_string(),
@@ -1122,5 +1945,63 @@ mod tests {
             app.healing_target,
             Some(("bucket-a".to_string(), "new-key".to_string()))
         );
+    }
+
+    #[test]
+    fn blocks_copy_to_same_object_path() {
+        let (mut app, _) = App::new(empty_startup());
+        app.transfer = Some(TransferState {
+            mode: TransferMode::CopyObject,
+            destination_connection_id: CURRENT_CONNECTION_ID.to_string(),
+            destination_bucket: "bucket-a".to_string(),
+            destination_key: "key-a".to_string(),
+            destination_buckets: None,
+            loading_destination_buckets: false,
+            local_path: None,
+            source_bucket: Some("bucket-a".to_string()),
+            source_key: Some("key-a".to_string()),
+            source_prefix: None,
+            items: Vec::new(),
+            next_index: 0,
+            completed: 0,
+            skipped: 0,
+            failed: 0,
+            current_item: None,
+            pending_conflict: None,
+            overwrite_policy: super::OverwritePolicy::Ask,
+            preparing: false,
+            running: false,
+            summary: None,
+        });
+
+        assert!(!app.transfer_can_start());
+    }
+
+    #[test]
+    fn prepare_import_items_maps_relative_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "abixio-ui-import-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let nested = root.join("docs");
+        fs::create_dir_all(&nested).expect("create import test dir");
+        fs::write(nested.join("readme.txt"), b"hello").expect("write import test file");
+
+        let items = prepare_import_items(root.clone(), "bucket-a", "prefix/")
+            .expect("prepare import items");
+
+        assert_eq!(items.len(), 1);
+        match &items[0].destination {
+            super::TransferEndpoint::S3 { bucket, key, .. } => {
+                assert_eq!(bucket, "bucket-a");
+                assert_eq!(key, "prefix/docs/readme.txt");
+            }
+            _ => panic!("expected s3 destination"),
+        }
+
+        fs::remove_dir_all(root).expect("cleanup import test dir");
     }
 }

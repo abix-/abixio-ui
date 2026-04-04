@@ -2,7 +2,7 @@
 
 Native desktop S3 manager. Browse, upload, download, and manage objects on any S3-compatible endpoint.
 
-## Features
+## Planned features
 
 - **S3 object browser** -- browse buckets, navigate prefixes, upload/download/delete
 - **Multi-server** -- connect to multiple endpoints (AWS, MinIO, AbixIO, Backblaze, etc.)
@@ -61,9 +61,26 @@ cargo build --release
 # produces target/release/abixio-ui
 ```
 
-## Status
+## Status: early development
 
-Not yet implemented. See architecture plan in repo.
+The app scaffolding compiles but is not usable yet.
+
+**Done:**
+- Project scaffold with egui/eframe 0.34
+- Async operation helper (tokio oneshot channels, non-blocking UI)
+- S3 client (raw HTTP via reqwest, XML parsing)
+- Bucket list sidebar view
+- Object browser view with breadcrumb navigation
+- Upload/delete actions (wired but untested end-to-end)
+
+**Not yet implemented:**
+- Connection manager (multi-server, saved connections)
+- OS keychain credential storage
+- Download to file
+- AbixIO-specific features (disk health, object inspector, config)
+- Auth (AWS Sig V4 signing)
+
+See [docs/](docs/) for architecture, data authority, and performance docs.
 
 ## License
 

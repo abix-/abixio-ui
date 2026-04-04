@@ -17,13 +17,13 @@ impl App {
             for conn in &self.settings.connections {
                 let is_active = self.active_connection.as_deref() == Some(&conn.name);
                 let has_keys = conn.resolve_keys().ok().flatten().is_some();
-                let auth_label = if has_keys { "authenticated" } else { "anonymous" };
+                let auth_label = if has_keys { "auth" } else { "anon" };
                 let status = if is_active { " [connected]" } else { "" };
                 let label = format!(
                     "{} - {} ({}, {}){}", conn.name, conn.endpoint, conn.region, auth_label, status
                 );
 
-                let mut r = row![text(label).size(11)].spacing(8);
+                let mut r = row![text(label).size(11)].spacing(4);
 
                 if !is_active {
                     r = r.push(
@@ -32,6 +32,16 @@ impl App {
                             .on_press(Message::ConnectTo(conn.name.clone())),
                     );
                 }
+                r = r.push(
+                    button(text("test").size(10))
+                        .style(button::secondary)
+                        .on_press(Message::TestConnection(conn.name.clone())),
+                );
+                r = r.push(
+                    button(text("edit").size(10))
+                        .style(button::secondary)
+                        .on_press(Message::EditConnection(conn.name.clone())),
+                );
                 r = r.push(
                     button(text("delete").size(10))
                         .style(button::text)
@@ -45,15 +55,19 @@ impl App {
 
         layout = layout.push(iced::widget::rule::horizontal(1));
 
-        // add connection form
-        layout = layout.push(text("Add connection").size(13));
+        // form header
+        let is_editing = self.editing_connection.is_some();
+        let form_title = if is_editing { "Edit connection" } else { "Add connection" };
+        let save_label = if is_editing { "save" } else { "add" };
+
+        layout = layout.push(text(form_title).size(13));
         layout = layout.push(
             row![
                 text_input("name", &self.new_conn_name)
                     .on_input(Message::NewConnNameChanged)
                     .size(11)
                     .width(120),
-                text_input("http://endpoint:9000", &self.new_conn_endpoint)
+                text_input("http://endpoint:10000", &self.new_conn_endpoint)
                     .on_input(Message::NewConnEndpointChanged)
                     .size(11)
                     .width(200),
@@ -75,7 +89,7 @@ impl App {
                     .secure(true)
                     .size(11)
                     .width(200),
-                button(text("add").size(10))
+                button(text(save_label).size(10))
                     .style(button::primary)
                     .on_press(Message::AddConnection),
             ]
@@ -83,7 +97,12 @@ impl App {
         );
 
         layout = layout.push(iced::widget::rule::horizontal(1));
-        layout = layout.push(text("Leave access key and secret key empty for anonymous access. Keys are stored in the OS keychain, never on disk.").size(10));
+        let hint = if is_editing {
+            "Leave key fields empty to keep existing keys. Clear both to make anonymous."
+        } else {
+            "Leave key fields empty for anonymous access. Keys are stored in the OS keychain, never on disk."
+        };
+        layout = layout.push(text(hint).size(10));
 
         layout.into()
     }

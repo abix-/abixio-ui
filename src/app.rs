@@ -38,7 +38,10 @@ pub enum Message {
     // connection manager
     ConnectTo(String),
     AddConnection,
+    EditConnection(String),
     RemoveConnection(String),
+    TestConnection(String),
+    TestConnectionResult(String, Result<(), String>),
     NewConnNameChanged(String),
     NewConnEndpointChanged(String),
     NewConnRegionChanged(String),
@@ -96,6 +99,7 @@ pub struct App {
     // connection manager
     pub settings: Settings,
     pub active_connection: Option<String>,
+    pub editing_connection: Option<String>,
 
     // connection form
     pub new_conn_name: String,
@@ -118,14 +122,14 @@ impl App {
                 Ok(client) => (Arc::new(client), ep.clone(), Section::Browse, true),
                 Err(e) => {
                     tracing::error!("failed to create s3 client: {}", e);
-                    let fallback = S3Client::anonymous("http://localhost:9000")
+                    let fallback = S3Client::anonymous("http://localhost:10000")
                         .expect("fallback client");
                     (Arc::new(fallback), String::new(), Section::Connections, false)
                 }
             }
         } else {
             let fallback =
-                S3Client::anonymous("http://localhost:9000").expect("fallback client");
+                S3Client::anonymous("http://localhost:10000").expect("fallback client");
             (Arc::new(fallback), String::new(), Section::Connections, false)
         };
 
@@ -148,6 +152,7 @@ impl App {
             perf: crate::perf::PerfStats::new(),
             settings,
             active_connection: None,
+            editing_connection: None,
             new_conn_name: String::new(),
             new_conn_endpoint: String::new(),
             new_conn_region: "us-east-1".to_string(),
@@ -458,6 +463,56 @@ impl App {
                     self.new_conn_region = "us-east-1".to_string();
                     self.new_conn_access_key.clear();
                     self.new_conn_secret_key.clear();
+                    self.editing_connection = None;
+                }
+                Task::none()
+            }
+            Message::EditConnection(name) => {
+                if let Some(conn) = self.settings.connections.iter().find(|c| c.name == name) {
+                    self.new_conn_name = conn.name.clone();
+                    self.new_conn_endpoint = conn.endpoint.clone();
+                    self.new_conn_region = conn.region.clone();
+                    self.new_conn_access_key.clear();
+                    self.new_conn_secret_key.clear();
+                    self.editing_connection = Some(name);
+                }
+                Task::none()
+            }
+            Message::TestConnection(name) => {
+                let conn = match self.settings.connections.iter().find(|c| c.name == name) {
+                    Some(c) => c.clone(),
+                    None => return Task::none(),
+                };
+                let creds = match conn.resolve_keys() {
+                    Ok(keys) => keys,
+                    Err(e) => {
+                        self.error = Some(format!("keychain error: {}", e));
+                        return Task::none();
+                    }
+                };
+                let client = match S3Client::new(
+                    &conn.endpoint,
+                    creds.as_ref().map(|(a, s)| (a.as_str(), s.as_str())),
+                    &conn.region,
+                ) {
+                    Ok(c) => Arc::new(c),
+                    Err(e) => {
+                        self.error = Some(format!("test failed: {}", e));
+                        return Task::none();
+                    }
+                };
+                let conn_name = name.clone();
+                Task::perform(
+                    async move {
+                        client.list_buckets().await.map(|_| ())
+                    },
+                    move |result| Message::TestConnectionResult(conn_name.clone(), result),
+                )
+            }
+            Message::TestConnectionResult(name, result) => {
+                match result {
+                    Ok(()) => self.error = Some(format!("'{}': connection ok", name)),
+                    Err(e) => self.error = Some(format!("'{}': {}", name, e)),
                 }
                 Task::none()
             }

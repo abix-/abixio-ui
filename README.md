@@ -23,18 +23,18 @@ iced 0.14 uses reactive rendering -- widgets only redraw when their state actual
 ### Data authority
 
 - **S3 endpoint** is the single source of truth for all bucket/object data
-- **OS keychain** stores secret keys (planned, not yet implemented)
-- **Local config** (`~/.abixio-ui/connections.json`) stores connection info only (planned)
+- **OS keychain** stores access keys and secret keys (Windows Credential Manager / macOS Keychain / Linux secret-service)
+- **Local config** (`~/.abixio-ui/settings.json`) stores connection profiles (name, endpoint, region -- no secrets)
 - No local caching -- every navigation action fetches live from the server
 
 ## Usage
 
 ```bash
 # connect to local AbixIO (no auth)
-abixio-ui --endpoint http://localhost:9000
+abixio-ui --endpoint http://localhost:10000
 
 # connect to any S3 endpoint with credentials
-abixio-ui --endpoint http://minio.home:9000 --access-key minioadmin --secret-key minioadmin
+abixio-ui --endpoint https://s3.us-west-2.amazonaws.com --access-key AKIA... --secret-key wJalr...
 
 # launch without args to manage connections in the UI
 abixio-ui
@@ -52,9 +52,8 @@ cargo build --release
 - Three-panel layout: icon sidebar + center content + right detail panel
 - Dark / Light theme switching in Settings
 - S3 client via [rust-s3](https://github.com/durch/rust-s3) with AWS Sig V4 signing
-- **Connection manager** -- add, remove, switch connections from the UI
-- **Credential manager** -- separate credentials from connections, one credential shared across many connections
-- **OS keychain storage** -- secret keys stored in Windows Credential Manager / macOS Keychain / Linux secret-service
+- **Connection manager** -- add, edit, remove, test, switch connections from the UI
+- **OS keychain storage** -- both access keys and secret keys stored in OS keychain, never on disk
 - Bucket list sidebar with create bucket
 - Object browser with breadcrumb navigation and prefix drilling
 - Object detail panel: full metadata from HEAD request (size, type, etag, headers)

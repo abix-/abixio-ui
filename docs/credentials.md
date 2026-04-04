@@ -42,7 +42,7 @@ One file, flat structure:
   "connections": [
     {
       "name": "local",
-      "endpoint": "http://localhost:9000",
+      "endpoint": "http://localhost:10000",
       "region": "us-east-1"
     },
     {
@@ -115,10 +115,10 @@ You can bypass the connection manager entirely with CLI args:
 
 ```bash
 # anonymous
-abixio-ui --endpoint http://localhost:9000
+abixio-ui --endpoint http://localhost:10000
 
 # with credentials (not stored, used for this session only)
-abixio-ui --endpoint http://localhost:9000 --access-key AKIA... --secret-key wJalrXUtn...
+abixio-ui --endpoint http://localhost:10000 --access-key AKIA... --secret-key wJalrXUtn...
 ```
 
 CLI credentials are never saved to disk or keychain. They exist only in memory

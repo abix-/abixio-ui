@@ -81,7 +81,7 @@ create bucket:
 ~/.abixio-ui/settings.json (on disk, not secret):
   {
     "connections": [
-      {"name": "home", "endpoint": "http://nas:9000", "region": "us-east-1"},
+      {"name": "home", "endpoint": "http://nas:10000", "region": "us-east-1"},
       {"name": "aws", "endpoint": "https://s3.amazonaws.com", "region": "us-west-2"}
     ]
   }

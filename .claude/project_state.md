@@ -3,27 +3,31 @@
 ## last session: 2026-04-04
 
 ### what we worked on
-- added AbixIO admin management API and UI
-- server: /_admin/status, /_admin/disks, /_admin/heal, /_admin/object endpoints
-- ui: admin client with sig v4 signing, disks dashboard, healing status view
-- auto-detects AbixIO servers on connect, shows admin tabs (D=disks, H=healing) in sidebar
-- changed default port to 10000 across both repos
+- object search and filter feature matching mc find patterns
+- local instant filter: text_input in toolbar filters loaded objects/folders by case-insensitive substring
+- recursive find: "Find" button lists all objects under current prefix recursively, filters by wildcard or substring
+- wildcard matching: supports `*` and `?` patterns, falls back to substring when no wildcards present
+- docs updated: features.md parity score 3/10 -> 6/10, README, architecture
 
 ### decisions made
-- **/_admin/ prefix**: underscore prefix is collision-proof (S3 bucket names must start with letter/number). checked first in router before S3 dispatch
-- **same auth for admin**: reuses S3 Sig V4 auth for admin endpoints, same as MinIO's approach (verified in madmin-go source)
-- **manual sig v4 in ui**: implemented ~30 line signing with hmac+sha2 rather than fighting with aws-sigv4 crate's API. same approach as rust-s3's signing.rs
-- **port 10000**: default port for abixio, easy to type, not commonly used
-- **one settings.json + keychain**: simplified credential model, both access key and secret key in OS keychain
+- **two-level approach**: local filter (instant, no network) + recursive find (network call) -- mirrors mc find's recursive list + client-side filter
+- **wildcard syntax**: `*` matches any sequence, `?` matches one char, no wildcards = substring match. case-insensitive always
+- **no external crate**: wildcard_match is ~30 lines, same approach as minio/pkg/wildcard
+- **filter clears on navigation**: SelectBucket, NavigatePrefix, ConnectTo, Refresh, CreateBucketDone, BucketDeleted all clear filter and find results
+- **find results as separate state**: `find_results` is independent of `objects`, shown as flat list with full key paths
 
 ### current state
-- both repos compile clean, all 101 server tests pass
-- server: admin module at src/admin/ with handlers, types, heal stats
-- ui: admin module at src/abixio/ with client, types; views at src/views/disks.rs, healing.rs
-- sidebar dynamically shows/hides admin tabs based on AbixIO detection
+- ui compiles clean, all tests pass (5 new wildcard tests)
+- new in src/app.rs: wildcard_match(), ObjectFilterChanged/Find/FindComplete/ClearFind messages, object_filter/find_results/finding fields
+- new in src/s3/client.rs: list_objects_recursive() method
+- rewritten src/views/objects.rs: filter input + find button in toolbar, local filter on objects/folders, find results view with clear button, match count display
+- not yet committed or tested against a live server
 
 ### next steps
+- run against live abixio server to verify filter and find work
+- run against live server to verify all existing e2e tests still pass
 - object shard inspector (per-object view showing shard status on each disk)
 - manual heal button in object detail panel
-- custom theme colors
+- bulk delete (multi-select)
 - auto-refresh for disks/healing views (iced subscription timer)
+- custom theme colors

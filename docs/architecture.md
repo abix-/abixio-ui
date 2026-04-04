@@ -42,7 +42,7 @@ src/
     connections.rs    # connection manager UI
     disks.rs          # disk health dashboard (AbixIO only)
     healing.rs        # healing status + scanner stats (AbixIO only)
-    objects.rs        # object table with prefix navigation
+    objects.rs        # object table with prefix navigation, filter, and recursive find
     detail.rs         # right context panel (selected object metadata + AbixIO object admin)
     settings.rs       # settings view (theme, perf stats, about)
     testing.rs        # in-app end-to-end smoke tests

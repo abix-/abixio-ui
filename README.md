@@ -6,7 +6,7 @@ app exposes the current Disks and Healing views.
 
 ## Features
 
-- **S3 object browser.** Browse buckets, navigate prefixes, create and delete buckets, and upload, download, copy, or delete objects.
+- **S3 object browser.** Browse buckets, navigate prefixes, create and delete buckets, upload, download, copy, or delete objects, and filter or find objects by name.
 - **Multi-server connections.** Save, edit, test, and switch between endpoints.
 - **AWS Sig V4 auth.** Connect to AWS, MinIO, AbixIO, Backblaze, or any authenticated endpoint.
 - **OS keychain.** Access keys and secret keys live in Windows Credential Manager, macOS Keychain, or Linux secret-service. Secrets do not go on disk.
@@ -86,7 +86,7 @@ cargo build --release    # release binary goes to Cargo's target dir
 - Connection manager: add, edit, remove, test, switch
 - OS keychain credential storage (both access key + secret key)
 - Bucket list with create bucket modal and recursive bucket delete
-- Object browser with breadcrumb navigation and prefix drilling
+- Object browser with breadcrumb navigation, prefix drilling, filter, and recursive find
 - Bucket detail panel with bucket overview and recursive delete action
 - Object detail panel: full metadata from HEAD request
 - AbixIO object detail section: erasure summary, shard status, inspect refresh, confirmed manual heal

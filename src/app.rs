@@ -116,6 +116,12 @@ pub enum Message {
         result: Result<HealResponse, String>,
     },
 
+    // object filter / find
+    ObjectFilterChanged(String),
+    Find,
+    FindComplete(Result<ListObjectsResult, String>),
+    ClearFind,
+
     // testing
     RunTests,
     TestsComplete(Vec<TestResult>),
@@ -284,6 +290,11 @@ pub struct App {
     pub new_conn_access_key: String,
     pub new_conn_secret_key: String,
 
+    // object filter / find
+    pub object_filter: String,
+    pub find_results: Option<Result<ListObjectsResult, String>>,
+    pub finding: bool,
+
     // testing
     pub test_results: Vec<TestResult>,
     pub test_running: bool,
@@ -376,6 +387,9 @@ impl App {
             new_conn_region: "us-east-1".to_string(),
             new_conn_access_key: String::new(),
             new_conn_secret_key: String::new(),
+            object_filter: String::new(),
+            find_results: None,
+            finding: false,
             test_results: Vec::new(),
             test_running: false,
             test_progress: String::new(),
@@ -444,6 +458,8 @@ impl App {
             Message::SelectBucket(name) => {
                 self.selected_bucket = Some(name.clone());
                 self.current_prefix.clear();
+                self.object_filter.clear();
+                self.find_results = None;
                 self.selection = Selection::Bucket(name);
                 self.clear_object_admin_state();
                 self.loading_objects = true;
@@ -451,6 +467,8 @@ impl App {
             }
             Message::NavigatePrefix(prefix) => {
                 self.current_prefix = prefix;
+                self.object_filter.clear();
+                self.find_results = None;
                 self.selection = Selection::None;
                 self.clear_object_admin_state();
                 self.loading_objects = true;
@@ -523,6 +541,8 @@ impl App {
                 self.selected_bucket = Some(bucket.clone());
                 self.selection = Selection::Bucket(bucket);
                 self.current_prefix.clear();
+                self.object_filter.clear();
+                self.find_results = None;
                 self.objects = None;
                 self.detail = None;
                 self.loading_buckets = true;
@@ -540,7 +560,52 @@ impl App {
                 Task::none()
             }
 
+            Message::ObjectFilterChanged(value) => {
+                self.object_filter = value;
+                Task::none()
+            }
+            Message::Find => {
+                let bucket = match &self.selected_bucket {
+                    Some(b) => b.clone(),
+                    None => return Task::none(),
+                };
+                if self.object_filter.is_empty() {
+                    return Task::none();
+                }
+                self.finding = true;
+                self.find_results = None;
+                let client = self.client.clone();
+                let prefix = self.current_prefix.clone();
+                let pattern = self.object_filter.clone();
+                Task::perform(
+                    async move {
+                        let result = client.list_objects_recursive(&bucket, &prefix).await?;
+                        let filtered: Vec<_> = result
+                            .objects
+                            .into_iter()
+                            .filter(|obj| wildcard_match(&pattern, &obj.key))
+                            .collect();
+                        Ok(ListObjectsResult {
+                            objects: filtered,
+                            common_prefixes: Vec::new(),
+                            is_truncated: result.is_truncated,
+                        })
+                    },
+                    Message::FindComplete,
+                )
+            }
+            Message::FindComplete(r) => {
+                self.finding = false;
+                self.find_results = Some(r);
+                Task::none()
+            }
+            Message::ClearFind => {
+                self.find_results = None;
+                Task::none()
+            }
+
             Message::Refresh => {
+                self.find_results = None;
                 self.loading_objects = true;
                 self.cmd_fetch_objects()
             }
@@ -976,6 +1041,8 @@ impl App {
                             self.selected_bucket = None;
                             self.selection = Selection::None;
                             self.current_prefix.clear();
+                            self.object_filter.clear();
+                            self.find_results = None;
                             self.objects = None;
                             self.detail = None;
                             self.clear_object_admin_state();
@@ -1048,6 +1115,8 @@ impl App {
                         self.detail = None;
                         self.selected_bucket = None;
                         self.current_prefix.clear();
+                        self.object_filter.clear();
+                        self.find_results = None;
                         self.clear_object_admin_state();
                         self.loading_buckets = true;
                         self.is_abixio = false;
@@ -2073,6 +2142,46 @@ pub(crate) async fn run_transfer_step(
     }
 }
 
+/// Wildcard match supporting `*` (any sequence) and `?` (any single char).
+/// If the pattern contains no wildcards, falls back to case-insensitive
+/// substring match. Matching is always case-insensitive.
+pub fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pat_lower = pattern.to_ascii_lowercase();
+    let text_lower = text.to_ascii_lowercase();
+
+    if !pat_lower.contains('*') && !pat_lower.contains('?') {
+        return text_lower.contains(&pat_lower);
+    }
+
+    let pat: Vec<char> = pat_lower.chars().collect();
+    let txt: Vec<char> = text_lower.chars().collect();
+    let (plen, tlen) = (pat.len(), txt.len());
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
+
+    while ti < tlen {
+        if pi < plen && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < plen && pat[pi] == '*' {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < plen && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == plen
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -2291,5 +2400,39 @@ mod tests {
         }
 
         fs::remove_dir_all(root).expect("cleanup import test dir");
+    }
+
+    #[test]
+    fn wildcard_match_substring() {
+        assert!(super::wildcard_match("hello", "say hello world"));
+        assert!(super::wildcard_match("HELLO", "say hello world"));
+        assert!(!super::wildcard_match("goodbye", "say hello world"));
+    }
+
+    #[test]
+    fn wildcard_match_star() {
+        assert!(super::wildcard_match("*.txt", "readme.txt"));
+        assert!(super::wildcard_match("*.txt", "docs/readme.txt"));
+        assert!(!super::wildcard_match("*.txt", "readme.md"));
+        assert!(super::wildcard_match("docs/*", "docs/readme.txt"));
+        assert!(super::wildcard_match("*read*", "docs/readme.txt"));
+    }
+
+    #[test]
+    fn wildcard_match_question() {
+        assert!(super::wildcard_match("?.txt", "a.txt"));
+        assert!(!super::wildcard_match("?.txt", "ab.txt"));
+    }
+
+    #[test]
+    fn wildcard_match_case_insensitive() {
+        assert!(super::wildcard_match("*.TXT", "readme.txt"));
+        assert!(super::wildcard_match("*.txt", "README.TXT"));
+    }
+
+    #[test]
+    fn wildcard_match_empty() {
+        assert!(super::wildcard_match("", "anything"));
+        assert!(super::wildcard_match("*", "anything"));
     }
 }

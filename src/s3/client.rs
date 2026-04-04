@@ -225,6 +225,41 @@ impl S3Client {
         })
     }
 
+    pub async fn list_objects_recursive(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Result<ListObjectsResult, String> {
+        let b = self.bucket(bucket)?;
+        let results = b
+            .list(prefix.to_string(), None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut objects = Vec::new();
+        let mut is_truncated = false;
+
+        for page in &results {
+            for obj in &page.contents {
+                objects.push(ObjectInfo {
+                    key: obj.key.clone(),
+                    size: obj.size,
+                    last_modified: obj.last_modified.clone(),
+                    etag: obj.e_tag.clone().unwrap_or_default(),
+                });
+            }
+            if page.is_truncated {
+                is_truncated = true;
+            }
+        }
+
+        Ok(ListObjectsResult {
+            objects,
+            common_prefixes: Vec::new(),
+            is_truncated,
+        })
+    }
+
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), String> {
         let b = self.bucket(bucket)?;
         let resp = b.delete_object(key).await.map_err(|e| e.to_string())?;

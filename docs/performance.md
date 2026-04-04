@@ -169,16 +169,40 @@ Source-level guards (run with `cargo test --test idle_guard`):
 |---|---|
 | `no_repaint_in_app_logic` | Zero `request_repaint()` calls in `src/app.rs` |
 | `no_repaint_in_views` | Zero `request_repaint()` calls in any `src/views/*.rs` |
-| `no_spinners_anywhere` | Zero `spinner()` calls in app.rs or views/ (spinners force 60fps animation) |
-| `no_animation_widgets` | Zero `spinner()`, `progress_bar()`, `animate_bool`, `animate_value` in views/ |
-| `async_op_has_exactly_one_repaint` | Exactly 1 `request_repaint()` in `src/async_op.rs` (the completion handler) |
+| `no_spinners_anywhere` | Zero `spinner()` calls in app.rs or views/ |
+| `no_animation_widgets` | Scans ALL `src/**/*.rs` for banned patterns (see below) |
+| `async_op_has_exactly_one_repaint` | Exactly 1 `request_repaint()` in `src/async_op.rs` |
 
-### Why no spinners?
+### Banned patterns (audited from egui 0.34.1 source)
 
-egui's `ui.spinner()` widget internally calls `request_repaint()` every frame
-to animate the rotation. This creates a continuous 60fps render loop for the
-entire duration of any loading state. We use static "Loading..." text instead.
-The source guard test catches any spinner() introduced in future code.
+We audited every `request_repaint` call in egui's source to identify which
+widgets/calls cause CONTINUOUS repainting vs one-shot interaction repaints.
+
+**Banned (cause continuous frame rendering):**
+
+| Pattern | egui source | Why it burns CPU |
+|---|---|---|
+| `spinner()` | `widgets/spinner.rs:40` | Animates every frame |
+| `progress_bar(` | `widgets/progress_bar.rs:138` | Animates fill every frame |
+| `animate_bool` | `context.rs:3236` | Triggers repaint until animation completes |
+| `animate_value` | `context.rs:3262` | Same |
+| `request_repaint_after_secs` | Timed repaint | Creates hidden polling timer |
+| `request_repaint_after(` | Timed repaint | Same |
+
+**Allowed (only repaint during active user interaction):**
+
+| Widget | egui source | When it repaints |
+|---|---|---|
+| `CollapsingHeader` | `collapsing_header.rs:72` | Only during open/close transition |
+| `ScrollArea` | `scroll_area.rs:850,894,1133,1483` | Only during scroll deceleration |
+| `Tooltip` | `tooltip.rs:258,364,376` | Only for show delay timer |
+| `Grid` | `grid.rs:280` | One extra frame for layout stabilization |
+| `Menu` | `menu.rs:569,704` | Only during open/close |
+| `Area` (drag) | `area.rs:552,644,688` | Only while user is dragging |
+| `Resize` | `resize.rs:216` | One extra frame for counter delay |
+
+The `no_animation_widgets` test scans every `.rs` file under `src/` for banned
+patterns. `async_op.rs` is excluded (it has the one allowed `request_repaint`).
 
 ## What we explicitly avoid
 

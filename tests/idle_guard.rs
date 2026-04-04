@@ -112,34 +112,68 @@ fn no_spinners_anywhere() {
 
 #[test]
 fn no_animation_widgets() {
-    // these widgets all trigger continuous repainting:
+    // audited egui 0.34.1 source: these widgets call request_repaint()
+    // continuously (every frame), not just during interaction:
+    //
+    // widgets/spinner.rs:40      -- always animates
+    // widgets/progress_bar.rs:138 -- animates fill
+    // context.rs:3236,3262       -- animate_bool/animate_value
+    //
+    // conditional repainters (ok to use -- only repaint during interaction):
+    // collapsing_header -- open/close transition only
+    // scroll_area      -- scroll deceleration only
+    // tooltip          -- show delay timer only
+    // grid             -- one extra frame for layout stabilization
+    // menu             -- open/close transition only
     let forbidden = [
         "spinner()",
+        ".spinner()",
         "progress_bar(",
         "animate_bool",
         "animate_value",
+        "request_repaint_after_secs", // timed repaints = hidden polling
+        "request_repaint_after(",     // same
     ];
 
-    let views_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
-    for entry in fs::read_dir(&views_dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "rs") {
-            let source = fs::read_to_string(&path).unwrap();
-            for pattern in &forbidden {
-                let count = count_pattern(&source, pattern);
-                assert_eq!(
-                    count,
-                    0,
-                    "found animation widget '{}' {} times in {} -- \
-                     animations cause continuous repainting",
-                    pattern,
-                    count,
-                    path.display()
-                );
-            }
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let all_rs_files = collect_rs_files(&src_dir);
+
+    for path in &all_rs_files {
+        // async_op.rs is allowed to have request_repaint (the completion handler)
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        if filename == "async_op.rs" {
+            continue;
+        }
+
+        let source = fs::read_to_string(path).unwrap();
+        for pattern in &forbidden {
+            let count = count_pattern(&source, pattern);
+            assert_eq!(
+                count,
+                0,
+                "found '{}' {} times in {} -- \
+                 this widget/call causes continuous or timed repainting. \
+                 see tests/idle_guard.rs for the full audit list",
+                pattern,
+                count,
+                path.display()
+            );
         }
     }
+}
+
+fn collect_rs_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(collect_rs_files(&path));
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            files.push(path);
+        }
+    }
+    files
 }
 
 #[test]

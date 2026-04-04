@@ -12,6 +12,18 @@ pub enum Section {
     Config,
     Healing,
     Connections,
+    Settings,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum ThemeChoice {
+    Dark,
+    Light,
+    System,
+}
+
+pub struct AppSettings {
+    pub theme: ThemeChoice,
 }
 
 #[derive(Clone, PartialEq)]
@@ -46,6 +58,7 @@ pub struct App {
     pub selected_bucket: Option<String>,
     pub current_prefix: String,
     pub new_bucket_name: String,
+    pub settings: AppSettings,
 }
 
 impl App {
@@ -68,6 +81,9 @@ impl App {
             selected_bucket: None,
             current_prefix: String::new(),
             new_bucket_name: String::new(),
+            settings: AppSettings {
+                theme: ThemeChoice::Dark,
+            },
         };
         app.fetch_buckets(&cc.egui_ctx);
         app
@@ -249,6 +265,7 @@ impl eframe::App for App {
                     ui.heading("Connections");
                     ui.label("Coming soon -- connection manager");
                 }
+                Section::Settings => self.settings_view(ui),
             }
         });
     }
@@ -271,27 +288,61 @@ pub const LABEL_COLOR: egui::Color32 = TEXT_MUTED;
 pub const VALUE_COLOR: egui::Color32 = TEXT_PRIMARY;
 
 fn apply_theme(ctx: &egui::Context) {
-    // force dark mode
-    ctx.set_theme(egui::Theme::Dark);
+    apply_theme_choice(ctx, ThemeChoice::Dark);
+}
 
-    // customize dark visuals
-    let mut visuals = egui::Visuals::dark();
+pub fn apply_theme_choice(ctx: &egui::Context, choice: ThemeChoice) {
+    match choice {
+        ThemeChoice::Dark => {
+            ctx.set_theme(egui::Theme::Dark);
+            ctx.set_visuals_of(egui::Theme::Dark, dark_visuals());
+        }
+        ThemeChoice::Light => {
+            ctx.set_theme(egui::Theme::Light);
+            ctx.set_visuals_of(egui::Theme::Light, light_visuals());
+        }
+        ThemeChoice::System => {
+            ctx.set_theme(egui::ThemePreference::System);
+            ctx.set_visuals_of(egui::Theme::Dark, dark_visuals());
+            ctx.set_visuals_of(egui::Theme::Light, light_visuals());
+        }
+    }
+}
 
-    visuals.panel_fill = BG_PANEL;
-    visuals.window_fill = BG_PANEL;
-    visuals.extreme_bg_color = BG_DEEP;
-    visuals.faint_bg_color = egui::Color32::from_rgb(0x1e, 0x20, 0x30);
-    visuals.override_text_color = Some(TEXT_PRIMARY);
-    visuals.hyperlink_color = LINK;
+fn dark_visuals() -> egui::Visuals {
+    let mut v = egui::Visuals::dark();
+    v.panel_fill = BG_PANEL;
+    v.window_fill = BG_PANEL;
+    v.extreme_bg_color = BG_DEEP;
+    v.faint_bg_color = egui::Color32::from_rgb(0x1e, 0x20, 0x30);
+    v.override_text_color = Some(TEXT_PRIMARY);
+    v.hyperlink_color = LINK;
+    v.selection.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
+    v.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, SEPARATOR);
+    v.widgets.noninteractive.bg_fill = BG_PANEL;
+    v.widgets.inactive.bg_fill = BG_WIDGET;
+    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x2e, 0x34, 0x50);
+    v.widgets.active.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
+    v
+}
 
-    visuals.selection.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
-    visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
-
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, SEPARATOR);
-    visuals.widgets.noninteractive.bg_fill = BG_PANEL;
-    visuals.widgets.inactive.bg_fill = BG_WIDGET;
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x2e, 0x34, 0x50);
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
-
-    ctx.set_visuals_of(egui::Theme::Dark, visuals);
+fn light_visuals() -> egui::Visuals {
+    let mut v = egui::Visuals::light();
+    // light mode: white bg, dark text, teal accent still works
+    v.panel_fill = egui::Color32::from_rgb(0xf5, 0xf5, 0xf8);
+    v.window_fill = egui::Color32::from_rgb(0xf5, 0xf5, 0xf8);
+    v.extreme_bg_color = egui::Color32::WHITE;
+    v.faint_bg_color = egui::Color32::from_rgb(0xea, 0xec, 0xf0);
+    v.override_text_color = Some(egui::Color32::from_rgb(0x1a, 0x1a, 0x2e));
+    v.hyperlink_color = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
+    v.selection.bg_fill = egui::Color32::from_rgb(0xb2, 0xf0, 0xe8);
+    v.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0x1a, 0x6b, 0x5e));
+    v.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(0xd0, 0xd4, 0xdd));
+    v.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(0xf5, 0xf5, 0xf8);
+    v.widgets.inactive.bg_fill = egui::Color32::from_rgb(0xe4, 0xe6, 0xed);
+    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(0xd8, 0xdb, 0xe5);
+    v.widgets.active.bg_fill = egui::Color32::from_rgb(0xb2, 0xf0, 0xe8);
+    v
 }

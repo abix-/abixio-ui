@@ -7,37 +7,32 @@ impl App {
         ui.vertical_centered(|ui: &mut egui::Ui| {
             ui.add_space(8.0);
 
-            self.nav_button(ui, "B", "Browse", Section::Browse, true);
+            self.nav_button(ui, "B", "Browse", Section::Browse);
             ui.add_space(4.0);
 
             if self.is_abixio {
-                self.nav_button(ui, "D", "Disks", Section::Disks, true);
+                self.nav_button(ui, "D", "Disks", Section::Disks);
                 ui.add_space(4.0);
-                self.nav_button(ui, "C", "Config", Section::Config, true);
+                self.nav_button(ui, "C", "Config", Section::Config);
                 ui.add_space(4.0);
-                self.nav_button(ui, "H", "Healing", Section::Healing, true);
+                self.nav_button(ui, "H", "Healing", Section::Healing);
                 ui.add_space(4.0);
             }
 
-            // connections always at bottom
+            // bottom section: connections + settings
             ui.with_layout(
                 egui::Layout::bottom_up(egui::Align::Center),
                 |ui: &mut egui::Ui| {
                     ui.add_space(8.0);
-                    self.nav_button(ui, "+", "Connections", Section::Connections, true);
+                    self.nav_button(ui, "S", "Settings", Section::Settings);
+                    ui.add_space(4.0);
+                    self.nav_button(ui, "+", "Connections", Section::Connections);
                 },
             );
         });
     }
 
-    fn nav_button(
-        &mut self,
-        ui: &mut egui::Ui,
-        icon: &str,
-        tooltip: &str,
-        section: Section,
-        _enabled: bool,
-    ) {
+    fn nav_button(&mut self, ui: &mut egui::Ui, icon: &str, tooltip: &str, section: Section) {
         let active = self.current_section == section;
         let btn = egui::Button::new(egui::RichText::new(icon).size(16.0).strong().color(
             if active {

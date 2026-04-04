@@ -2,9 +2,9 @@
 
 ## Overview
 
-abixio-ui is a native desktop app built with egui (eframe). It connects to any
-S3-compatible endpoint over HTTP. When connected to an AbixIO server, additional
-management features are enabled automatically.
+abixio-ui is a native desktop app built with [iced](https://iced.rs) 0.14.
+It connects to any S3-compatible endpoint over HTTP. When connected to an
+AbixIO server, additional management features are enabled automatically.
 
 ```
 +-------------------+     HTTP/S3      +-------------------+
@@ -17,113 +17,82 @@ management features are enabled automatically.
 
 ```
 src/
-  main.rs             # eframe app entry, tokio runtime init
-  app.rs              # top-level App struct, main layout, frame loop
-  s3_client.rs        # raw S3 HTTP calls via reqwest + XML parsing
-  abixio_client.rs    # AbixIO management API calls (JSON)
-  state.rs            # app state: selected connection, bucket, prefix, object
-  theme.rs            # colors, fonts, spacing
+  main.rs             # iced::application() entry point
+  app.rs              # App state, Message enum, update(), view()
+  async_op.rs         # AsyncOp helper (used by tests, not the app)
+  perf.rs             # performance stats (5m sliding window)
+  s3/
+    mod.rs
+    client.rs         # raw S3 HTTP calls via reqwest
+    xml.rs            # S3 XML response deserialization
   views/
-    buckets.rs        # left sidebar: bucket list
-    objects.rs        # right panel: object table with prefix navigation
-    upload.rs         # file picker dialog + upload progress
-    inspector.rs      # object detail: shards, checksums, erasure info
-    disks.rs          # disk health dashboard
-    config.rs         # server config viewer
-    connections.rs    # multi-server connection manager
+    mod.rs
+    sidebar.rs        # left icon rail navigation
+    buckets.rs        # bucket list + browse_view (bucket panel + object panel)
+    objects.rs        # object table with prefix navigation
+    detail.rs         # right context panel (object/bucket metadata)
+    settings.rs       # settings view (theme, perf stats, about)
 ```
+
+## Elm architecture (iced pattern)
+
+iced uses the Elm architecture: Model-View-Update (MVU).
+
+**Boot:** `App::new(endpoint) -> (App, Task<Message>)`
+- Creates initial state
+- Returns initial Task to fetch bucket list
+
+**Update:** `App::update(&mut self, Message) -> Task<Message>`
+- Receives a Message (user action or async result)
+- Mutates state
+- Returns Task for any async work needed
+- Never blocks -- file dialogs are the one exception (known limitation)
+
+**View:** `App::view(&self) -> Element<Message>`
+- Pure function of state, no mutation
+- Returns widget tree that iced diffs against previous frame
+- Only redraws widgets whose output actually changed (reactive rendering)
+
+**Subscription:** `App::subscription(&self) -> Subscription<Message>`
+- Keyboard listener (ESC -> ClearSelection)
+- No polling, no timers
 
 ## Async model
 
-egui runs on a single thread in immediate mode. Network calls must not block
-the render loop. Pattern learned from egui-async crate internals, simplified
-for our needs.
-
-### Runtime setup
-
-Single global tokio runtime, lazy-initialized:
+iced handles async natively via `Task::perform(future, message_mapper)`.
+No manual channels, no runtime management, no request_repaint.
 
 ```rust
-static RUNTIME: LazyLock<tokio::runtime::Runtime> =
-    LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
-```
+// fire async request
+Task::perform(
+    async move { client.list_buckets().await },
+    Message::BucketsLoaded,
+)
 
-### Per-request oneshot channels (not mpsc)
-
-Each async request gets its own `tokio::sync::oneshot` channel. No message
-routing, no request IDs, no multiplexing. The UI holds the receiver, the
-background task holds the sender.
-
-```rust
-// state per async operation
-struct AsyncOp<T> {
-    rx: Option<oneshot::Receiver<Result<T, String>>>,
-    data: Option<Result<T, String>>,
-    pending: bool,
+// handle result in update()
+Message::BucketsLoaded(Ok(buckets)) => {
+    self.buckets = Some(Ok(buckets));
+    Task::none()
 }
-
-impl<T: Send + 'static> AsyncOp<T> {
-    fn request<F>(&mut self, ctx: &egui::Context, fut: F)
-    where F: Future<Output = Result<T, String>> + Send + 'static {
-        let (tx, rx) = oneshot::channel();
-        let ctx = ctx.clone();
-        RUNTIME.spawn(async move {
-            let result = fut.await;
-            let _ = tx.send(result);
-            ctx.request_repaint(); // wake UI thread
-        });
-        self.rx = Some(rx);
-        self.pending = true;
-    }
-
-    fn poll(&mut self) {
-        if let Some(rx) = &mut self.rx {
-            match rx.try_recv() {
-                Ok(result) => {
-                    self.data = Some(result);
-                    self.pending = false;
-                    self.rx = None;
-                }
-                Err(oneshot::error::TryRecvError::Empty) => {} // still running
-                Err(oneshot::error::TryRecvError::Closed) => {
-                    self.pending = false;
-                    self.rx = None;
-                }
-            }
-        }
-    }
+Message::BucketsLoaded(Err(e)) => {
+    self.buckets = Some(Err(e));
+    Task::none()
 }
 ```
 
-### Repaint only when needed
+iced manages the tokio runtime internally. We don't create or manage one.
+`async_op.rs` exists only for the CPU idle tests -- the app uses Task::perform.
 
-- `ctx.request_repaint()` is called ONLY from background tasks after completion
-- The UI thread never calls `request_repaint()` in the render loop
-- While pending: one extra repaint per frame to check the channel (via poll)
-- While idle: zero repaints, zero CPU
+## Reactive rendering
 
-```rust
-fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-    // poll all active async ops
-    self.buckets_op.poll();
-    self.objects_op.poll();
+iced 0.14 uses reactive rendering by default:
+- Widgets only redraw when their state changes
+- Mouse movement over non-interactive areas = zero redraws
+- No `request_repaint` calls anywhere in our code
+- Framework handles all repaint scheduling
 
-    // only request another frame if something is pending
-    if self.buckets_op.pending || self.objects_op.pending {
-        ui.ctx().request_repaint();
-    }
-
-    // render based on current state
-    // ...
-}
-```
-
-### eframe 0.34 API
-
-Using the new split trait (App::update replaced with App::logic + App::ui):
-- `logic()` -- called every frame, handles non-UI state (poll async ops here)
-- `ui()` -- called when repainting, receives `&mut egui::Ui`
-- `Ui` derefs to `Context`, so `ui.input()` works directly
+This is fundamentally different from immediate mode (egui) where every OS
+event triggers a full UI rebuild.
 
 ## S3 client
 
@@ -134,35 +103,17 @@ Operations:
 - `list_objects(endpoint, bucket, prefix, delimiter)` -- GET /bucket?list-type=2&...
 - `put_object(endpoint, bucket, key, data, content_type)` -- PUT /bucket/key
 - `get_object(endpoint, bucket, key)` -- GET /bucket/key
-- `head_object(endpoint, bucket, key)` -- HEAD /bucket/key
+- `head_object(endpoint, bucket, key)` -- HEAD /bucket/key (returns all headers)
 - `delete_object(endpoint, bucket, key)` -- DELETE /bucket/key
-
-Auth: AWS Signature V4 when credentials are configured. Skipped for no-auth endpoints.
 
 Works with any S3-compatible server: AbixIO, AWS, MinIO, Backblaze B2, etc.
 
 ## AbixIO detection
 
-On connect, the UI probes `GET /_abixio/status`:
+On connect, the UI will probe `GET /_abixio/status` (not yet implemented):
 
-- 200 + JSON response: this is an AbixIO server. Enable management tabs
-  (disk health, object inspector, config viewer).
-- 404 or non-JSON: generic S3 endpoint. Show S3 features only.
-
-## AbixIO management API
-
-When connected to AbixIO, the UI calls these endpoints (served by AbixIO server):
-
-```
-GET  /_abixio/status        -> {version, uptime, data_shards, parity_shards, disk_count}
-GET  /_abixio/disks         -> [{path, online, used_bytes, free_bytes, shard_count}, ...]
-GET  /_abixio/object-info   -> ?bucket=X&key=Y -> {size, etag, erasure, shards: [{disk, index, checksum, present}, ...]}
-GET  /_abixio/heal/status   -> {mrf_queue_depth, scanner_progress, last_scan_time}
-POST /_abixio/heal/trigger  -> force immediate integrity scan
-```
-
-All return JSON. These endpoints are AbixIO-specific and do not exist on other
-S3 servers.
+- 200 + JSON: AbixIO server, enable management tabs
+- 404 or error: generic S3, show S3 features only
 
 ## Layout
 
@@ -172,93 +123,56 @@ Three-panel layout:
 +---+-- center content --+----- right detail ----+
 |nav|                     |                       |
 | B | bucket + object     | context-dependent     |
-| D | browser, or admin   | metadata panel        |
-| C | dashboard           |                       |
-| H |                     | appears on selection  |
-| + |                     | hides on ESC/close    |
-| S |                     |                       |
+|   | browser, or admin   | metadata panel        |
+|   | dashboard           |                       |
+| + |                     | appears on selection  |
+| S |                     | hides on ESC/close    |
 +---+---------------------+-----------------------+
 40px     flexible              280px
 ```
 
-- **Left**: icon rail (40px, fixed). Section navigation:
-  - B = Browse (bucket + object browser)
-  - D = Disks (AbixIO only)
-  - C = Config (AbixIO only)
-  - H = Healing (AbixIO only)
-  - + = Connections (bottom)
-  - S = Settings (bottom)
-- **Center**: main content. Changes based on selected section.
-- **Right**: detail panel. Shows full metadata for selected object/bucket.
-  Hidden when nothing is selected. Fires HEAD request on selection.
+- **Left**: icon rail (40px). B=Browse, +=Connections, S=Settings
+- **Center**: main content, changes based on selected section
+- **Right**: detail panel, shows full metadata for selected object/bucket.
+  Hidden when nothing selected. Fires HEAD request on selection.
 
 ## Design rules
 
 ### Color
 
-- **Red is reserved for errors and destructive actions only.** A red element
-  that is not an error confuses users. Never use red for accent, selection,
-  or branding.
-- **Accent color: teal (#2dd4bf).** Used for selection highlights and active
-  states. High contrast against dark backgrounds.
-- **Text contrast:** primary text (#eeeeee) on dark panels (#1a1c2e).
-  Labels use muted (#8899aa). Minimum 4.5:1 contrast ratio.
-- **Links: bright blue (#5cb8ff).** Distinct from body text, not red.
+- **Red is for errors and destructive actions only**
+- Currently using stock iced `Theme::Dark` / `Theme::Light`
+- Custom theme colors planned (teal accent, high contrast)
 
 ### Theme
 
-- Dark mode is the default. Custom dark palette in `src/app.rs`.
-- Three options: Dark, Light, System. Switchable in Settings > Appearance.
-- Uses egui 0.34 API: `set_theme()` + `set_visuals_of()` per theme.
-- Both dark and light themes are custom-styled (not raw egui defaults).
-- All color constants defined in one place (`src/app.rs` theme section).
+- Dark mode is the default
+- Two options: Dark, Light. Switchable in Settings > Appearance
+- Uses iced's built-in `Theme::Dark` / `Theme::Light`
 
-### Settings view
+### Error handling
 
-Settings (S icon in sidebar) contains:
-- **Appearance**: theme switcher (Dark / Light / System)
-- **Connection**: current endpoint + server type
-- **Performance**: live metrics (see below)
-- **About**: version + GitHub link
-
-### Performance monitoring
-
-Built-in performance dashboard in Settings. All metrics use a 5-minute sliding
-window ring buffer (`src/perf.rs`). No background polling -- stats are recorded
-passively as frames render and network ops complete.
-
-**Rendering:**
-- FPS (current + 5m average)
-- Frame time (current, 5m average, 5m max)
-- Total frames + repaints in last 5m
-
-**Network:**
-- Requests (5m window + total)
-- Bytes in/out (5m window + total)
-
-**Disk I/O:**
-- Always 0 -- the UI does no local caching or disk writes (by design)
+- All async `Err` results are displayed in a dismissable error bar at bottom
+- Errors are never silently dropped
 
 ### Detail panel
 
 When an object is selected, the right panel fires a HEAD request to get full
 HTTP headers, then displays:
 
-1. **Filename** (large) + full path (small, muted)
+1. **Filename** (large) + full path (small)
 2. **Overview**: size, content type, last modified, ETag
-3. **Storage**: bucket, key, prefix
+3. **Storage**: bucket, key
 4. **HTTP Headers**: all raw response headers
-5. **Erasure Shards**: per-disk shard info (AbixIO only)
-6. **Actions**: Download, Delete (Delete styled as destructive/red)
+5. **Actions**: Download, Delete
 
 ## Dependencies
 
-- `eframe` -- egui desktop wrapper (windowing, rendering)
-- `egui_extras` -- table widget, image support
+- `iced` 0.14 -- GUI framework (reactive rendering, Elm architecture)
 - `reqwest` -- async HTTP client
-- `tokio` -- async runtime (for background network thread)
+- `tokio` -- async runtime (managed by iced internally)
 - `quick-xml` -- S3 XML response parsing
 - `serde` / `serde_json` -- serialization
 - `rfd` -- native file dialogs (upload/download)
-- `keyring` -- OS keychain access for secret keys
 - `clap` -- CLI argument parsing
+- `tracing` -- logging

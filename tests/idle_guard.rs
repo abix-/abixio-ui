@@ -139,12 +139,6 @@ fn no_animation_widgets() {
     let all_rs_files = collect_rs_files(&src_dir);
 
     for path in &all_rs_files {
-        // async_op.rs is allowed to have request_repaint (the completion handler)
-        let filename = path.file_name().unwrap().to_str().unwrap();
-        if filename == "async_op.rs" {
-            continue;
-        }
-
         let source = fs::read_to_string(path).unwrap();
         for pattern in &forbidden {
             let count = count_pattern(&source, pattern);
@@ -177,13 +171,21 @@ fn collect_rs_files(dir: &Path) -> Vec<std::path::PathBuf> {
 }
 
 #[test]
-fn async_op_has_exactly_one_repaint() {
-    let source = read_source("src/async_op.rs");
-    let count = count_repaint_calls(&source);
-    assert_eq!(
-        count, 1,
-        "async_op.rs should have exactly 1 request_repaint() call \
-         (in the background task completion handler), found {}",
-        count
-    );
+fn no_repaint_anywhere() {
+    // after migrating to iced, there should be ZERO request_repaint calls
+    // in the entire codebase. iced handles all repaints via reactive rendering.
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let all_rs_files = collect_rs_files(&src_dir);
+    for path in &all_rs_files {
+        let source = fs::read_to_string(path).unwrap();
+        let count = count_repaint_calls(&source);
+        assert_eq!(
+            count,
+            0,
+            "found {} request_repaint() calls in {} -- \
+             iced handles repaints via reactive rendering, no manual repaint needed",
+            count,
+            path.display()
+        );
+    }
 }

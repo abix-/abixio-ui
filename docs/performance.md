@@ -17,32 +17,29 @@ flows from this:
   Data is fetched when the user asks for it.
 - **No caching.** We don't store data locally. Every navigation is a live fetch.
   This means no stale data, no cache invalidation, no disk writes.
-- **No animations.** Spinners, progress bars, and animated transitions are banned.
-  They force 60fps continuous rendering for their entire duration. We use static
-  text ("Loading...") instead.
+- **No animations.** We don't use animated widgets. Static text for loading states.
 - **No background work.** No health checks, no keep-alive pings, no prefetching,
-  no scheduled tasks. The tokio runtime sleeps when there's no work.
-- **One repaint trigger.** The only code that calls `request_repaint()` is the
-  async task completion handler in `async_op.rs`. Nothing else. This is enforced
-  by automated tests.
+  no scheduled tasks.
+- **Reactive rendering.** iced 0.14 only redraws widgets whose state changed.
+  Mouse movement over non-interactive areas causes zero redraws. This is handled
+  by the framework, not by us.
 
-### What triggers a repaint
+### What triggers a redraw
 
 | Trigger | Source | Frequency |
 |---|---|---|
-| User input (click, key, scroll) | OS event | Only when user acts |
-| Async task completes | `async_op.rs` calls `request_repaint()` | Once per completed request |
-| ScrollArea deceleration | egui internal | Decays to zero, stops on its own |
-| Tooltip delay | egui internal | One-shot timer |
-| Grid layout stabilization | egui internal | 1 extra frame |
+| User click/key/scroll | OS event -> iced | Only when user acts |
+| Async task completes | iced Task system | Once per completed request |
+| Widget state change | iced reactive diff | Only the changed widget |
+| Mouse over interactive widget | iced hover state | Only if hover changes appearance |
 
-### What does NOT trigger a repaint
+### What does NOT trigger a redraw
 
 | Scenario | Why not |
 |---|---|
-| User staring at screen | No events = no frames |
-| Network request in-flight | We don't poll; background task wakes us on completion |
-| After any operation completes | Renders once, then idle |
+| User idle, mouse stopped | No events = no frames |
+| Mouse over non-interactive area | iced reactive: no state change = no redraw |
+| Network request in-flight | iced Task handles completion internally |
 | App in background/minimized | No events = no frames |
 | Between user clicks | No events = no frames |
 
@@ -72,21 +69,12 @@ it should not cause a repaint. If it does, that's a bug.
 | Click "Download" button | GET /bucket/key, write to disk | 1 frame | Idle |
 | Click "+" (create bucket) | PUT /bucket, then GET / | 2 frames | Idle |
 | Click sidebar nav icon | None | 1 frame (section switch) | Idle |
-| Click theme switch | None | 1 frame (visuals update) | Idle |
+| Click theme switch | None | 1 frame (theme update) | Idle |
 | Press ESC | None | 1 frame (close detail panel) | Idle |
 | Type in text field | None | 1 frame per keystroke | Idle on blur |
-| Move mouse over window | None | 1 frame per mouse move event | Idle when mouse stops |
-| Hover over button/link | None | 1 frame (highlight state) | Idle when mouse stops |
+| Move mouse over interactive widget | None | 1 frame (hover state change) | Idle when stops |
+| Move mouse over non-interactive area | None | 0 frames (iced reactive) | Already idle |
 | Window resize/move | None | 1 frame per OS resize event | Idle when done |
-
-### egui internal (interaction-driven, not continuous)
-
-| Trigger | When | Duration |
-|---|---|---|
-| ScrollArea deceleration | After scroll gesture | Decays to zero in ~500ms |
-| Tooltip delay | Hovering a widget | One-shot timer, then idle |
-| Grid layout stabilization | First render of a grid | 1 extra frame |
-| Menu open/close | Click menu item | Transition frames only |
 
 ### Never
 
@@ -94,88 +82,28 @@ it should not cause a repaint. If it does, that's a bug.
 |---|---|
 | User idle, mouse stopped, window focused | 0 |
 | User idle, window unfocused | 0 |
-| Network request in-flight | 0 (until completion signal) |
+| Mouse over plain text/labels | 0 (iced reactive) |
+| Network request in-flight | 0 (until completion) |
 | App minimized | 0 |
 | After any operation completes | 0 (after the 1 completion frame) |
 
-## Rendering
+## Rendering architecture
 
-egui defaults to continuous 60fps rendering. We do not want this.
+iced 0.14 uses reactive rendering by default (PR #2662). The framework diffs
+widget output between frames and only redraws widgets whose state changed.
 
-**Repaint only on events:**
-- User input (click, key, scroll, resize)
-- Network response received (background task signals completion)
-- Nothing else
+There is no `request_repaint()` in our code. iced handles all repaint
+scheduling internally based on state changes from `update()`.
 
-### How it works
-
-Each async network request uses a `tokio::sync::oneshot` channel. The background
-task holds a clone of `egui::Context`. When the task completes:
-
-```rust
-// async_op.rs -- background task
-RUNTIME.spawn(async move {
-    let result = fut.await;
-    let _ = tx.send(result);
-    ctx.request_repaint();  // <-- THE ONLY repaint trigger
-});
-```
-
-This is the **only** place `request_repaint()` is called. The UI thread's
-`logic()` method polls the channel with `try_recv()` (non-blocking) but
-**never calls request_repaint() itself**:
-
-```rust
-// app.rs -- logic() runs each frame
-fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    self.perf.record_frame();
-    self.buckets_op.poll();  // try_recv(), non-blocking
-    self.objects_op.poll();
-    // ...
-
-    // NO request_repaint() here. Background tasks wake us when done.
-}
-```
-
-### Timeline
-
-```
-t=0  user clicks bucket "test"
-     -> request() spawns async task
-     -> UI renders loading state (1 frame)
-     -> UI goes idle (0 fps, 0 CPU)
-
-t=50ms  background task completes
-     -> sends result via oneshot channel
-     -> calls ctx.request_repaint()
-     -> UI wakes up, logic() polls result
-     -> UI renders object list (1 frame)
-     -> UI goes idle again
-
-t=50ms..infinity  user staring at screen
-     -> 0 fps, 0 CPU, 0 network
-```
-
-### Common mistake we avoid
-
-A naive approach polls for pending requests every frame:
-
-```rust
-// BAD: burns CPU while waiting for network
-if self.loading {
-    ctx.request_repaint();  // 60fps render loop during every request!
-}
-```
-
-We don't do this. The background task wakes us exactly once when done.
-
-When idle: 0 fps, 0% CPU. egui sleeps until the next OS event.
+Previous versions of this app used egui (immediate mode) which rebuilt the
+entire UI on every OS event. We migrated to iced specifically to eliminate
+unnecessary redraws.
 
 ## Network
 
 **No polling. No background fetches. No keep-alive pings.**
 
-Network calls happen only when the user explicitly navigates:
+Network calls happen only when the user explicitly acts:
 - Click a bucket: one GET request
 - Click a prefix: one GET request
 - Click refresh: one GET request
@@ -183,132 +111,72 @@ Network calls happen only when the user explicitly navigates:
 
 When the user is staring at a listing, zero network traffic.
 
-**Request batching:** one request at a time per view. If the user clicks
-rapidly through buckets, cancel the in-flight request and send the new one.
-Don't queue up stale requests.
-
-```
-user clicks bucket A -> send GET /A
-user clicks bucket B before A responds -> cancel A, send GET /B
-```
-
-**AbixIO management endpoints** (disk health, heal status) are fetched only
-when the user navigates to those tabs. Not polled. Not prefetched.
-
 ## Memory
 
-**No object data in memory.** The UI holds:
-- Current bucket listing (Vec of object names + sizes) -- tiny
-- Connection list -- tiny
-- UI state (selected bucket, prefix, scroll position) -- tiny
+The UI holds:
+- Current bucket listing (Vec of names + sizes) -- tiny
+- Current object listing -- tiny
+- Connection info -- tiny
+- UI state (selected bucket, prefix, section) -- tiny
 
-Object data is streamed directly: upload reads from disk to HTTP, download
-writes from HTTP to disk. Never buffered entirely in memory (except for
-small objects where it doesn't matter).
-
-**Listing pagination:** for buckets with thousands of objects, use S3
-continuation tokens. Load one page at a time. Don't fetch all 100k objects
-into memory.
+No object data cached in memory. Uploads read from disk to HTTP.
+Downloads write from HTTP to disk.
 
 ## Disk
 
-**The app writes to disk only when:**
-- User saves a new connection (one small JSON write)
-- User changes preferences (one small JSON write)
+The app writes to disk only when:
 - User downloads a file (writes to user-chosen path)
-- OS keychain operations (handled by OS, not us)
+- Future: save connections.json (not yet implemented)
 
-No temp files. No caches. No logs to disk. No write-ahead anything.
+No temp files. No caches. No logs to disk.
 
 ## Startup
 
-**Fast launch:**
-- Read `connections.json` (one small file)
-- Read `preferences.json` (one small file)
+- Parse CLI args
 - Open window
-- Done. No server contact until user selects a connection.
-
-No splash screen. No "checking for updates." No preloading data.
-
-## Thread model
-
-Two threads total:
-1. **UI thread** -- egui render loop. Sleeps when idle.
-2. **Network thread** -- tokio runtime. Sleeps when no requests pending.
-
-No thread pool. No worker pool. No timers. No scheduled tasks.
+- Fetch bucket list (one GET request)
+- Done. No splash screen. No update checks.
 
 ## Verified idle: real CPU measurement tests
 
-Every idle code path is tested with Windows `GetProcessTimes`. Each test measures
-actual process CPU time over a 2-second idle window. Threshold: <50ms CPU (<2.5%).
-A 60fps render loop would consume ~2000ms (100% of one core) -- these tests catch it.
+Every idle code path is tested with Windows `GetProcessTimes`. Each test
+measures actual process CPU time over a 2-second idle window. Threshold:
+<50ms CPU (<2.5%). A 60fps render loop would consume ~2000ms.
 
 Run: `cargo test --test cpu_idle -- --ignored --test-threads=1`
 
 | Test | Scenario | Proves |
 |---|---|---|
-| `perf_stats_idle` | Create PerfStats, don't call record_frame, sleep 2s | Stats module has zero background cost |
-| `tokio_runtime_idle` | Init tokio runtime, no work, sleep 2s | Runtime thread sleeps when idle |
-| `async_op_idle_after_completion` | Fire request, wait for done, sleep 2s | No lingering work after completion |
-| `async_op_multiple_requests_then_idle` | Fire 5 sequential requests, all complete, sleep 2s | Idle after burst of activity |
-| `perf_stats_after_recording_then_idle` | Record 100 frames + 100 requests, sleep 2s | Stats recording has no background effect |
-| `async_op_created_but_never_used` | Create 3 AsyncOps, never fire, sleep 2s | Unused ops have zero overhead |
-| `polling_completed_ops_does_not_spin` | Poll completed op 1000x, sleep 2s | Repeated polling is a no-op |
-| `busy_loop_detected_as_high_cpu` | Spin for 200ms | Sanity: measurement actually works |
+| `perf_stats_idle` | Create PerfStats, sleep 2s | Stats module has zero cost |
+| `tokio_runtime_idle` | Init runtime, no work, sleep 2s | Runtime sleeps when idle |
+| `async_op_idle_after_completion` | Fire request, wait, sleep 2s | No lingering work |
+| `async_op_multiple_requests_then_idle` | 5 sequential requests, sleep 2s | Idle after burst |
+| `perf_stats_after_recording_then_idle` | Record 100 frames, sleep 2s | No background effect |
+| `async_op_created_but_never_used` | Create 3 ops, sleep 2s | Unused ops = zero cost |
+| `polling_completed_ops_does_not_spin` | Poll 1000x, sleep 2s | Polling is no-op |
+| `busy_loop_detected_as_high_cpu` | Spin 200ms | Sanity: measurement works |
 
 Source-level guards (run with `cargo test --test idle_guard`):
 
 | Test | What it checks |
 |---|---|
-| `no_repaint_in_app_logic` | Zero `request_repaint()` calls in `src/app.rs` |
-| `no_repaint_in_views` | Zero `request_repaint()` calls in any `src/views/*.rs` |
-| `no_spinners_anywhere` | Zero `spinner()` calls in app.rs or views/ |
-| `no_animation_widgets` | Scans ALL `src/**/*.rs` for banned patterns (see below) |
-| `async_op_has_exactly_one_repaint` | Exactly 1 `request_repaint()` in `src/async_op.rs` |
-
-### Banned patterns (audited from egui 0.34.1 source)
-
-We audited every `request_repaint` call in egui's source to identify which
-widgets/calls cause CONTINUOUS repainting vs one-shot interaction repaints.
-
-**Banned (cause continuous frame rendering):**
-
-| Pattern | egui source | Why it burns CPU |
-|---|---|---|
-| `spinner()` | `widgets/spinner.rs:40` | Animates every frame |
-| `progress_bar(` | `widgets/progress_bar.rs:138` | Animates fill every frame |
-| `animate_bool` | `context.rs:3236` | Triggers repaint until animation completes |
-| `animate_value` | `context.rs:3262` | Same |
-| `request_repaint_after_secs` | Timed repaint | Creates hidden polling timer |
-| `request_repaint_after(` | Timed repaint | Same |
-
-**Allowed (only repaint during active user interaction):**
-
-| Widget | egui source | When it repaints |
-|---|---|---|
-| `CollapsingHeader` | `collapsing_header.rs:72` | Only during open/close transition |
-| `ScrollArea` | `scroll_area.rs:850,894,1133,1483` | Only during scroll deceleration |
-| `Tooltip` | `tooltip.rs:258,364,376` | Only for show delay timer |
-| `Grid` | `grid.rs:280` | One extra frame for layout stabilization |
-| `Menu` | `menu.rs:569,704` | Only during open/close |
-| `Area` (drag) | `area.rs:552,644,688` | Only while user is dragging |
-| `Resize` | `resize.rs:216` | One extra frame for counter delay |
-
-The `no_animation_widgets` test scans every `.rs` file under `src/` for banned
-patterns. `async_op.rs` is excluded (it has the one allowed `request_repaint`).
+| `no_repaint_in_app_logic` | Zero `request_repaint()` in `src/app.rs` |
+| `no_repaint_in_views` | Zero `request_repaint()` in `src/views/*.rs` |
+| `no_spinners_anywhere` | Zero `spinner()` in app or views |
+| `no_animation_widgets` | No banned animated widget patterns in any src/ file |
+| `async_op_has_exactly_one_repaint` | AsyncOp test helper has 0 repaint calls (removed after iced migration) |
 
 ## What we explicitly avoid
 
 | Anti-pattern | Why | Our approach |
 |---|---|---|
-| Continuous rendering | Burns CPU/GPU for no reason | Repaint on events only |
-| Polling repaint loop | `if pending { request_repaint() }` burns CPU while waiting | Background task calls repaint on completion |
-| Background polling | Network + CPU waste when idle | Fetch on user action only |
+| Immediate mode UI | Rebuilds entire UI every event | iced reactive: only changed widgets |
+| Continuous rendering | Burns CPU/GPU for nothing | iced reactive: idle = 0 fps |
+| Background polling | Network + CPU waste | Fetch on user action only |
 | Object data caching | Memory waste, stale data | Always fetch live |
 | Prefetching | Network waste, speculative | Load on navigate only |
 | Connection keep-alive pings | Network waste | Connect on demand |
 | Logging to disk | Disk I/O waste | stderr only, if at all |
 | Analytics/telemetry | Network + privacy waste | None |
 | Auto-refresh timers | CPU + network waste | Manual refresh button |
-| Animation loops | GPU waste | No animations |
+| Animated widgets | Force continuous rendering | Static loading text |

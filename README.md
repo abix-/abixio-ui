@@ -1,6 +1,6 @@
 # abixio-ui
 
-**Status: early development -- compiles, not usable yet**
+**Status: early development -- compiles, basic S3 browsing works**
 
 Native desktop S3 manager. Browse, upload, download, and manage objects on any S3-compatible endpoint.
 
@@ -14,31 +14,18 @@ Native desktop S3 manager. Browse, upload, download, and manage objects on any S
 
 ## How it works
 
-abixio-ui is a standalone native desktop app built with egui. It connects to any S3-compatible endpoint over HTTP. No AWS SDK required -- it speaks raw S3 protocol.
+abixio-ui is a standalone native desktop app built with [iced](https://iced.rs) 0.14. It connects to any S3-compatible endpoint over HTTP. No AWS SDK required -- it speaks raw S3 protocol.
 
 When connected to an [AbixIO](https://github.com/abix-/abixio) server, additional management features (disk health, shard inspection, config) are automatically enabled.
+
+iced 0.14 uses reactive rendering -- widgets only redraw when their state actually changes. Mouse movement over non-interactive areas causes zero redraws.
 
 ### Data authority
 
 - **S3 endpoint** is the single source of truth for all bucket/object data
-- **OS keychain** stores secret keys (Windows Credential Manager / macOS Keychain / Linux secret-service)
-- **Local config** (`~/.abixio-ui/connections.json`) stores connection info only (no secrets)
+- **OS keychain** stores secret keys (planned, not yet implemented)
+- **Local config** (`~/.abixio-ui/connections.json`) stores connection info only (planned)
 - No local caching -- every navigation action fetches live from the server
-
-### Architecture
-
-```
-+-------------------+     HTTP/S3      +-------------------+
-|   abixio-ui       | <=============> |  S3 endpoint      |
-|   (desktop app)   |                  |  (any S3 server)  |
-+-------------------+                  +-------------------+
-        |
-        v
-  ~/.abixio-ui/
-    connections.json   # endpoint name, URL, access_key (NO secrets)
-    preferences.json   # window size, theme, last connection
-    OS keychain        # secret keys only
-```
 
 ## Usage
 
@@ -46,47 +33,41 @@ When connected to an [AbixIO](https://github.com/abix-/abixio) server, additiona
 # connect to local AbixIO
 abixio-ui --endpoint http://localhost:9000
 
-# connect to AWS
-abixio-ui --endpoint https://s3.amazonaws.com
-
-# connect to MinIO
+# connect to any S3 endpoint
 abixio-ui --endpoint http://minio.home:9000
-
-# or just launch and use the connection manager
-abixio-ui
 ```
 
 ## Build
 
 ```bash
 cargo build --release
-# produces target/release/abixio-ui
 ```
 
 ## What works / what doesn't
 
 **Done:**
 - Three-panel layout: icon sidebar + center content + right detail panel
-- Custom dark theme (teal accent, high contrast) + light theme
-- Theme switching in Settings (Dark / Light / System)
-- Async operation helper (tokio oneshot channels, non-blocking UI)
+- Dark / Light theme switching in Settings
 - S3 client (raw HTTP via reqwest, XML parsing)
 - Bucket list sidebar with create bucket
 - Object browser with breadcrumb navigation and prefix drilling
 - Object detail panel: full metadata from HEAD request (size, type, etag, all HTTP headers)
 - Upload via native file dialog
 - Download via native save dialog
-- Delete with immediate refresh
-- Performance monitoring: FPS, frame time, network requests, bytes in/out (5m sliding window)
+- Delete with error display
+- ESC keyboard shortcut to close detail panel
+- Error bar with dismiss for failed operations
 - Settings view: theme, connection info, performance stats, about
+- Performance stats: message count, frame time tracking (5m sliding window)
 
 **Not yet implemented:**
 - Connection manager (multi-server, saved connections)
 - OS keychain credential storage
 - AbixIO-specific features (disk health, object inspector, config)
 - Auth (AWS Sig V4 signing)
+- Custom theme colors (using stock iced Dark/Light for now)
 
-See [docs/](docs/) for architecture, data authority, and performance docs.
+See [docs/](docs/) for architecture, data authority, performance, and iced standards.
 
 ## License
 

@@ -89,12 +89,11 @@ fn tokio_runtime_idle_near_zero_cpu() {
 #[test]
 #[ignore]
 fn async_op_idle_after_completion_near_zero_cpu() {
-    let ctx = egui::Context::default();
     let _ = &*abixio_ui::async_op::RUNTIME;
 
     // fire a quick async op and let it complete
     let mut op = abixio_ui::async_op::AsyncOp::<String>::new();
-    op.request(&ctx, async {
+    op.request(async {
         tokio::time::sleep(Duration::from_millis(50)).await;
         Ok("done".to_string())
     });
@@ -122,13 +121,12 @@ fn async_op_idle_after_completion_near_zero_cpu() {
 #[test]
 #[ignore]
 fn async_op_multiple_requests_then_idle() {
-    let ctx = egui::Context::default();
     let _ = &*abixio_ui::async_op::RUNTIME;
 
     // fire several async ops in sequence
     for i in 0..5 {
         let mut op = abixio_ui::async_op::AsyncOp::<String>::new();
-        op.request(&ctx, async move {
+        op.request(async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
             Ok(format!("done {}", i))
         });
@@ -202,11 +200,10 @@ fn async_op_created_but_never_used_idle() {
 #[test]
 #[ignore]
 fn polling_completed_ops_does_not_spin() {
-    let ctx = egui::Context::default();
     let _ = &*abixio_ui::async_op::RUNTIME;
 
     let mut op = abixio_ui::async_op::AsyncOp::<String>::new();
-    op.request(&ctx, async { Ok("instant".to_string()) });
+    op.request(async { Ok("instant".to_string()) });
     thread::sleep(Duration::from_millis(100));
     op.poll();
     assert!(!op.pending);

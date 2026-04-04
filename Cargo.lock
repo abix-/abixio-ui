@@ -25,6 +25,7 @@ dependencies = [
  "anyhow",
  "clap",
  "eframe",
+ "egui",
  "egui_extras",
  "quick-xml 0.39.2",
  "reqwest",
@@ -34,6 +35,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -18,7 +18,7 @@ app exposes the current Disks and Healing views.
 
 ## How it works
 
-Built with [iced](https://iced.rs) 0.14 (reactive rendering, Elm architecture). Connects via [rust-s3](https://github.com/durch/rust-s3) for S3 operations with full Sig V4 signing.
+Built with [iced](https://iced.rs) 0.14 (reactive rendering, Elm architecture). Connects via [aws-sdk-s3](https://docs.rs/aws-sdk-s3) (official AWS SDK for Rust) for all S3 operations.
 
 When connected to an [AbixIO](https://github.com/abix-/abixio) server, the UI
 probes `/_admin/status`. If it responds with `"server": "abixio"`, admin tabs
@@ -80,40 +80,35 @@ cargo build --release    # release binary goes to Cargo's target dir
 
 ## What works
 
-- Three-panel layout: icon sidebar + center content + right detail panel
-- Dark / Light theme switching
-- S3 client via rust-s3 with AWS Sig V4 signing
-- Connection manager: add, edit, remove, test, switch
-- OS keychain credential storage (both access key + secret key)
-- Bucket list with create bucket modal and recursive bucket delete
-- Object browser with breadcrumb navigation, prefix drilling, filter, recursive find, multi-select, and bulk delete
-- Bucket detail panel with bucket overview and recursive delete action
-- Object detail panel: full metadata from HEAD, with Copy, Move, Rename, Download, Delete actions
-- AbixIO object detail section: erasure summary, shard status, inspect refresh, confirmed manual heal
-- Upload/download via native file dialogs
-- Server-side copy (S3 CopyObject API), move (copy + delete source), rename
+- S3 client via aws-sdk-s3 (official AWS SDK) with full API surface available
+- Core object CRUD: upload, download, copy, move, rename, delete (single and batch)
+- Batch delete via S3 DeleteObjects API (1000 keys/call)
+- Server-side copy via CopyObject API (same-bucket and cross-bucket)
+- Bucket lifecycle: create, delete (recursive with confirmation), list
+- Object browser with breadcrumb navigation, prefix drilling, filter, recursive find
+- Multi-select with bulk delete, select all (respects filter)
 - Recursive folder import and recursive prefix export
-- AbixIO auto-detection on connect
-- Disk health dashboard (AbixIO only)
-- Healing status monitor (AbixIO only)
-- Admin API client with Sig V4 signing for `/_admin/*` endpoints
-- Built-in Testing tab for end-to-end smoke checks
-- ESC to close detail panel, error bar with dismiss
-- Basic performance stats view (update counters; network counters not yet wired)
+- Connection manager: add, edit, remove, test, switch between endpoints
+- OS keychain credential storage (Windows Credential Manager, macOS Keychain, Linux secret-service)
+- Object detail panel: HEAD metadata, HTTP headers, custom metadata, actions
+- AbixIO admin: auto-detection, disk health, healing monitor, shard inspection, manual heal
+- Three-panel layout, dark/light theme, ESC to close, error bar
+- Built-in smoke test tab
 - CLI args: `--endpoint`, `--access-key`, `--secret-key`
 
 ## Not yet implemented
 
+- Recursive prefix delete UI (batch API is wired, UI flow is not)
+- Object tagging (read/write/delete)
+- Version browser
+- Bucket policies
+- Multipart upload for large files
 - Auto-refresh timer for admin views
-- Persisted UI preferences (theme, window size, last active connection)
-- Success toasts and delete confirmation dialogs for object deletion
-- Custom theme colors (using stock iced Dark/Light for now)
-- Multipart upload progress
+- Custom theme colors
 
-See [docs/features.md](docs/features.md) for the current feature set, bucket
-lifecycle behavior, and MinIO
-Client `mc` parity view, plus [docs/](docs/) for architecture, credential
-storage, data authority, and more.
+See [docs/features.md](docs/features.md) for mc parity tracking,
+[docs/s3-client-audit.md](docs/s3-client-audit.md) for SDK configuration audit,
+and [docs/](docs/) for architecture, credentials, and data authority.
 
 ## License
 

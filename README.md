@@ -1,5 +1,7 @@
 # abixio-ui
 
+**Status: early development -- compiles, not usable yet**
+
 Native desktop S3 manager. Browse, upload, download, and manage objects on any S3-compatible endpoint.
 
 ## Planned features
@@ -61,9 +63,7 @@ cargo build --release
 # produces target/release/abixio-ui
 ```
 
-## Status: early development
-
-The app scaffolding compiles but is not usable yet.
+## What works / what doesn't
 
 **Done:**
 - Project scaffold with egui/eframe 0.34

@@ -58,7 +58,7 @@ impl App {
         ui.separator();
 
         if self.objects_op.pending {
-            ui.spinner();
+            ui.label(egui::RichText::new("Loading...").color(crate::app::LABEL_COLOR));
             return;
         }
 

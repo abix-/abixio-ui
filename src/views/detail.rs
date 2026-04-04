@@ -53,7 +53,7 @@ impl App {
 
         // check if we have detail data from HEAD
         if self.detail_op.pending {
-            ui.spinner();
+            ui.label(egui::RichText::new("Loading...").color(crate::app::LABEL_COLOR));
             return;
         }
 

@@ -21,7 +21,8 @@ impl App {
         ui.separator();
 
         if self.buckets_op.pending {
-            ui.spinner();
+            // no ui.spinner() -- it forces continuous 60fps repainting
+            ui.label(egui::RichText::new("Loading...").color(crate::app::LABEL_COLOR));
         }
 
         if let Some(Ok(buckets)) = &self.buckets_op.data {

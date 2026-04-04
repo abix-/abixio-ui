@@ -169,7 +169,16 @@ Source-level guards (run with `cargo test --test idle_guard`):
 |---|---|
 | `no_repaint_in_app_logic` | Zero `request_repaint()` calls in `src/app.rs` |
 | `no_repaint_in_views` | Zero `request_repaint()` calls in any `src/views/*.rs` |
+| `no_spinners_anywhere` | Zero `spinner()` calls in app.rs or views/ (spinners force 60fps animation) |
+| `no_animation_widgets` | Zero `spinner()`, `progress_bar()`, `animate_bool`, `animate_value` in views/ |
 | `async_op_has_exactly_one_repaint` | Exactly 1 `request_repaint()` in `src/async_op.rs` (the completion handler) |
+
+### Why no spinners?
+
+egui's `ui.spinner()` widget internally calls `request_repaint()` every frame
+to animate the rotation. This creates a continuous 60fps render loop for the
+entire duration of any loading state. We use static "Loading..." text instead.
+The source guard test catches any spinner() introduced in future code.
 
 ## What we explicitly avoid
 

@@ -46,6 +46,55 @@ flows from this:
 | App in background/minimized | No events = no frames |
 | Between user clicks | No events = no frames |
 
+## Complete repaint inventory
+
+Every repaint in the app, exhaustively listed. If it's not in this table,
+it should not cause a repaint. If it does, that's a bug.
+
+### Startup (1 repaint)
+
+| Action | Network | Renders | Then |
+|---|---|---|---|
+| App launches | GET / (list buckets) | 1 frame on completion | Idle |
+
+### User actions (each = 1 network call + 1 repaint on completion)
+
+| User action | Network call | Renders | Then |
+|---|---|---|---|
+| Click bucket in sidebar | GET /bucket?list-type=2 | 1 frame | Idle |
+| Click prefix (folder) | GET /bucket?list-type=2&prefix=x/ | 1 frame | Idle |
+| Click breadcrumb segment | GET /bucket?list-type=2&prefix=x/ | 1 frame | Idle |
+| Click "Refresh" button | GET /bucket?list-type=2 | 1 frame | Idle |
+| Click "Refresh All" button | GET / (list buckets) | 1 frame | Idle |
+| Click object in table | HEAD /bucket/key | 1 frame (detail panel) | Idle |
+| Click "Upload" button | PUT /bucket/key, then GET listing | 2 frames | Idle |
+| Click "Delete" button | DELETE /bucket/key, then GET listing | 2 frames | Idle |
+| Click "Download" button | GET /bucket/key, write to disk | 1 frame | Idle |
+| Click "+" (create bucket) | PUT /bucket, then GET / | 2 frames | Idle |
+| Click sidebar nav icon | None | 1 frame (section switch) | Idle |
+| Click theme switch | None | 1 frame (visuals update) | Idle |
+| Press ESC | None | 1 frame (close detail panel) | Idle |
+| Type in text field | None | 1 frame per keystroke | Idle on blur |
+
+### egui internal (interaction-driven, not continuous)
+
+| Trigger | When | Duration |
+|---|---|---|
+| ScrollArea deceleration | After scroll gesture | Decays to zero in ~500ms |
+| Tooltip delay | Hovering a widget | One-shot timer, then idle |
+| Grid layout stabilization | First render of a grid | 1 extra frame |
+| Menu open/close | Click menu item | Transition frames only |
+
+### Never
+
+| Scenario | Renders |
+|---|---|
+| User idle, window focused | 0 |
+| User idle, window unfocused | 0 |
+| Network request in-flight | 0 (until completion signal) |
+| App minimized | 0 |
+| After any operation completes | 0 (after the 1 completion frame) |
+
 ## Rendering
 
 egui defaults to continuous 60fps rendering. We do not want this.

@@ -271,6 +271,10 @@ pub const LABEL_COLOR: egui::Color32 = TEXT_MUTED;
 pub const VALUE_COLOR: egui::Color32 = TEXT_PRIMARY;
 
 fn apply_theme(ctx: &egui::Context) {
+    // force dark mode
+    ctx.set_theme(egui::Theme::Dark);
+
+    // customize dark visuals
     let mut visuals = egui::Visuals::dark();
 
     visuals.panel_fill = BG_PANEL;
@@ -280,7 +284,7 @@ fn apply_theme(ctx: &egui::Context) {
     visuals.override_text_color = Some(TEXT_PRIMARY);
     visuals.hyperlink_color = LINK;
 
-    visuals.selection.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e); // muted teal bg
+    visuals.selection.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
     visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
 
     visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, SEPARATOR);
@@ -289,5 +293,5 @@ fn apply_theme(ctx: &egui::Context) {
     visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x2e, 0x34, 0x50);
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
 
-    ctx.set_visuals(visuals);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals);
 }

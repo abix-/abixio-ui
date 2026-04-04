@@ -112,12 +112,54 @@ fn view(&self) -> Element<Message> {
 Use `Theme::custom()` for custom palettes. Stock `Theme::Dark` / `Theme::Light`
 for now, custom colors are a future improvement.
 
+## File I/O in Tasks
+
+Always use `tokio::fs` (async) inside `Task::perform`, never `std::fs` (sync).
+Blocking I/O on the tokio thread pool stalls other tasks.
+
+```rust
+// GOOD: non-blocking
+Task::perform(async move {
+    let data = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
+    client.put_object(&bucket, &key, data, "application/octet-stream").await
+}, Message::UploadDone)
+
+// BAD: blocks tokio thread
+Task::perform(async move {
+    let data = std::fs::read(&file).map_err(|e| e.to_string())?; // BLOCKING
+    ...
+}, ...)
+```
+
+## Performance metrics
+
+`perf.record_frame()` is called in `update()`, not `view()`. This counts
+state updates, not actual renders. In iced, each `update()` triggers at most
+one `view()` call, so these closely approximate actual frames. The metrics
+are labeled "Updates" not "FPS" to be accurate.
+
+`view()` takes `&self` (immutable) so mutable perf counters can't live there
+without interior mutability. Counting in `update()` is the pragmatic choice.
+
+## Known limitations
+
+### File dialogs block the UI thread
+
+`rfd::FileDialog::pick_file()` and `save_file()` are synchronous calls in
+`update()`. This freezes the window until the user picks a file or cancels.
+There is no async file dialog API available on Windows via rfd.
+
+This is documented and accepted. The freeze is brief (user is interacting
+with the dialog) and doesn't cause data loss or corruption.
+
 ## What we avoid
 
 | Anti-pattern | Why | Iced way |
 |---|---|---|
+| Blocking I/O in Task | Stalls tokio thread pool | Use `tokio::fs` not `std::fs` |
 | Blocking in update() | Freezes UI | Use Task::perform for async |
 | Mutation in view() | View must be pure | Only read state in view() |
 | Manual request_repaint | iced handles reactivity | Return Task from update() |
 | Boolean loading flags | Less idiomatic | Use enum states (Loading/Loaded/Error) |
 | Ignoring Err results | User doesn't see failures | Display error in UI |
+| Calling metrics "FPS" | update() != render | Label as "Updates/sec" |

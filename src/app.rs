@@ -136,6 +136,9 @@ impl App {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        // record_frame counts update() calls, not view() renders.
+        // in iced, each update triggers at most one render, so this
+        // closely approximates actual frame count.
         self.perf.record_frame();
 
         match message {
@@ -243,7 +246,7 @@ impl App {
                 let key = format!("{}{}", prefix, filename);
                 Task::perform(
                     async move {
-                        let data = std::fs::read(&file).map_err(|e| e.to_string())?;
+                        let data = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
                         client
                             .put_object(&bucket, &key, data, "application/octet-stream")
                             .await
@@ -269,7 +272,9 @@ impl App {
                 Task::perform(
                     async move {
                         let data = client.get_object(&bucket, &key).await?;
-                        std::fs::write(&save_path, &data).map_err(|e| e.to_string())?;
+                        tokio::fs::write(&save_path, &data)
+                            .await
+                            .map_err(|e| e.to_string())?;
                         Ok(save_path.to_string_lossy().to_string())
                     },
                     Message::DownloadDone,

@@ -37,29 +37,29 @@ impl App {
             iced::widget::rule::horizontal(1),
             // performance
             text("Performance").size(13),
-            text("Rendering").size(11),
+            text("Updates").size(11),
             row![
-                text("FPS (current)").size(10),
+                text("Updates/sec (current)").size(10),
                 text(format!("{:.0}", p.current_fps())).size(10)
             ]
             .spacing(8),
             row![
-                text("FPS (5m avg)").size(10),
+                text("Updates/sec (5m avg)").size(10),
                 text(format!("{:.0}", p.avg_fps())).size(10)
             ]
             .spacing(8),
             row![
-                text("Frame time").size(10),
+                text("Update time").size(10),
                 text(format!("{:.1} ms", p.current_frame_ms())).size(10)
             ]
             .spacing(8),
             row![
-                text("Total frames").size(10),
+                text("Total updates").size(10),
                 text(format!("{}", p.total_frames())).size(10)
             ]
             .spacing(8),
             row![
-                text("Repaints (5m)").size(10),
+                text("Updates (5m)").size(10),
                 text(format!("{}", p.repaints_5m())).size(10)
             ]
             .spacing(8),

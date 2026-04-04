@@ -1,11 +1,3 @@
-#![allow(dead_code)]
-
-mod app;
-mod async_op;
-pub mod perf;
-mod s3;
-mod views;
-
 use clap::Parser;
 use eframe::egui;
 
@@ -30,7 +22,7 @@ fn main() {
     eframe::run_native(
         "abixio-ui",
         options,
-        Box::new(|cc| Ok(Box::new(app::App::new(cc, &args.endpoint)))),
+        Box::new(|cc| Ok(Box::new(abixio_ui::app::App::new(cc, &args.endpoint)))),
     )
     .unwrap();
 }

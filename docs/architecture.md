@@ -36,36 +36,94 @@ src/
 ## Async model
 
 egui runs on a single thread in immediate mode. Network calls must not block
-the render loop.
+the render loop. Pattern learned from egui-async crate internals, simplified
+for our needs.
 
-```
-UI thread (egui, 60fps):
-  - renders every frame
-  - on user action: sends Request to background via channel
-  - each frame: polls channel for Response, updates state
+### Runtime setup
 
-Background thread (tokio):
-  - receives Request messages from channel
-  - makes HTTP calls via reqwest
-  - sends Response messages back via channel
-```
-
-Channel: `std::sync::mpsc`. The UI thread never blocks -- it calls `try_recv()`
-each frame.
+Single global tokio runtime, lazy-initialized:
 
 ```rust
-// send request (non-blocking)
-if ui.button("Refresh").clicked() {
-    self.tx.send(Request::ListObjects { bucket, prefix });
-    self.loading = true;
+static RUNTIME: LazyLock<tokio::runtime::Runtime> =
+    LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
+```
+
+### Per-request oneshot channels (not mpsc)
+
+Each async request gets its own `tokio::sync::oneshot` channel. No message
+routing, no request IDs, no multiplexing. The UI holds the receiver, the
+background task holds the sender.
+
+```rust
+// state per async operation
+struct AsyncOp<T> {
+    rx: Option<oneshot::Receiver<Result<T, String>>>,
+    data: Option<Result<T, String>>,
+    pending: bool,
 }
 
-// poll for response (non-blocking)
-if let Ok(Response::Objects(list)) = self.rx.try_recv() {
-    self.objects = list;
-    self.loading = false;
+impl<T: Send + 'static> AsyncOp<T> {
+    fn request<F>(&mut self, ctx: &egui::Context, fut: F)
+    where F: Future<Output = Result<T, String>> + Send + 'static {
+        let (tx, rx) = oneshot::channel();
+        let ctx = ctx.clone();
+        RUNTIME.spawn(async move {
+            let result = fut.await;
+            let _ = tx.send(result);
+            ctx.request_repaint(); // wake UI thread
+        });
+        self.rx = Some(rx);
+        self.pending = true;
+    }
+
+    fn poll(&mut self) {
+        if let Some(rx) = &mut self.rx {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.data = Some(result);
+                    self.pending = false;
+                    self.rx = None;
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {} // still running
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    self.pending = false;
+                    self.rx = None;
+                }
+            }
+        }
+    }
 }
 ```
+
+### Repaint only when needed
+
+- `ctx.request_repaint()` is called ONLY from background tasks after completion
+- The UI thread never calls `request_repaint()` in the render loop
+- While pending: one extra repaint per frame to check the channel (via poll)
+- While idle: zero repaints, zero CPU
+
+```rust
+fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    // poll all active async ops
+    self.buckets_op.poll();
+    self.objects_op.poll();
+
+    // only request another frame if something is pending
+    if self.buckets_op.pending || self.objects_op.pending {
+        ui.ctx().request_repaint();
+    }
+
+    // render based on current state
+    // ...
+}
+```
+
+### eframe 0.34 API
+
+Using the new split trait (App::update replaced with App::logic + App::ui):
+- `logic()` -- called every frame, handles non-UI state (poll async ops here)
+- `ui()` -- called when repainting, receives `&mut egui::Ui`
+- `Ui` derefs to `Context`, so `ui.input()` works directly
 
 ## S3 client
 

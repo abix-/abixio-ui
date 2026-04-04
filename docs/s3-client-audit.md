@@ -17,9 +17,11 @@ and 1 means "completely ignored, likely to cause problems."
 |---|---|---|---|
 | `behavior_version` | `BehaviorVersion::latest()` | 10/10 | Required. Set correctly. |
 | `region` | User-provided or `us-east-1` | 9/10 | Correct. CLI defaults to `us-east-1`, saved connections store region. Minor gap: no region auto-detection. |
-| `credentials_provider` | Static `Credentials::new(ak, sk)` or empty strings for anonymous | 4/10 | Authenticated works. Anonymous passes empty strings which still signs requests with empty keys instead of sending unsigned requests. Should use `no_credentials()` or `allow_no_auth(true)`. |
+| `credentials_provider` | Static credentials for auth, failing provider + `allow_no_auth()` for anonymous | 9/10 | Authenticated uses static SigV4. Anonymous uses a failing credentials provider combined with `allow_no_auth()` so requests are sent unsigned (no Authorization header). |
 | `endpoint_url` | User-provided endpoint | 10/10 | Correct. Required for non-AWS servers. |
 | `force_path_style` | `true` | 10/10 | Correct. Required for MinIO, AbixIO, and most self-hosted S3-compatible servers. |
+| `timeout_config` | connect: 10s, operation: 60s | 9/10 | Prevents UI hangs on unreachable servers. Operation timeout covers large uploads/downloads. |
+| `app_name` | `abixio-ui` | 9/10 | Appears in User-Agent header. Helps server operators identify traffic. |
 
 ### Configuration NOT set (using SDK defaults)
 
@@ -27,15 +29,14 @@ and 1 means "completely ignored, likely to cause problems."
 
 | Config | SDK default | Rating | Assessment |
 |---|---|---|---|
-| `retry_config` | 3 attempts, exponential backoff | 5/10 | Acceptable for normal operations. Problem: connection tests to bad endpoints take 3x as long. Should set max_attempts(1) for connection tests and keep default for data operations. |
-| `timeout_config` | No explicit connect or operation timeout | 3/10 | If a server accepts TCP but never responds, the request hangs indefinitely. Should set connect_timeout (5-10s) and operation_timeout (30-60s). Without this, the UI freezes on unreachable servers. |
+| `retry_config` | 3 attempts, exponential backoff | 5/10 | Acceptable for normal operations. Problem: connection tests to bad endpoints take 3x as long. Could set max_attempts(1) for connection tests. |
 | `stalled_stream_protection` | Enabled, default grace period | 7/10 | Good default. Protects against stalled downloads. |
 
 #### Authentication -- medium impact
 
 | Config | SDK default | Rating | Assessment |
 |---|---|---|---|
-| `allow_no_auth` | Disabled | 3/10 | Anonymous connections send signed requests with empty keys. Some servers reject this. Should enable for anonymous connections. |
+| `allow_no_auth` | Enabled for anonymous connections | 9/10 | Anonymous connections use a failing credentials provider + `allow_no_auth()`. Requests are sent unsigned. |
 | `identity_cache` | Lazy caching | 8/10 | Fine. Credentials are static. |
 | `auth_scheme_resolver` | Default (SigV4) | 10/10 | Correct for all S3-compatible servers. |
 
@@ -65,19 +66,16 @@ and 1 means "completely ignored, likely to cause problems."
 | `http_client` | Smithy default (hyper + rustls) | 8/10 | Matches our TLS stack. |
 | `sleep_impl` | Standard async sleep (tokio) | 10/10 | Correct. |
 | `time_source` | System clock | 10/10 | Correct. |
-| `app_name` | None | 4/10 | Should set to `abixio-ui`. Appears in User-Agent. Easy fix. |
+| `app_name` | `abixio-ui` | 9/10 | Set. Appears in User-Agent header. |
 | `invocation_id_generator` | Random UUID | 10/10 | Correct. |
 
-### Configuration fix list
+### Remaining configuration items
 
 | Priority | Issue | Fix |
 |---|---|---|
-| **Must fix** | Anonymous auth sends signed requests with empty keys | Use `no_credentials()` or `allow_no_auth(true)` for anonymous |
-| **Must fix** | No connect or operation timeout | Set `connect_timeout(10s)`, `operation_timeout(60s)` |
 | **Should fix** | Retry config causes slow connection tests | `max_attempts(1)` for test path |
-| **Should fix** | No app name in User-Agent | Set `app_name("abixio-ui")` |
 
-### Configuration rating: 7/10
+### Configuration rating: 9/10
 
 ---
 
@@ -198,9 +196,10 @@ website hosting, analytics, metrics, inventory, intelligent-tiering, S3
 Express, transfer acceleration. These are AWS-specific admin features not
 relevant to a desktop S3 client targeting self-hosted servers.
 
-## Overall rating: 7/10
+## Overall rating: 8/10
 
-SDK config needs timeout and anonymous auth fixes. Response handling is
-solid for implemented APIs but ignores useful fields (storage class,
-version ID, encryption status). Error handling flattens structured errors
-to strings.
+SDK config is solid (9/10). Anonymous auth sends unsigned requests, timeouts
+prevent UI hangs, app name is set. Response handling is solid for
+implemented APIs but ignores some useful fields (storage class, version ID,
+encryption status). Error handling still flattens structured errors to
+strings.

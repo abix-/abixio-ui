@@ -22,7 +22,7 @@ MinIO.
 | Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
 | Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
 | Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
-| Bulk delete and batch object workflows | Multi-select checkboxes with bulk delete, select all, confirmation modal, progress feedback, S3 DeleteObjects batch API | Recursive `mc rm`, batch-oriented workflows | 6/10 | Partial | Multi-select and bulk delete with confirmation. Uses S3 DeleteObjects API (1000 keys/batch). No recursive prefix delete UI, no time/size filters, no dry-run. |
+| Bulk delete and batch object workflows | Multi-select bulk delete, recursive prefix delete, S3 DeleteObjects batch API (1000 keys/call) | Recursive `mc rm`, batch-oriented workflows | 7/10 | Partial | Multi-select bulk delete and recursive prefix delete with confirmation modals. Uses S3 DeleteObjects API. No time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
 | Tags | Not implemented | `mc tag` | 0/10 | None | No bucket-tag or object-tag UI. |
 | Bucket policy and anonymous access | Not implemented | `mc anonymous` | 0/10 | None | No bucket policy or public-access management UI. |

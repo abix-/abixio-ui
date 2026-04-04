@@ -83,6 +83,7 @@ cargo build --release    # release binary goes to Cargo's target dir
 - S3 client via aws-sdk-s3 (official AWS SDK) with full API surface available
 - Core object CRUD: upload, download, copy, move, rename, delete (single and batch)
 - Batch delete via S3 DeleteObjects API (1000 keys/call)
+- Recursive prefix delete: delete a folder and all objects under it
 - Server-side copy via CopyObject API (same-bucket and cross-bucket)
 - Bucket lifecycle: create, delete (recursive with confirmation), list
 - Object browser with breadcrumb navigation, prefix drilling, filter, recursive find
@@ -90,6 +91,8 @@ cargo build --release    # release binary goes to Cargo's target dir
 - Recursive folder import and recursive prefix export
 - Connection manager: add, edit, remove, test, switch between endpoints
 - OS keychain credential storage (Windows Credential Manager, macOS Keychain, Linux secret-service)
+- Anonymous connections (unsigned requests, no credentials required)
+- Connect timeout (10s) and operation timeout (60s) to prevent UI hangs
 - Object detail panel: HEAD metadata, HTTP headers, custom metadata, actions
 - AbixIO admin: auto-detection, disk health, healing monitor, shard inspection, manual heal
 - Three-panel layout, dark/light theme, ESC to close, error bar
@@ -98,7 +101,6 @@ cargo build --release    # release binary goes to Cargo's target dir
 
 ## Not yet implemented
 
-- Recursive prefix delete UI (batch API is wired, UI flow is not)
 - Object tagging (read/write/delete)
 - Version browser
 - Bucket policies

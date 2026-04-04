@@ -3,18 +3,43 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::async_op::AsyncOp;
-use crate::s3::client::{BucketInfo, ListObjectsResult, S3Client};
+use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectInfo, S3Client};
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum Section {
+    Browse,
+    Disks,
+    Config,
+    Healing,
+    Connections,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Selection {
+    None,
+    Bucket(String),
+    Object {
+        bucket: String,
+        key: String,
+        info: Option<ObjectInfo>,
+    },
+}
 
 pub struct App {
-    client: Arc<S3Client>,
+    pub client: Arc<S3Client>,
     pub endpoint: String,
+
+    // navigation
+    pub current_section: Section,
+    pub selection: Selection,
+    pub is_abixio: bool,
 
     // async ops
     pub buckets_op: AsyncOp<Vec<BucketInfo>>,
     pub objects_op: AsyncOp<ListObjectsResult>,
-    upload_op: AsyncOp<String>,
-    delete_op: AsyncOp<()>,
-    create_bucket_op: AsyncOp<()>,
+    pub upload_op: AsyncOp<String>,
+    pub delete_op: AsyncOp<()>,
+    pub create_bucket_op: AsyncOp<()>,
 
     // ui state
     pub selected_bucket: Option<String>,
@@ -24,10 +49,15 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, endpoint: &str) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+
         let client = Arc::new(S3Client::new(endpoint));
         let mut app = Self {
             client,
             endpoint: endpoint.to_string(),
+            current_section: Section::Browse,
+            selection: Selection::None,
+            is_abixio: false,
             buckets_op: AsyncOp::new(),
             objects_op: AsyncOp::new(),
             upload_op: AsyncOp::new(),
@@ -106,14 +136,12 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // poll all async ops
         self.buckets_op.poll();
         self.objects_op.poll();
         self.upload_op.poll();
         self.delete_op.poll();
         self.create_bucket_op.poll();
 
-        // if create/upload/delete just completed, refresh
         if let Some(Ok(())) = self.create_bucket_op.data.take() {
             self.fetch_buckets(ctx);
         }
@@ -121,10 +149,10 @@ impl eframe::App for App {
             self.fetch_objects(ctx);
         }
         if let Some(Ok(())) = self.delete_op.data.take() {
+            self.selection = Selection::None;
             self.fetch_objects(ctx);
         }
 
-        // request repaint only if something is pending
         if self.buckets_op.pending
             || self.objects_op.pending
             || self.upload_op.pending
@@ -136,31 +164,61 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
+        // ESC clears selection
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.selection = Selection::None;
+        }
 
+        // top bar
         egui::TopBottomPanel::top("top_bar").show_inside(ui, |ui: &mut egui::Ui| {
             ui.horizontal(|ui: &mut egui::Ui| {
-                ui.label("Endpoint:");
+                ui.strong("abixio-ui");
+                ui.separator();
                 ui.label(&self.endpoint);
-                ui.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui: &mut egui::Ui| {
-                        if ui.button("Refresh All").clicked() {
-                            self.fetch_buckets(&ctx);
-                        }
-                    },
-                );
+                if self.is_abixio {
+                    ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "AbixIO");
+                }
             });
         });
 
-        egui::SidePanel::left("bucket_panel")
-            .default_width(200.0)
+        // left icon sidebar
+        egui::SidePanel::left("nav")
+            .exact_width(40.0)
+            .resizable(false)
             .show_inside(ui, |ui: &mut egui::Ui| {
-                self.bucket_panel(ui);
+                self.sidebar(ui);
             });
 
+        // right detail panel (only when something selected)
+        if !matches!(self.selection, Selection::None) {
+            egui::SidePanel::right("detail")
+                .default_width(280.0)
+                .show_inside(ui, |ui: &mut egui::Ui| {
+                    self.detail_panel(ui);
+                });
+        }
+
+        // center content
         egui::CentralPanel::default().show_inside(ui, |ui: &mut egui::Ui| {
-            self.object_panel(ui);
+            match self.current_section {
+                Section::Browse => self.browse_view(ui),
+                Section::Disks => {
+                    ui.heading("Disk Health");
+                    ui.label("Coming soon -- requires AbixIO management API");
+                }
+                Section::Config => {
+                    ui.heading("Server Config");
+                    ui.label("Coming soon -- requires AbixIO management API");
+                }
+                Section::Healing => {
+                    ui.heading("Healing Status");
+                    ui.label("Coming soon -- requires AbixIO management API");
+                }
+                Section::Connections => {
+                    ui.heading("Connections");
+                    ui.label("Coming soon -- connection manager");
+                }
+            }
         });
     }
 }

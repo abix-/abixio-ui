@@ -1,18 +1,21 @@
 use eframe::egui;
 
-use crate::app::App;
+use crate::app::{App, Selection};
+use crate::s3::client::ObjectInfo;
 
 impl App {
     pub fn object_panel(&mut self, ui: &mut egui::Ui) {
         let bucket = match &self.selected_bucket {
             Some(b) => b.clone(),
             None => {
-                ui.heading("Select a bucket");
+                ui.centered_and_justified(|ui: &mut egui::Ui| {
+                    ui.label("Select a bucket");
+                });
                 return;
             }
         };
 
-        // breadcrumb bar
+        // breadcrumb + actions bar
         let prefix = self.current_prefix.clone();
         let mut nav_to: Option<String> = None;
 
@@ -48,6 +51,7 @@ impl App {
 
         if let Some(new_prefix) = nav_to {
             self.current_prefix = new_prefix;
+            self.selection = Selection::None;
             self.fetch_objects(ui.ctx());
         }
 
@@ -68,50 +72,64 @@ impl App {
             _ => return,
         };
 
-        // common prefixes (folders)
         let current_prefix = self.current_prefix.clone();
-        let mut folder_nav: Option<String> = None;
 
+        // folders (common prefixes)
+        let mut folder_nav: Option<String> = None;
         for cp in &result.common_prefixes {
             let display = cp.strip_prefix(&current_prefix).unwrap_or(cp);
-            if ui.link(format!("  {}", display)).clicked() {
-                folder_nav = Some(cp.clone());
-            }
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.label("  ");
+                if ui.link(format!("{}", display)).clicked() {
+                    folder_nav = Some(cp.clone());
+                }
+            });
         }
 
         if let Some(p) = folder_nav {
             self.current_prefix = p;
+            self.selection = Selection::None;
             self.fetch_objects(ui.ctx());
             return;
         }
 
         // objects table
-        let mut delete_key: Option<String> = None;
+        let mut clicked_obj: Option<ObjectInfo> = None;
 
         egui::Grid::new("objects_grid")
             .striped(true)
-            .min_col_width(100.0)
+            .min_col_width(80.0)
             .show(ui, |ui: &mut egui::Ui| {
                 ui.strong("Name");
                 ui.strong("Size");
-                ui.strong("Last Modified");
-                ui.strong("");
+                ui.strong("Modified");
                 ui.end_row();
 
                 for obj in &result.objects {
                     let display_key = obj.key.strip_prefix(&current_prefix).unwrap_or(&obj.key);
-                    ui.label(display_key);
+
+                    let is_selected = matches!(
+                        &self.selection,
+                        Selection::Object { key, .. } if *key == obj.key
+                    );
+
+                    let resp = ui.selectable_label(is_selected, display_key);
+                    if resp.clicked() {
+                        clicked_obj = Some(obj.clone());
+                    }
+
                     ui.label(format_size(obj.size));
                     ui.label(&obj.last_modified);
-                    if ui.small_button("Delete").clicked() {
-                        delete_key = Some(obj.key.clone());
-                    }
                     ui.end_row();
                 }
             });
 
-        if let Some(key) = delete_key {
-            self.delete_object(ui.ctx(), &bucket, &key);
+        if let Some(obj) = clicked_obj {
+            self.selection = Selection::Object {
+                bucket,
+                key: obj.key.clone(),
+                info: Some(obj),
+            };
         }
     }
 }

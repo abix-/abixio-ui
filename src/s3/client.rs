@@ -182,7 +182,7 @@ pub struct BucketInfo {
     pub creation_date: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectInfo {
     pub key: String,
     pub size: u64,

@@ -12,7 +12,7 @@ use crate::abixio::types::{
     DisksResponse, HealResponse, HealStatusResponse, ObjectInspectResponse, StatusResponse,
 };
 use crate::config::{self, Connection, Settings};
-use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, S3Client};
+use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client};
 use crate::views::testing::TestResult;
 
 pub(crate) const CURRENT_CONNECTION_ID: &str = "__current__";
@@ -40,7 +40,10 @@ pub enum Message {
     DetailLoaded(Result<ObjectDetail, String>),
     UploadDone(Result<String, String>),
     DeleteDone(Result<(), String>),
-    CreateBucketDone(Result<(), String>),
+    CreateBucketDone {
+        bucket: String,
+        result: Result<(), String>,
+    },
     DownloadDone(Result<String, String>),
 
     Refresh,
@@ -63,9 +66,20 @@ pub enum Message {
     TransferConflictSkip,
     TransferConflictOverwriteAll,
     TransferConflictSkipAll,
-    CreateBucket,
-    SetTheme(AppTheme),
     NewBucketNameChanged(String),
+    OpenCreateBucketModal,
+    CloseCreateBucketModal,
+    CreateBucket,
+    OpenDeleteBucketModal,
+    CloseDeleteBucketModal,
+    BucketDeletePreviewLoaded {
+        bucket: String,
+        result: Result<Vec<ObjectInfo>, String>,
+    },
+    BucketDeleteConfirmNameChanged(String),
+    ConfirmDeleteBucket,
+    BucketDeleteStepFinished(Result<BucketDeleteStepResult, String>),
+    SetTheme(AppTheme),
     DismissError,
 
     // connection manager
@@ -197,6 +211,25 @@ pub struct TransferState {
     pub summary: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BucketDeleteState {
+    pub bucket: String,
+    pub confirm_name: String,
+    pub preview_loading: bool,
+    pub object_keys: Vec<String>,
+    pub total_objects: usize,
+    pub deleted_objects: usize,
+    pub next_index: usize,
+    pub deleting: bool,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BucketDeleteStepResult {
+    ObjectDeleted(String),
+    BucketDeleted(String),
+}
+
 // -- state --
 
 pub struct App {
@@ -213,6 +246,8 @@ pub struct App {
     pub selected_bucket: Option<String>,
     pub current_prefix: String,
     pub new_bucket_name: String,
+    pub create_bucket_modal_open: bool,
+    pub create_bucket_modal_error: Option<String>,
 
     pub loading_buckets: bool,
     pub loading_objects: bool,
@@ -240,6 +275,7 @@ pub struct App {
     pub healing_target: Option<(String, String)>,
     pub heal_result: Option<String>,
     pub transfer: Option<TransferState>,
+    pub bucket_delete: Option<BucketDeleteState>,
 
     // connection form
     pub new_conn_name: String,
@@ -311,6 +347,8 @@ impl App {
             selected_bucket: None,
             current_prefix: String::new(),
             new_bucket_name: String::new(),
+            create_bucket_modal_open: false,
+            create_bucket_modal_error: None,
             loading_buckets,
             loading_objects: false,
             loading_detail: false,
@@ -332,6 +370,7 @@ impl App {
             healing_target: None,
             heal_result: None,
             transfer: None,
+            bucket_delete: None,
             new_conn_name: String::new(),
             new_conn_endpoint: String::new(),
             new_conn_region: "us-east-1".to_string(),
@@ -475,11 +514,23 @@ impl App {
                 self.error = Some(format!("Delete failed: {}", e));
                 Task::none()
             }
-            Message::CreateBucketDone(Ok(())) => {
+            Message::CreateBucketDone {
+                bucket,
+                result: Ok(()),
+            } => {
+                self.create_bucket_modal_open = false;
+                self.create_bucket_modal_error = None;
+                self.selected_bucket = Some(bucket.clone());
+                self.selection = Selection::Bucket(bucket);
+                self.current_prefix.clear();
+                self.objects = None;
+                self.detail = None;
                 self.loading_buckets = true;
-                self.cmd_fetch_buckets()
+                self.loading_objects = true;
+                Task::batch(vec![self.cmd_fetch_buckets(), self.cmd_fetch_objects()])
             }
-            Message::CreateBucketDone(Err(e)) => {
+            Message::CreateBucketDone { result: Err(e), .. } => {
+                self.create_bucket_modal_error = Some(e.clone());
                 self.error = Some(format!("Create bucket failed: {}", e));
                 Task::none()
             }
@@ -806,17 +857,148 @@ impl App {
             Message::TransferConflictSkip => self.resolve_transfer_conflict(true, false),
             Message::TransferConflictOverwriteAll => self.resolve_transfer_conflict(false, true),
             Message::TransferConflictSkipAll => self.resolve_transfer_conflict(true, true),
+            Message::OpenCreateBucketModal => {
+                self.new_bucket_name.clear();
+                self.create_bucket_modal_error = None;
+                self.create_bucket_modal_open = true;
+                Task::none()
+            }
+            Message::CloseCreateBucketModal => {
+                self.create_bucket_modal_open = false;
+                self.create_bucket_modal_error = None;
+                Task::none()
+            }
             Message::CreateBucket => {
-                if self.new_bucket_name.is_empty() {
+                let name = self.new_bucket_name.trim().to_string();
+                if name.is_empty() {
+                    self.create_bucket_modal_error = Some("Bucket name is required.".to_string());
                     return Task::none();
                 }
                 let client = self.client.clone();
-                let name = self.new_bucket_name.clone();
-                self.new_bucket_name.clear();
+                self.create_bucket_modal_error = None;
                 Task::perform(
-                    async move { client.create_bucket(&name).await },
-                    Message::CreateBucketDone,
+                    async move {
+                        let result = client.create_bucket(&name).await;
+                        (name, result)
+                    },
+                    |(bucket, result)| Message::CreateBucketDone { bucket, result },
                 )
+            }
+            Message::OpenDeleteBucketModal => {
+                let Some(bucket) = self.current_selected_bucket() else {
+                    return Task::none();
+                };
+                self.bucket_delete = Some(BucketDeleteState {
+                    bucket: bucket.clone(),
+                    confirm_name: String::new(),
+                    preview_loading: true,
+                    object_keys: Vec::new(),
+                    total_objects: 0,
+                    deleted_objects: 0,
+                    next_index: 0,
+                    deleting: false,
+                    summary: None,
+                });
+                let client = self.client.clone();
+                Task::perform(
+                    async move {
+                        let result = client
+                            .list_objects(&bucket, "", "")
+                            .await
+                            .map(|listing| listing.objects);
+                        (bucket, result)
+                    },
+                    |(bucket, result)| Message::BucketDeletePreviewLoaded { bucket, result },
+                )
+            }
+            Message::CloseDeleteBucketModal => {
+                if self
+                    .bucket_delete
+                    .as_ref()
+                    .is_some_and(|state| state.deleting)
+                {
+                    return Task::none();
+                }
+                self.bucket_delete = None;
+                Task::none()
+            }
+            Message::BucketDeletePreviewLoaded { bucket, result } => {
+                let Some(state) = self.bucket_delete.as_mut() else {
+                    return Task::none();
+                };
+                if state.bucket != bucket {
+                    return Task::none();
+                }
+                state.preview_loading = false;
+                match result {
+                    Ok(objects) => {
+                        state.total_objects = objects.len();
+                        state.object_keys = objects.into_iter().map(|object| object.key).collect();
+                        state.summary = Some(if state.total_objects == 0 {
+                            "Bucket is empty.".to_string()
+                        } else {
+                            format!(
+                                "Bucket contains {} object(s). Delete will remove them recursively.",
+                                state.total_objects
+                            )
+                        });
+                    }
+                    Err(error) => {
+                        state.summary = Some(format!("Preview failed: {}", error));
+                    }
+                }
+                Task::none()
+            }
+            Message::BucketDeleteConfirmNameChanged(value) => {
+                if let Some(state) = self.bucket_delete.as_mut() {
+                    state.confirm_name = value;
+                }
+                Task::none()
+            }
+            Message::ConfirmDeleteBucket => self.cmd_process_next_bucket_delete_step(),
+            Message::BucketDeleteStepFinished(result) => {
+                let Some(state) = self.bucket_delete.as_mut() else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(BucketDeleteStepResult::ObjectDeleted(label)) => {
+                        state.deleted_objects += 1;
+                        state.next_index += 1;
+                        state.summary = Some(format!(
+                            "Deleting objects: {}/{} complete. Last: {}",
+                            state.deleted_objects, state.total_objects, label
+                        ));
+                        self.cmd_process_next_bucket_delete_step()
+                    }
+                    Ok(BucketDeleteStepResult::BucketDeleted(bucket)) => {
+                        self.bucket_delete = None;
+                        if self.selected_bucket.as_deref() == Some(&bucket) {
+                            self.selected_bucket = None;
+                            self.selection = Selection::None;
+                            self.current_prefix.clear();
+                            self.objects = None;
+                            self.detail = None;
+                            self.clear_object_admin_state();
+                        }
+                        self.loading_buckets = true;
+                        Task::batch(vec![self.cmd_fetch_buckets(), Task::none()])
+                    }
+                    Err(error) => {
+                        state.deleting = false;
+                        state.summary = Some(format!(
+                            "Delete stopped after {} of {} objects: {}",
+                            state.deleted_objects, state.total_objects, error
+                        ));
+                        self.error = Some(format!("Delete bucket failed: {}", error));
+                        if self.selected_bucket.as_deref() == Some(&state.bucket) {
+                            self.loading_objects = true;
+                            Task::batch(vec![self.cmd_fetch_buckets(), self.cmd_fetch_objects()])
+                        } else {
+                            self.loading_buckets = true;
+                            self.cmd_fetch_buckets()
+                        }
+                    }
+                }
             }
             Message::SetTheme(t) => {
                 self.theme = t;
@@ -824,6 +1006,7 @@ impl App {
             }
             Message::NewBucketNameChanged(val) => {
                 self.new_bucket_name = val;
+                self.create_bucket_modal_error = None;
                 Task::none()
             }
             Message::DismissError => {
@@ -1259,7 +1442,10 @@ impl App {
 
         let mut main_row = row![container(sidebar).width(40), content,];
 
-        if matches!(self.selection, Selection::Object { .. }) {
+        if matches!(
+            self.selection,
+            Selection::Object { .. } | Selection::Bucket(_)
+        ) {
             main_row = main_row.push(container(self.detail_view()).width(280));
         }
 
@@ -1306,10 +1492,20 @@ impl App {
         } else {
             base
         };
-        if self.transfer.is_some() {
-            stack![with_heal, self.transfer_modal()].into()
+        let with_delete = if self.bucket_delete.is_some() {
+            stack![with_heal, self.bucket_delete_modal()].into()
         } else {
             with_heal
+        };
+        let with_create = if self.create_bucket_modal_open {
+            stack![with_delete, self.create_bucket_modal()].into()
+        } else {
+            with_delete
+        };
+        if self.transfer.is_some() {
+            stack![with_create, self.transfer_modal()].into()
+        } else {
+            with_create
         }
     }
 
@@ -1406,6 +1602,14 @@ impl App {
         match &self.selection {
             Selection::Object { bucket, key } => Some((bucket.clone(), key.clone())),
             _ => None,
+        }
+    }
+
+    fn current_selected_bucket(&self) -> Option<String> {
+        match &self.selection {
+            Selection::Bucket(bucket) => Some(bucket.clone()),
+            Selection::Object { bucket, .. } => Some(bucket.clone()),
+            Selection::None => self.selected_bucket.clone(),
         }
     }
 
@@ -1623,6 +1827,49 @@ impl App {
         }
     }
 
+    pub(crate) fn bucket_delete_can_start(&self) -> bool {
+        let Some(state) = &self.bucket_delete else {
+            return false;
+        };
+        !state.preview_loading
+            && !state.deleting
+            && state.confirm_name == state.bucket
+            && !state.bucket.is_empty()
+    }
+
+    fn cmd_process_next_bucket_delete_step(&mut self) -> Task<Message> {
+        let Some(state) = self.bucket_delete.as_mut() else {
+            return Task::none();
+        };
+        if state.preview_loading || state.confirm_name != state.bucket {
+            return Task::none();
+        }
+        state.deleting = true;
+
+        if state.next_index < state.object_keys.len() {
+            let client = self.client.clone();
+            let bucket = state.bucket.clone();
+            let key = state.object_keys[state.next_index].clone();
+            return Task::perform(
+                async move {
+                    client.delete_object(&bucket, &key).await?;
+                    Ok(BucketDeleteStepResult::ObjectDeleted(key))
+                },
+                Message::BucketDeleteStepFinished,
+            );
+        }
+
+        let client = self.client.clone();
+        let bucket = state.bucket.clone();
+        Task::perform(
+            async move {
+                client.delete_bucket(&bucket).await?;
+                Ok(BucketDeleteStepResult::BucketDeleted(bucket))
+            },
+            Message::BucketDeleteStepFinished,
+        )
+    }
+
     fn make_client_for_connection(&self, connection_id: &str) -> Result<Arc<S3Client>, String> {
         if connection_id == CURRENT_CONNECTION_ID {
             return Ok(self.client.clone());
@@ -1831,8 +2078,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        App, CURRENT_CONNECTION_ID, Message, Selection, StartupOptions, TransferMode,
-        TransferState, prepare_import_items,
+        App, BucketDeleteState, CURRENT_CONNECTION_ID, Message, Selection, StartupOptions,
+        TransferMode, TransferState, prepare_import_items,
     };
     use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
 
@@ -1975,6 +2222,47 @@ mod tests {
         });
 
         assert!(!app.transfer_can_start());
+    }
+
+    #[test]
+    fn create_bucket_success_selects_new_bucket() {
+        let (mut app, _) = App::new(empty_startup());
+        app.create_bucket_modal_open = true;
+
+        let _ = app.update(Message::CreateBucketDone {
+            bucket: "bucket-a".to_string(),
+            result: Ok(()),
+        });
+
+        assert!(!app.create_bucket_modal_open);
+        assert_eq!(app.selected_bucket.as_deref(), Some("bucket-a"));
+        assert_eq!(app.selection, Selection::Bucket("bucket-a".to_string()));
+        assert!(app.loading_buckets);
+        assert!(app.loading_objects);
+    }
+
+    #[test]
+    fn bucket_delete_requires_exact_name() {
+        let (mut app, _) = App::new(empty_startup());
+        app.bucket_delete = Some(BucketDeleteState {
+            bucket: "bucket-a".to_string(),
+            confirm_name: "bucket".to_string(),
+            preview_loading: false,
+            object_keys: vec!["one".to_string()],
+            total_objects: 1,
+            deleted_objects: 0,
+            next_index: 0,
+            deleting: false,
+            summary: None,
+        });
+
+        assert!(!app.bucket_delete_can_start());
+
+        let _ = app.update(Message::BucketDeleteConfirmNameChanged(
+            "bucket-a".to_string(),
+        ));
+
+        assert!(app.bucket_delete_can_start());
     }
 
     #[test]

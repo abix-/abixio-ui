@@ -13,6 +13,28 @@ impl App {
                 col = col.push(text(name).size(16));
                 col = col.push(text("Bucket").size(11));
                 col = col.push(iced::widget::rule::horizontal(1));
+                col = col.push(section("Overview"));
+                col = col.push(meta_row("Bucket", name));
+                col = col.push(meta_row("Prefix", &self.current_prefix));
+
+                if let Some(Ok(objects)) = &self.objects {
+                    col = col.push(section("Contents"));
+                    col = col.push(meta_row(
+                        "Folders",
+                        &objects.common_prefixes.len().to_string(),
+                    ));
+                    col = col.push(meta_row("Objects", &objects.objects.len().to_string()));
+                }
+
+                col = col.push(section("Actions"));
+                col = col.push(
+                    row![
+                        button(text("Refresh").size(11)).on_press(Message::Refresh),
+                        button(text("Delete Bucket").size(11))
+                            .on_press(Message::OpenDeleteBucketModal),
+                    ]
+                    .spacing(4),
+                );
             }
             Selection::Object { bucket, key } => {
                 let short = key.rsplit('/').next().unwrap_or(key);
@@ -164,6 +186,91 @@ impl App {
         .height(Length::Fill)
         .into()
     }
+
+    pub fn create_bucket_modal(&self) -> Element<'_, Message> {
+        let create_button = if self.new_bucket_name.trim().is_empty() {
+            button(text("Create Bucket").size(11))
+        } else {
+            button(text("Create Bucket").size(11)).on_press(Message::CreateBucket)
+        };
+
+        let mut body = column![
+            text("Create Bucket").size(16),
+            text("Create a new bucket on the current connection.").size(11),
+            text_input_row(
+                "Bucket name",
+                &self.new_bucket_name,
+                Message::NewBucketNameChanged
+            ),
+        ]
+        .spacing(8)
+        .padding(12);
+
+        if let Some(error) = &self.create_bucket_modal_error {
+            body = body.push(text(error).size(11));
+        }
+
+        body = body.push(
+            row![
+                button(text("Cancel").size(11)).on_press(Message::CloseCreateBucketModal),
+                create_button,
+            ]
+            .spacing(8),
+        );
+
+        modal_card(body, 360)
+    }
+
+    pub fn bucket_delete_modal(&self) -> Element<'_, Message> {
+        let Some(state) = &self.bucket_delete else {
+            return container(text("")).width(Length::Shrink).into();
+        };
+
+        let delete_button = if self.bucket_delete_can_start() {
+            button(text("Delete Bucket").size(11)).on_press(Message::ConfirmDeleteBucket)
+        } else {
+            button(text("Delete Bucket").size(11))
+        };
+
+        let mut body = column![
+            text("Delete Bucket").size(16),
+            text("This will delete the bucket and all objects in it.").size(11),
+            meta_row("Bucket", &state.bucket),
+        ]
+        .spacing(8)
+        .padding(12);
+
+        if state.preview_loading {
+            body = body.push(text("Loading bucket contents...").size(11));
+        } else {
+            body = body.push(meta_row("Objects", &state.total_objects.to_string()));
+            body = body.push(meta_row("Deleted", &state.deleted_objects.to_string()));
+        }
+
+        if let Some(summary) = &state.summary {
+            body = body.push(text(summary).size(11));
+        }
+
+        body = body.push(text("Type the bucket name to enable deletion.").size(11));
+        body = body.push(text_input_row(
+            "Bucket name",
+            &state.confirm_name,
+            Message::BucketDeleteConfirmNameChanged,
+        ));
+        body = body.push(
+            row![
+                if state.deleting {
+                    button(text("Cancel").size(11))
+                } else {
+                    button(text("Cancel").size(11)).on_press(Message::CloseDeleteBucketModal)
+                },
+                delete_button,
+            ]
+            .spacing(8),
+        );
+
+        modal_card(body, 420)
+    }
 }
 
 fn section(label: &str) -> Element<'static, Message> {
@@ -186,6 +293,38 @@ fn meta_row(label: &str, value: &str) -> Element<'static, Message> {
             .width(Length::FillPortion(3)),
     ]
     .spacing(4)
+    .into()
+}
+
+fn text_input_row(
+    placeholder: &str,
+    value: &str,
+    on_input: fn(String) -> Message,
+) -> Element<'static, Message> {
+    iced::widget::text_input(placeholder, value)
+        .on_input(on_input)
+        .size(11)
+        .into()
+}
+
+fn modal_card<'a>(content: iced::widget::Column<'a, Message>, width: u16) -> Element<'a, Message> {
+    let card = container(content).width(width as u32);
+
+    container(
+        row![
+            space::horizontal().width(Length::Fill),
+            column![
+                space::vertical().height(Length::Fill),
+                card,
+                space::vertical().height(Length::Fill),
+            ],
+            space::horizontal().width(Length::Fill),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
     .into()
 }
 

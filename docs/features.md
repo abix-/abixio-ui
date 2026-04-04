@@ -18,7 +18,7 @@ MinIO.
 | AbixIO-specific admin features | Disks, healing, shard inspection, manual heal | No direct AbixIO equivalent | n/a | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. |
 | Copy, import, and export workflows | Single-object copy, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` workflows | 6/10 | Partial | Useful copy coverage now exists, but there is still no move, rename, multi-source copy, or advanced `mc cp` option surface. |
 | Search, find, and filtering | Prefix navigation only | `mc find` | 3/10 | Partial | Prefix browsing exists, but there is no search or filter query UI. |
-| Bucket create and delete | Create bucket only | `mc mb`, `mc rb` | 4/10 | Partial | Bucket delete is still missing. |
+| Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
 | Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
 | Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
 | Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
@@ -40,7 +40,8 @@ MinIO.
 | Core S3 | Connect to S3-compatible endpoints over HTTP or HTTPS | Yes | 8/10 | Works with saved connections or direct CLI launch. |
 | Core S3 | Start from CLI endpoint and credential flags | Yes | 6/10 | Supports `--endpoint`, `--access-key`, and `--secret-key`. |
 | Core S3 | List buckets | Yes | 8/10 | Live server read. |
-| Core S3 | Create buckets | Yes | 4/10 | Bucket delete is still missing. |
+| Core S3 | Create buckets | Yes | 7/10 | Create uses a dedicated modal on the current connection. |
+| Core S3 | Delete buckets | Yes | 7/10 | Recursive delete is implemented with typed-name confirmation. |
 | Core S3 | Browse objects | Yes | 7/10 | Prefix navigation and breadcrumbs are implemented. |
 | Core S3 | Upload files | Yes | 8/10 | Uses a native file picker. |
 | Core S3 | Download files | Yes | 8/10 | Uses a native save dialog. |
@@ -67,7 +68,7 @@ MinIO.
 | UI | Auto-run smoke tests with JSON report | Yes | 2/10 | `--run-tests` writes a report and keeps the app open. This helps verification, not daily object operations. |
 | Gaps | Move and rename | No | 0/10 | Not implemented yet. |
 | Gaps | Search and find | No | 3/10 | No search UI beyond prefix navigation. |
-| Gaps | Bucket delete | No | 4/10 | Not implemented yet. |
+| Gaps | Bucket delete | Yes | 7/10 | Implemented as recursive delete with typed-name confirmation. |
 | Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
 | Gaps | Versioning and recovery | No | 0/10 | No version browser, restore, or undo flow. |
@@ -85,7 +86,6 @@ MinIO.
 
 - Move and rename.
 - Search and find queries beyond prefix navigation.
-- Bucket deletion.
 - Presigned sharing links.
 - Recursive sync, mirror, and diff workflows.
 - Versioning, undo, and recovery tooling.
@@ -121,8 +121,7 @@ MinIO.
   connection anonymous" flow yet.
 - Direct CLI connections always use region `us-east-1`. If you need another
   region, use a saved connection profile.
-- The Testing tab creates a timestamped bucket and removes test objects, but it
-  does not delete the bucket itself because the app does not yet implement
-  bucket deletion.
+- The Testing tab now deletes both its empty and non-empty test buckets during
+  cleanup.
 - If a feature is not listed under `Available Now In abixio-ui`, it should not
   be described as shipping.

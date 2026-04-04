@@ -156,7 +156,8 @@ curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-
 4. Review the PASS/FAIL table
 
 For AbixIO endpoints the Testing tab also checks the admin status, disks,
-healing, and object-inspection APIs.
+healing, and object-inspection APIs. It also deletes its test buckets during
+cleanup now that bucket delete exists in the app.
 
 ## In-app AbixIO object admin
 

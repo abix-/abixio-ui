@@ -6,7 +6,7 @@ app exposes the current Disks and Healing views.
 
 ## Features
 
-- **S3 object browser.** Browse buckets, navigate prefixes, and upload, download, or delete objects.
+- **S3 object browser.** Browse buckets, navigate prefixes, create and delete buckets, and upload, download, copy, or delete objects.
 - **Multi-server connections.** Save, edit, test, and switch between endpoints.
 - **AWS Sig V4 auth.** Connect to AWS, MinIO, AbixIO, Backblaze, or any authenticated endpoint.
 - **OS keychain.** Access keys and secret keys live in Windows Credential Manager, macOS Keychain, or Linux secret-service. Secrets do not go on disk.
@@ -85,12 +85,14 @@ cargo build --release    # release binary goes to Cargo's target dir
 - S3 client via rust-s3 with AWS Sig V4 signing
 - Connection manager: add, edit, remove, test, switch
 - OS keychain credential storage (both access key + secret key)
-- Bucket list with create bucket
+- Bucket list with create bucket modal and recursive bucket delete
 - Object browser with breadcrumb navigation and prefix drilling
+- Bucket detail panel with bucket overview and recursive delete action
 - Object detail panel: full metadata from HEAD request
 - AbixIO object detail section: erasure summary, shard status, inspect refresh, confirmed manual heal
 - Upload/download via native file dialogs
-- Delete with error display
+- Object delete with error display
+- Single-object copy, recursive import, and recursive export
 - AbixIO auto-detection on connect
 - Disk health dashboard (AbixIO only)
 - Healing status monitor (AbixIO only)
@@ -103,13 +105,13 @@ cargo build --release    # release binary goes to Cargo's target dir
 ## Not yet implemented
 
 - Auto-refresh timer for admin views
-- Delete bucket action
 - Persisted UI preferences (theme, window size, last active connection)
 - Success toasts and delete confirmation dialogs for object deletion
 - Custom theme colors (using stock iced Dark/Light for now)
 - Multipart upload progress
 
-See [docs/features.md](docs/features.md) for the current feature set and MinIO
+See [docs/features.md](docs/features.md) for the current feature set, bucket
+lifecycle behavior, and MinIO
 Client `mc` parity view, plus [docs/](docs/) for architecture, credential
 storage, data authority, and more.
 

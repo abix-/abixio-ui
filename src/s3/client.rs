@@ -123,6 +123,17 @@ impl S3Client {
         Ok(())
     }
 
+    pub async fn delete_bucket(&self, bucket: &str) -> Result<(), String> {
+        let b = self.bucket(bucket)?;
+        let code = b.delete().await.map_err(|e| e.to_string())?;
+
+        if (200..300).contains(&code) {
+            Ok(())
+        } else {
+            Err(format!("delete bucket: {}", code))
+        }
+    }
+
     pub async fn put_object(
         &self,
         bucket: &str,

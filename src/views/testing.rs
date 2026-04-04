@@ -158,6 +158,28 @@ pub async fn run_e2e_tests(
         Err(e) => t.check("list buckets", false, e),
     }
 
+    let empty_bucket = format!("{}-empty", bucket);
+    let r = client.create_bucket(&empty_bucket).await;
+    t.check(
+        "create empty bucket",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+    let r = client.delete_bucket(&empty_bucket).await;
+    t.check(
+        "delete empty bucket",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+    let r = client.list_buckets().await;
+    match &r {
+        Ok(buckets) => {
+            let missing = buckets.iter().all(|b| b.name != empty_bucket);
+            t.check("empty bucket removed from list", missing, "");
+        }
+        Err(e) => t.check("list buckets after empty delete", false, e),
+    }
+
     // put object
     let r = client
         .put_object(&bucket, "hello.txt", b"hello world".to_vec(), "text/plain")
@@ -594,9 +616,20 @@ pub async fn run_e2e_tests(
     }
     let _ = tokio::fs::remove_dir_all(import_root).await;
     let _ = tokio::fs::remove_dir_all(export_root).await;
-    // delete bucket -- use reqwest directly since S3Client doesn't expose delete_bucket
-    // we'll just leave it; the test bucket name is timestamped so no collision
-    // TODO: add delete_bucket to S3Client if cleanup matters
+    let r = client.delete_bucket(&bucket).await;
+    t.check(
+        "delete non-empty bucket",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+    let r = client.list_buckets().await;
+    match &r {
+        Ok(buckets) => {
+            let missing = buckets.iter().all(|b| b.name != bucket);
+            t.check("non-empty bucket removed from list", missing, "");
+        }
+        Err(e) => t.check("list buckets after delete", false, e),
+    }
 
     t.results
 }

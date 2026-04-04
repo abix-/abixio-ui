@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Element, Length};
 
 use crate::app::{App, Message};
@@ -46,13 +46,9 @@ impl App {
 
         col = col.push(iced::widget::rule::horizontal(1));
         col = col.push(
-            row![
-                text_input("new bucket", &self.new_bucket_name)
-                    .on_input(Message::NewBucketNameChanged)
-                    .size(11),
-                button(text("+").size(12)).on_press(Message::CreateBucket),
-            ]
-            .spacing(4),
+            button(text("New Bucket").size(11))
+                .width(Length::Fill)
+                .on_press(Message::OpenCreateBucketModal),
         );
 
         scrollable(col).height(Length::Fill).into()

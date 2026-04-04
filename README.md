@@ -1,76 +1,100 @@
 # abixio-ui
 
-**Status: early development -- compiles, basic S3 browsing works**
+Native desktop S3 manager and AbixIO server admin. Browse, upload, download, and manage objects on any S3-compatible endpoint. Full server management when connected to AbixIO.
 
-Native desktop S3 manager. Browse, upload, download, and manage objects on any S3-compatible endpoint.
-
-## Planned features
+## Features
 
 - **S3 object browser** -- browse buckets, navigate prefixes, upload/download/delete
-- **Multi-server** -- connect to multiple endpoints (AWS, MinIO, AbixIO, Backblaze, etc.)
-- **Disk health** -- view disk status, space usage, healing progress (AbixIO servers only)
-- **Object inspector** -- see shard distribution, checksums, erasure config (AbixIO servers only)
-- **Config management** -- view/edit server configuration (AbixIO servers only)
+- **Multi-server connections** -- save, edit, test, and switch between endpoints
+- **AWS Sig V4 auth** -- connect to AWS, MinIO, AbixIO, Backblaze, or any authenticated endpoint
+- **OS keychain** -- access keys and secret keys stored in Windows Credential Manager / macOS Keychain / Linux secret-service. Zero secrets on disk
+- **AbixIO admin** -- when connected to an AbixIO server, the UI auto-detects it and enables:
+  - **Disk health dashboard** -- per-disk status, space usage, bucket/object counts
+  - **Healing monitor** -- MRF queue depth, integrity scanner stats, manual heal trigger
+  - **Object shard inspector** -- per-shard status, checksums, erasure distribution
 
 ## How it works
 
-abixio-ui is a standalone native desktop app built with [iced](https://iced.rs) 0.14. It connects to any S3-compatible endpoint using the [rust-s3](https://github.com/durch/rust-s3) library with full AWS Signature V4 authentication support.
+Built with [iced](https://iced.rs) 0.14 (reactive rendering, Elm architecture). Connects via [rust-s3](https://github.com/durch/rust-s3) for S3 operations with full Sig V4 signing.
 
-When connected to an [AbixIO](https://github.com/abix-/abixio) server, additional management features (disk health, shard inspection, config) are automatically enabled.
-
-iced 0.14 uses reactive rendering -- widgets only redraw when their state actually changes. Mouse movement over non-interactive areas causes zero redraws.
+When connected to an [AbixIO](https://github.com/abix-/abixio) server, the UI probes `/_admin/status`. If it responds with `"server": "abixio"`, admin tabs (Disks, Healing) appear in the sidebar. Non-AbixIO S3 endpoints work fine -- admin tabs are simply hidden.
 
 ### Data authority
 
 - **S3 endpoint** is the single source of truth for all bucket/object data
-- **OS keychain** stores access keys and secret keys (Windows Credential Manager / macOS Keychain / Linux secret-service)
+- **OS keychain** stores access keys and secret keys (encrypted by OS)
 - **Local config** (`~/.abixio-ui/settings.json`) stores connection profiles (name, endpoint, region -- no secrets)
 - No local caching -- every navigation action fetches live from the server
 
 ## Usage
 
 ```bash
-# connect to local AbixIO (no auth)
+# launch with connection manager (recommended)
+abixio-ui
+
+# connect directly to a local AbixIO server
 abixio-ui --endpoint http://localhost:10000
 
-# connect to any S3 endpoint with credentials
+# connect with credentials
 abixio-ui --endpoint https://s3.us-west-2.amazonaws.com --access-key AKIA... --secret-key wJalr...
+```
 
-# launch without args to manage connections in the UI
-abixio-ui
+## Quick test
+
+```bash
+# start AbixIO server (4 disks, 2+2 erasure, no auth)
+mkdir -p /tmp/abixio/{d1,d2,d3,d4}
+abixio --listen 0.0.0.0:10000 \
+  --disks /tmp/abixio/d1,/tmp/abixio/d2,/tmp/abixio/d3,/tmp/abixio/d4 \
+  --data 2 --parity 2 --no-auth
+
+# launch UI
+abixio-ui --endpoint http://localhost:10000
+
+# create a bucket and upload via curl
+curl -X PUT http://localhost:10000/testbucket
+curl -X PUT -d "hello world" http://localhost:10000/testbucket/hello.txt
+
+# verify admin API
+curl http://localhost:10000/_admin/status
+curl http://localhost:10000/_admin/disks
+curl "http://localhost:10000/_admin/object?bucket=testbucket&key=hello.txt"
 ```
 
 ## Build
 
 ```bash
-cargo build --release
+cargo build --release    # produces target/release/abixio-ui (~18 MB)
 ```
 
-## What works / what doesn't
+## What works
 
-**Done:**
 - Three-panel layout: icon sidebar + center content + right detail panel
-- Dark / Light theme switching in Settings
-- S3 client via [rust-s3](https://github.com/durch/rust-s3) with AWS Sig V4 signing
-- **Connection manager** -- add, edit, remove, test, switch connections from the UI
-- **OS keychain storage** -- both access keys and secret keys stored in OS keychain, never on disk
-- Bucket list sidebar with create bucket
+- Dark / Light theme switching
+- S3 client via rust-s3 with AWS Sig V4 signing
+- Connection manager: add, edit, remove, test, switch
+- OS keychain credential storage (both access key + secret key)
+- Bucket list with create bucket
 - Object browser with breadcrumb navigation and prefix drilling
-- Object detail panel: full metadata from HEAD request (size, type, etag, headers)
-- Upload via native file dialog
-- Download via native save dialog
+- Object detail panel: full metadata from HEAD request
+- Upload/download via native file dialogs
 - Delete with error display
-- ESC keyboard shortcut to close detail panel
-- Error bar with dismiss for failed operations
-- Settings view: theme, connection info, performance stats, about
-- Performance stats: message count, frame time tracking (5m sliding window)
-- CLI args: `--endpoint`, `--access-key`, `--secret-key` for scripted use
+- AbixIO auto-detection on connect
+- Disk health dashboard (AbixIO only)
+- Healing status monitor (AbixIO only)
+- Admin API client with Sig V4 signing for `/_admin/*` endpoints
+- ESC to close detail panel, error bar with dismiss
+- Performance stats (5m sliding window)
+- CLI args: `--endpoint`, `--access-key`, `--secret-key`
 
-**Not yet implemented:**
-- AbixIO-specific features (disk health, object inspector, config)
+## Not yet implemented
+
+- Object shard inspector in detail panel
+- Auto-refresh timer for admin views
 - Custom theme colors (using stock iced Dark/Light for now)
+- Multipart upload progress
 
-See [docs/](docs/) for architecture, data authority, performance, and iced standards.
+See [docs/](docs/) for architecture, credential storage, data authority, and more.
 
 ## License
 

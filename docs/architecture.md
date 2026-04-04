@@ -9,9 +9,13 @@ AbixIO server, additional management features are enabled automatically.
 ```
 +-------------------+     HTTP/S3      +-------------------+
 |   abixio-ui       | <=============> |  S3 endpoint      |
-|   (desktop app)   |                  |  (any S3 server)  |
+|   (desktop app)   |   /_admin/*     |  (any S3 server)  |
 +-------------------+                  +-------------------+
 ```
+
+When connected to an AbixIO server, the UI also communicates via `/_admin/*`
+JSON endpoints for disk health, healing status, and object shard inspection.
+These endpoints are auto-detected on connect via `/_admin/status`.
 
 ## Components
 
@@ -26,11 +30,17 @@ src/
   s3/
     mod.rs
     client.rs         # thin wrapper around rust-s3 Bucket API
+  abixio/
+    mod.rs
+    client.rs         # admin API client (reqwest + Sig V4 signing)
+    types.rs          # JSON response types for /_admin/* endpoints
   views/
     mod.rs
-    sidebar.rs        # left icon rail navigation
+    sidebar.rs        # left icon rail (shows D/H tabs for AbixIO)
     buckets.rs        # bucket list + browse_view (bucket panel + object panel)
-    connections.rs    # connection + credential manager UI
+    connections.rs    # connection manager UI
+    disks.rs          # disk health dashboard (AbixIO only)
+    healing.rs        # healing status + scanner stats (AbixIO only)
     objects.rs        # object table with prefix navigation
     detail.rs         # right context panel (object/bucket metadata)
     settings.rs       # settings view (theme, perf stats, about)
@@ -131,10 +141,22 @@ See [docs/credentials.md](credentials.md) for full details.
 
 ## AbixIO detection
 
-On connect, the UI will probe `GET /_abixio/status` (not yet implemented):
+On connect, the UI probes `GET /_admin/status`:
 
-- 200 + JSON: AbixIO server, enable management tabs
-- 404 or error: generic S3, show S3 features only
+- 200 + JSON with `"server": "abixio"`: set `is_abixio = true`, show D (Disks) and H (Healing) tabs in sidebar, auto-fetch disk + heal data
+- 404 or error: generic S3 server, admin tabs hidden
+
+The admin client (`src/abixio/client.rs`) signs requests with Sig V4 using the same credentials as S3.
+
+### Admin API endpoints (served by AbixIO server)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/_admin/status` | GET | Server identity, version, uptime, erasure config |
+| `/_admin/disks` | GET | Per-disk status, space, bucket/object counts |
+| `/_admin/heal` | GET | MRF queue depth, scanner stats |
+| `/_admin/heal?bucket=X&key=Y` | POST | Trigger manual heal for one object |
+| `/_admin/object?bucket=X&key=Y` | GET | Per-shard status for one object |
 
 ## Layout
 

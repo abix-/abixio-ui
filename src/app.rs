@@ -132,7 +132,14 @@ pub enum Message {
     OpenBulkDeleteModal,
     CloseBulkDeleteModal,
     ConfirmBulkDelete,
-    BulkDeleteStepFinished(Result<String, String>),
+    BulkDeleteBatchFinished(Result<usize, String>),
+
+    // prefix delete
+    OpenPrefixDeleteModal(String),
+    ClosePrefixDeleteModal,
+    PrefixDeleteListLoaded(Result<Vec<String>, String>),
+    ConfirmPrefixDelete,
+    PrefixDeleteBatchFinished(Result<usize, String>),
 
     // testing
     RunTests,
@@ -260,6 +267,18 @@ pub struct BulkDeleteState {
     pub summary: Option<String>,
 }
 
+pub struct PrefixDeleteState {
+    pub bucket: String,
+    pub prefix: String,
+    pub keys: Vec<String>,
+    pub loading: bool,
+    pub total: usize,
+    pub deleted: usize,
+    pub next_index: usize,
+    pub deleting: bool,
+    pub summary: Option<String>,
+}
+
 // -- state --
 
 pub struct App {
@@ -322,6 +341,7 @@ pub struct App {
     // multi-select / bulk delete
     pub selected_keys: HashSet<String>,
     pub bulk_delete: Option<BulkDeleteState>,
+    pub prefix_delete: Option<PrefixDeleteState>,
 
     // testing
     pub test_results: Vec<TestResult>,
@@ -420,6 +440,7 @@ impl App {
             finding: false,
             selected_keys: HashSet::new(),
             bulk_delete: None,
+            prefix_delete: None,
             test_results: Vec::new(),
             test_running: false,
             test_progress: String::new(),
@@ -698,17 +719,16 @@ impl App {
             Message::ConfirmBulkDelete => {
                 self.cmd_process_next_bulk_delete_step()
             }
-            Message::BulkDeleteStepFinished(result) => {
+            Message::BulkDeleteBatchFinished(result) => {
                 let Some(state) = self.bulk_delete.as_mut() else {
                     return Task::none();
                 };
                 match result {
-                    Ok(key) => {
-                        state.deleted += 1;
-                        state.next_index += 1;
+                    Ok(count) => {
+                        state.deleted += count;
                         state.summary = Some(format!(
-                            "Deleting: {}/{} done. Last: {}",
-                            state.deleted, state.total, key
+                            "Deleting: {}/{} done",
+                            state.deleted, state.total
                         ));
                         self.cmd_process_next_bulk_delete_step()
                     }
@@ -719,6 +739,78 @@ impl App {
                             state.deleted, state.total, error
                         ));
                         self.error = Some(format!("Bulk delete failed: {}", error));
+                        Task::none()
+                    }
+                }
+            }
+
+            // prefix delete
+            Message::OpenPrefixDeleteModal(prefix) => {
+                let bucket = match &self.selected_bucket {
+                    Some(b) => b.clone(),
+                    None => return Task::none(),
+                };
+                self.prefix_delete = Some(PrefixDeleteState {
+                    bucket: bucket.clone(),
+                    prefix: prefix.clone(),
+                    keys: Vec::new(),
+                    loading: true,
+                    total: 0,
+                    deleted: 0,
+                    next_index: 0,
+                    deleting: false,
+                    summary: None,
+                });
+                let client = self.client.clone();
+                Task::perform(
+                    async move {
+                        let result = client.list_objects_recursive(&bucket, &prefix).await?;
+                        Ok(result.objects.into_iter().map(|o| o.key).collect())
+                    },
+                    Message::PrefixDeleteListLoaded,
+                )
+            }
+            Message::ClosePrefixDeleteModal => {
+                self.prefix_delete = None;
+                Task::none()
+            }
+            Message::PrefixDeleteListLoaded(result) => {
+                let Some(state) = self.prefix_delete.as_mut() else {
+                    return Task::none();
+                };
+                state.loading = false;
+                match result {
+                    Ok(keys) => {
+                        state.total = keys.len();
+                        state.keys = keys;
+                    }
+                    Err(e) => {
+                        state.summary = Some(format!("Failed to list: {}", e));
+                    }
+                }
+                Task::none()
+            }
+            Message::ConfirmPrefixDelete => self.cmd_process_next_prefix_delete_batch(),
+            Message::PrefixDeleteBatchFinished(result) => {
+                let Some(state) = self.prefix_delete.as_mut() else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(count) => {
+                        state.deleted += count;
+                        state.summary = Some(format!(
+                            "Deleting: {}/{} done",
+                            state.deleted, state.total
+                        ));
+                        self.cmd_process_next_prefix_delete_batch()
+                    }
+                    Err(error) => {
+                        state.deleting = false;
+                        state.summary = Some(format!(
+                            "Stopped after {}/{}: {}",
+                            state.deleted, state.total, error
+                        ));
+                        self.error = Some(format!("Prefix delete failed: {}", error));
                         Task::none()
                     }
                 }
@@ -1757,10 +1849,15 @@ impl App {
         } else {
             with_create
         };
-        if self.bulk_delete.is_some() {
+        let with_bulk = if self.bulk_delete.is_some() {
             stack![with_transfer, self.bulk_delete_modal()].into()
         } else {
             with_transfer
+        };
+        if self.prefix_delete.is_some() {
+            stack![with_bulk, self.prefix_delete_modal()].into()
+        } else {
+            with_bulk
         }
     }
 
@@ -2137,13 +2234,16 @@ impl App {
         if state.next_index < state.keys.len() {
             let client = self.client.clone();
             let bucket = state.bucket.clone();
-            let key = state.keys[state.next_index].clone();
+            let end = (state.next_index + 1000).min(state.keys.len());
+            let batch: Vec<String> = state.keys[state.next_index..end].to_vec();
+            let batch_size = batch.len();
+            state.next_index = end;
             return Task::perform(
                 async move {
-                    client.delete_object(&bucket, &key).await?;
-                    Ok(key)
+                    let failed = client.delete_objects(&bucket, &batch).await?;
+                    Ok(batch_size - failed.len())
                 },
-                Message::BulkDeleteStepFinished,
+                Message::BulkDeleteBatchFinished,
             );
         }
 
@@ -2155,6 +2255,40 @@ impl App {
         self.loading_objects = true;
         self.error = None;
         let summary = format!("Deleted {} of {} objects", deleted, total);
+        self.error = Some(summary);
+        self.cmd_fetch_objects()
+    }
+
+    fn cmd_process_next_prefix_delete_batch(&mut self) -> Task<Message> {
+        let Some(state) = self.prefix_delete.as_mut() else {
+            return Task::none();
+        };
+        state.deleting = true;
+
+        if state.next_index < state.keys.len() {
+            let client = self.client.clone();
+            let bucket = state.bucket.clone();
+            let end = (state.next_index + 1000).min(state.keys.len());
+            let batch: Vec<String> = state.keys[state.next_index..end].to_vec();
+            let batch_size = batch.len();
+            state.next_index = end;
+            return Task::perform(
+                async move {
+                    let failed = client.delete_objects(&bucket, &batch).await?;
+                    Ok(batch_size - failed.len())
+                },
+                Message::PrefixDeleteBatchFinished,
+            );
+        }
+
+        // all done
+        let deleted = state.deleted;
+        let total = state.total;
+        self.prefix_delete = None;
+        self.selected_keys.clear();
+        self.loading_objects = true;
+        self.error = None;
+        let summary = format!("Deleted {} of {} objects under prefix", deleted, total);
         self.error = Some(summary);
         self.cmd_fetch_objects()
     }

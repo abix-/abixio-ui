@@ -325,6 +325,63 @@ impl App {
 
         modal_card(body, 420)
     }
+
+    pub fn prefix_delete_modal(&self) -> Element<'_, Message> {
+        let Some(state) = &self.prefix_delete else {
+            return container(text("")).width(Length::Shrink).into();
+        };
+
+        let mut body = column![
+            text("Delete Prefix").size(16),
+            meta_row("Bucket", &state.bucket),
+            meta_row("Prefix", &state.prefix),
+        ]
+        .spacing(8)
+        .padding(12);
+
+        if state.loading {
+            body = body.push(text("Listing objects...").size(11));
+        } else {
+            body = body.push(meta_row("Objects", &state.total.to_string()));
+
+            // show first 10 keys
+            let show_count = state.keys.len().min(10);
+            for key in &state.keys[..show_count] {
+                body = body.push(text(format!("  {}", key)).size(10));
+            }
+            if state.keys.len() > 10 {
+                body = body.push(
+                    text(format!("  and {} more...", state.keys.len() - 10)).size(10),
+                );
+            }
+        }
+
+        if let Some(summary) = &state.summary {
+            body = body.push(text(summary).size(11));
+        }
+
+        let delete_button = if !state.loading && !state.deleting && !state.keys.is_empty() {
+            button(text("Delete").size(11)).on_press(Message::ConfirmPrefixDelete)
+        } else if state.deleting {
+            button(text("Deleting...").size(11))
+        } else {
+            button(text("Delete").size(11))
+        };
+
+        body = body.push(
+            row![
+                if state.deleting {
+                    button(text("Cancel").size(11))
+                } else {
+                    button(text("Cancel").size(11)).on_press(Message::ClosePrefixDeleteModal)
+                },
+                delete_button,
+            ]
+            .spacing(8),
+        );
+
+        modal_card(body, 420)
+    }
 }
 
 fn section(label: &str) -> Element<'static, Message> {

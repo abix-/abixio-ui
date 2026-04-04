@@ -177,11 +177,17 @@ impl App {
                 }
                 folder_count += 1;
                 let prefix = cp.clone();
+                let prefix_del = cp.clone();
                 content = content.push(
-                    button(text(format!("  {}", display)).size(12))
-                        .width(Length::Fill)
-                        .style(button::text)
-                        .on_press(Message::NavigatePrefix(prefix)),
+                    row![
+                        button(text(format!("  {}", display)).size(12))
+                            .width(Length::Fill)
+                            .style(button::text)
+                            .on_press(Message::NavigatePrefix(prefix)),
+                        button(text("Del").size(10))
+                            .on_press(Message::OpenPrefixDeleteModal(prefix_del)),
+                    ]
+                    .spacing(4),
                 );
             }
 

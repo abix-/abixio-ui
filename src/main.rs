@@ -19,5 +19,7 @@ fn main() -> iced::Result {
     )
     .theme(abixio_ui::app::App::theme)
     .title(abixio_ui::app::App::title)
+    .subscription(abixio_ui::app::App::subscription)
+    .window_size((1024.0, 768.0))
     .run()
 }

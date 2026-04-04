@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use iced::keyboard;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Subscription, Task, Theme};
 
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, S3Client};
 
@@ -31,6 +32,7 @@ pub enum Message {
     CreateBucket,
     SetTheme(AppTheme),
     NewBucketNameChanged(String),
+    DismissError,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,6 +79,7 @@ pub struct App {
     pub loading_objects: bool,
     pub loading_detail: bool,
 
+    pub error: Option<String>,
     pub perf: crate::perf::PerfStats,
 }
 
@@ -98,6 +101,7 @@ impl App {
             loading_buckets: true,
             loading_objects: false,
             loading_detail: false,
+            error: None,
             perf: crate::perf::PerfStats::new(),
         };
         let task = {
@@ -119,6 +123,16 @@ impl App {
             AppTheme::Dark => Theme::Dark,
             AppTheme::Light => Theme::Light,
         }
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        keyboard::listen().filter_map(|event| match event {
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            } => Some(Message::ClearSelection),
+            _ => None,
+        })
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -171,29 +185,36 @@ impl App {
                 self.detail = Some(r);
                 Task::none()
             }
-            Message::UploadDone(r) => {
-                if r.is_ok() {
-                    self.loading_objects = true;
-                    return self.cmd_fetch_objects();
-                }
+            Message::UploadDone(Ok(_)) => {
+                self.loading_objects = true;
+                self.cmd_fetch_objects()
+            }
+            Message::UploadDone(Err(e)) => {
+                self.error = Some(format!("Upload failed: {}", e));
                 Task::none()
             }
-            Message::DeleteDone(r) => {
-                if r.is_ok() {
-                    self.selection = Selection::None;
-                    self.loading_objects = true;
-                    return self.cmd_fetch_objects();
-                }
+            Message::DeleteDone(Ok(())) => {
+                self.selection = Selection::None;
+                self.loading_objects = true;
+                self.cmd_fetch_objects()
+            }
+            Message::DeleteDone(Err(e)) => {
+                self.error = Some(format!("Delete failed: {}", e));
                 Task::none()
             }
-            Message::CreateBucketDone(r) => {
-                if r.is_ok() {
-                    self.loading_buckets = true;
-                    return self.cmd_fetch_buckets();
-                }
+            Message::CreateBucketDone(Ok(())) => {
+                self.loading_buckets = true;
+                self.cmd_fetch_buckets()
+            }
+            Message::CreateBucketDone(Err(e)) => {
+                self.error = Some(format!("Create bucket failed: {}", e));
                 Task::none()
             }
-            Message::DownloadDone(_) => Task::none(),
+            Message::DownloadDone(Ok(_)) => Task::none(),
+            Message::DownloadDone(Err(e)) => {
+                self.error = Some(format!("Download failed: {}", e));
+                Task::none()
+            }
 
             Message::Refresh => {
                 self.loading_objects = true;
@@ -274,6 +295,10 @@ impl App {
                 self.new_bucket_name = val;
                 Task::none()
             }
+            Message::DismissError => {
+                self.error = None;
+                Task::none()
+            }
         }
     }
 
@@ -302,10 +327,28 @@ impl App {
         )
         .width(Length::Fill);
 
-        column![top_bar, iced::widget::rule::horizontal(1), main_row]
+        let mut layout = column![top_bar, iced::widget::rule::horizontal(1), main_row]
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+
+        // error bar at bottom
+        if let Some(err) = &self.error {
+            layout = layout.push(
+                container(
+                    row![
+                        text(err.clone()).size(12),
+                        button(text("dismiss").size(10))
+                            .style(button::text)
+                            .on_press(Message::DismissError),
+                    ]
+                    .spacing(8),
+                )
+                .padding(6)
+                .width(Length::Fill),
+            );
+        }
+
+        layout.into()
     }
 
     // -- commands --

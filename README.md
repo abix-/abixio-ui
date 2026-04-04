@@ -66,17 +66,23 @@ cargo build --release
 ## What works / what doesn't
 
 **Done:**
-- Project scaffold with egui/eframe 0.34
+- Three-panel layout: icon sidebar + center content + right detail panel
+- Custom dark theme (teal accent, high contrast) + light theme
+- Theme switching in Settings (Dark / Light / System)
 - Async operation helper (tokio oneshot channels, non-blocking UI)
 - S3 client (raw HTTP via reqwest, XML parsing)
-- Bucket list sidebar view
-- Object browser view with breadcrumb navigation
-- Upload/delete actions (wired but untested end-to-end)
+- Bucket list sidebar with create bucket
+- Object browser with breadcrumb navigation and prefix drilling
+- Object detail panel: full metadata from HEAD request (size, type, etag, all HTTP headers)
+- Upload via native file dialog
+- Download via native save dialog
+- Delete with immediate refresh
+- Performance monitoring: FPS, frame time, network requests, bytes in/out (5m sliding window)
+- Settings view: theme, connection info, performance stats, about
 
 **Not yet implemented:**
 - Connection manager (multi-server, saved connections)
 - OS keychain credential storage
-- Download to file
 - AbixIO-specific features (disk health, object inspector, config)
 - Auth (AWS Sig V4 signing)
 

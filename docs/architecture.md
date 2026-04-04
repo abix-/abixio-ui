@@ -176,14 +176,21 @@ Three-panel layout:
 | C | dashboard           |                       |
 | H |                     | appears on selection  |
 | + |                     | hides on ESC/close    |
+| S |                     |                       |
 +---+---------------------+-----------------------+
 40px     flexible              280px
 ```
 
-- **Left**: icon rail (40px, fixed). Section navigation.
+- **Left**: icon rail (40px, fixed). Section navigation:
+  - B = Browse (bucket + object browser)
+  - D = Disks (AbixIO only)
+  - C = Config (AbixIO only)
+  - H = Healing (AbixIO only)
+  - + = Connections (bottom)
+  - S = Settings (bottom)
 - **Center**: main content. Changes based on selected section.
 - **Right**: detail panel. Shows full metadata for selected object/bucket.
-  Hidden when nothing is selected.
+  Hidden when nothing is selected. Fires HEAD request on selection.
 
 ## Design rules
 
@@ -200,10 +207,37 @@ Three-panel layout:
 
 ### Theme
 
-- Dark mode is the default.
-- Themes will be configurable in settings (future).
-- All color constants are defined in one place (`src/app.rs` theme section)
-  for easy swapping.
+- Dark mode is the default. Custom dark palette in `src/app.rs`.
+- Three options: Dark, Light, System. Switchable in Settings > Appearance.
+- Uses egui 0.34 API: `set_theme()` + `set_visuals_of()` per theme.
+- Both dark and light themes are custom-styled (not raw egui defaults).
+- All color constants defined in one place (`src/app.rs` theme section).
+
+### Settings view
+
+Settings (S icon in sidebar) contains:
+- **Appearance**: theme switcher (Dark / Light / System)
+- **Connection**: current endpoint + server type
+- **Performance**: live metrics (see below)
+- **About**: version + GitHub link
+
+### Performance monitoring
+
+Built-in performance dashboard in Settings. All metrics use a 5-minute sliding
+window ring buffer (`src/perf.rs`). No background polling -- stats are recorded
+passively as frames render and network ops complete.
+
+**Rendering:**
+- FPS (current + 5m average)
+- Frame time (current, 5m average, 5m max)
+- Total frames + repaints in last 5m
+
+**Network:**
+- Requests (5m window + total)
+- Bytes in/out (5m window + total)
+
+**Disk I/O:**
+- Always 0 -- the UI does no local caching or disk writes (by design)
 
 ### Detail panel
 

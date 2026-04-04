@@ -225,6 +225,43 @@ impl S3Client {
         })
     }
 
+    /// Server-side copy. For same-bucket copies, uses the S3 CopyObject API
+    /// (data never leaves the server). For cross-bucket copies on the same
+    /// endpoint, falls back to GET + PUT since rust-s3 only exposes
+    /// same-bucket server-side copy.
+    pub async fn copy_object(
+        &self,
+        src_bucket: &str,
+        src_key: &str,
+        dst_bucket: &str,
+        dst_key: &str,
+    ) -> Result<(), String> {
+        if src_bucket == dst_bucket {
+            let b = self.bucket(dst_bucket)?;
+            let code = b
+                .copy_object_internal(src_key, dst_key)
+                .await
+                .map_err(|e| e.to_string())?;
+            if (200..300).contains(&code) {
+                Ok(())
+            } else {
+                Err(format!("copy object: {}", code))
+            }
+        } else {
+            // cross-bucket: GET from source, PUT to destination
+            let data = self.get_object(src_bucket, src_key).await?;
+            let detail = self.head_object(src_bucket, src_key).await?;
+            let content_type = if detail.content_type.is_empty() {
+                "application/octet-stream"
+            } else {
+                &detail.content_type
+            };
+            self.put_object(dst_bucket, dst_key, data, content_type)
+                .await?;
+            Ok(())
+        }
+    }
+
     pub async fn list_objects_recursive(
         &self,
         bucket: &str,

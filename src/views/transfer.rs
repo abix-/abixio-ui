@@ -16,7 +16,7 @@ impl App {
             .padding(12);
 
         match transfer.mode {
-            TransferMode::CopyObject => {
+            TransferMode::CopyObject | TransferMode::MoveObject => {
                 body = body.push(text(self.transfer_source_summary()).size(11));
                 let connection_options = self.available_connection_options();
                 body = body.push(text("Destination connection").size(11));
@@ -143,6 +143,7 @@ impl App {
     fn transfer_title(&self) -> &'static str {
         match self.transfer.as_ref().map(|t| t.mode) {
             Some(TransferMode::CopyObject) => "Copy Object",
+            Some(TransferMode::MoveObject) => "Move / Rename Object",
             Some(TransferMode::ImportFolder) => "Import Folder",
             Some(TransferMode::ExportPrefix) => "Export Prefix",
             None => "Transfer",
@@ -154,7 +155,7 @@ impl App {
             return String::new();
         };
         match transfer.mode {
-            TransferMode::CopyObject => format!(
+            TransferMode::CopyObject | TransferMode::MoveObject => format!(
                 "Source: {}/{}",
                 transfer.source_bucket.clone().unwrap_or_default(),
                 transfer.source_key.clone().unwrap_or_default()

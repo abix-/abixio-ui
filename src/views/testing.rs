@@ -325,6 +325,7 @@ pub async fn run_e2e_tests(
         Some(client.clone()),
         copy_item.clone(),
         OverwritePolicy::Ask,
+        false,
     )
     .await;
     match &r {
@@ -379,6 +380,7 @@ pub async fn run_e2e_tests(
         Some(client.clone()),
         overwrite_item.clone(),
         OverwritePolicy::Ask,
+        false,
     )
     .await;
     t.check(
@@ -391,6 +393,7 @@ pub async fn run_e2e_tests(
         Some(client.clone()),
         overwrite_item,
         OverwritePolicy::OverwriteAll,
+        false,
     )
     .await;
     t.check(
@@ -433,6 +436,7 @@ pub async fn run_e2e_tests(
                     Some(client.clone()),
                     item,
                     OverwritePolicy::Ask,
+                    false,
                 )
                 .await;
                 if !matches!(result, Ok(TransferStepResult::Copied(_))) {
@@ -471,7 +475,8 @@ pub async fn run_e2e_tests(
             let mut all_exported = true;
             for item in items {
                 let result =
-                    run_transfer_step(client.clone(), None, item, OverwritePolicy::Ask).await;
+                    run_transfer_step(client.clone(), None, item, OverwritePolicy::Ask, false)
+                        .await;
                 if !matches!(result, Ok(TransferStepResult::Copied(_))) {
                     all_exported = false;
                 }

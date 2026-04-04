@@ -53,6 +53,8 @@ pub enum Message {
     Delete(String, String),
     Download(String, String),
     OpenCopyObject,
+    OpenMoveObject,
+    OpenRenameObject,
     OpenImportFolder,
     OpenExportPrefix,
     CloseTransferModal,
@@ -166,6 +168,7 @@ pub enum Selection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferMode {
     CopyObject,
+    MoveObject,
     ImportFolder,
     ExportPrefix,
 }
@@ -826,6 +829,64 @@ impl App {
                     self.cmd_fetch_transfer_buckets(&destination_connection_id)
                 }
             }
+            Message::OpenMoveObject => {
+                let Some((bucket, key)) = self.current_selected_object() else {
+                    return Task::none();
+                };
+                self.transfer = Some(TransferState {
+                    mode: TransferMode::MoveObject,
+                    destination_connection_id: CURRENT_CONNECTION_ID.to_string(),
+                    destination_bucket: bucket.clone(),
+                    destination_key: key.clone(),
+                    destination_buckets: self.buckets.clone(),
+                    loading_destination_buckets: false,
+                    local_path: None,
+                    source_bucket: Some(bucket),
+                    source_key: Some(key),
+                    source_prefix: None,
+                    items: Vec::new(),
+                    next_index: 0,
+                    completed: 0,
+                    skipped: 0,
+                    failed: 0,
+                    current_item: None,
+                    pending_conflict: None,
+                    overwrite_policy: OverwritePolicy::Ask,
+                    preparing: false,
+                    running: false,
+                    summary: None,
+                });
+                Task::none()
+            }
+            Message::OpenRenameObject => {
+                let Some((bucket, key)) = self.current_selected_object() else {
+                    return Task::none();
+                };
+                self.transfer = Some(TransferState {
+                    mode: TransferMode::MoveObject,
+                    destination_connection_id: CURRENT_CONNECTION_ID.to_string(),
+                    destination_bucket: bucket.clone(),
+                    destination_key: key.clone(),
+                    destination_buckets: self.buckets.clone(),
+                    loading_destination_buckets: false,
+                    local_path: None,
+                    source_bucket: Some(bucket),
+                    source_key: Some(key),
+                    source_prefix: None,
+                    items: Vec::new(),
+                    next_index: 0,
+                    completed: 0,
+                    skipped: 0,
+                    failed: 0,
+                    current_item: None,
+                    pending_conflict: None,
+                    overwrite_policy: OverwritePolicy::Ask,
+                    preparing: false,
+                    running: false,
+                    summary: None,
+                });
+                Task::none()
+            }
             Message::OpenImportFolder => {
                 let Some(bucket) = self.selected_bucket.clone() else {
                     return Task::none();
@@ -939,7 +1000,7 @@ impl App {
                 transfer.preparing = true;
                 transfer.summary = None;
                 match transfer.mode {
-                    TransferMode::CopyObject => {
+                    TransferMode::CopyObject | TransferMode::MoveObject => {
                         let item = TransferItem {
                             source: TransferEndpoint::S3 {
                                 connection_id: CURRENT_CONNECTION_ID.to_string(),
@@ -1886,7 +1947,7 @@ impl App {
             return false;
         }
         match transfer.mode {
-            TransferMode::CopyObject => {
+            TransferMode::CopyObject | TransferMode::MoveObject => {
                 !transfer.destination_bucket.is_empty()
                     && !transfer.destination_key.is_empty()
                     && !self.transfer_points_to_same_object(transfer)
@@ -1936,7 +1997,7 @@ impl App {
             ));
             let should_refresh = matches!(
                 transfer.mode,
-                TransferMode::ImportFolder | TransferMode::CopyObject
+                TransferMode::ImportFolder | TransferMode::CopyObject | TransferMode::MoveObject
             ) && transfer.destination_connection_id == CURRENT_CONNECTION_ID;
             return if should_refresh {
                 self.loading_objects = true;
@@ -1950,6 +2011,7 @@ impl App {
         let item = transfer.items[transfer.next_index].clone();
         transfer.current_item = Some(item.label());
         let overwrite_policy = transfer.overwrite_policy;
+        let is_move = transfer.mode == TransferMode::MoveObject;
         let source_client = self.client.clone();
         let destination_client = match &item.destination {
             TransferEndpoint::S3 { connection_id, .. } => match self
@@ -1964,7 +2026,8 @@ impl App {
         };
         Task::perform(
             async move {
-                run_transfer_step(source_client, destination_client, item, overwrite_policy).await
+                run_transfer_step(source_client, destination_client, item, overwrite_policy, is_move)
+                    .await
             },
             Message::TransferStepFinished,
         )
@@ -2013,6 +2076,7 @@ impl App {
                         destination_client,
                         item,
                         OverwritePolicy::OverwriteAll,
+                        false,
                     )
                     .await
                 },
@@ -2227,6 +2291,7 @@ pub(crate) async fn run_transfer_step(
     destination_client: Option<Arc<S3Client>>,
     item: TransferItem,
     overwrite_policy: OverwritePolicy,
+    is_move: bool,
 ) -> Result<TransferStepResult, String> {
     match &item.destination {
         TransferEndpoint::S3 { bucket, key, .. } => {
@@ -2241,33 +2306,32 @@ pub(crate) async fn run_transfer_step(
                     OverwritePolicy::OverwriteAll => {}
                 }
             }
-            let data = match &item.source {
+            match &item.source {
                 TransferEndpoint::S3 {
                     bucket: src_bucket,
                     key: src_key,
                     ..
-                } => source_client.get_object(src_bucket, src_key).await?,
-                TransferEndpoint::Local { path } => {
-                    tokio::fs::read(path).await.map_err(|e| e.to_string())?
+                } => {
+                    // server-side copy when possible (same client/endpoint)
+                    source_client
+                        .copy_object(src_bucket, src_key, bucket, key)
+                        .await?;
+                    // for move: delete source after confirmed copy
+                    if is_move {
+                        source_client
+                            .delete_object(src_bucket, src_key)
+                            .await?;
+                    }
                 }
-            };
-            let content_type = match &item.source {
-                TransferEndpoint::Local { path } => guess_content_type(path),
-                TransferEndpoint::S3 {
-                    bucket: src_bucket,
-                    key: src_key,
-                    ..
-                } => source_client
-                    .head_object(src_bucket, src_key)
-                    .await
-                    .ok()
-                    .map(|detail| detail.content_type)
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "application/octet-stream".to_string()),
-            };
-            dest_client
-                .put_object(bucket, key, data, &content_type)
-                .await?;
+                TransferEndpoint::Local { path } => {
+                    let data =
+                        tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+                    let content_type = guess_content_type(path);
+                    dest_client
+                        .put_object(bucket, key, data, &content_type)
+                        .await?;
+                }
+            }
             Ok(TransferStepResult::Copied(item.label()))
         }
         TransferEndpoint::Local { path } => {

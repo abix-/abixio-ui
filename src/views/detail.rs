@@ -66,6 +66,8 @@ impl App {
                             button(text("Download").size(11))
                                 .on_press(Message::Download(bucket.clone(), key.clone())),
                             button(text("Copy").size(11)).on_press(Message::OpenCopyObject),
+                            button(text("Move").size(11)).on_press(Message::OpenMoveObject),
+                            button(text("Rename").size(11)).on_press(Message::OpenRenameObject),
                             button(text("Delete").size(11))
                                 .on_press(Message::Delete(bucket.clone(), key.clone())),
                         ]

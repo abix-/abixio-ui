@@ -16,7 +16,7 @@ MinIO.
 | Bucket listing and object browsing | Bucket list, object list, prefix navigation, breadcrumbs, object metadata panel | `mc ls`, `mc tree`, `mc stat`, related browse and list flows | 7/10 | Partial | Strong interactive browse support, but no tree, `du`, or full stat-style command breadth. |
 | Object upload, download, metadata, and delete | Upload, download, HEAD metadata, single-object delete, AbixIO object detail | `mc cp`, `mc cat`, `mc head`, `mc stat`, `mc rm` | 8/10 | Partial | Covers the main single-object CRUD and metadata workflows. Inline content viewing and advanced copy flags are still missing. |
 | AbixIO-specific admin features | Disks (with pluggable backend info), healing, shard inspection, manual heal | No direct AbixIO equivalent | n/a | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. AbixIO server now supports pluggable storage backends via the `Backend` trait. |
-| Copy, import, and export workflows | Single-object copy, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` workflows | 6/10 | Partial | Useful copy coverage now exists, but there is still no move, rename, multi-source copy, or advanced `mc cp` option surface. |
+| Copy, move, rename, import, and export | Server-side copy, move (copy+delete), rename, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` and `mc mv` workflows | 7/10 | Partial | Copy uses S3 server-side CopyObject API. Move and rename use copy-then-delete. No multi-source copy or advanced `mc cp` option surface. |
 | Search, find, and filtering | Filter box with substring and wildcard matching on current listing, plus recursive Find across all prefixes | `mc find` | 6/10 | Partial | Local instant filter on loaded objects plus recursive find with wildcard or substring pattern. Missing: time, size, metadata, and tag filters. |
 | Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
 | Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
@@ -66,7 +66,7 @@ MinIO.
 | UI | Bottom error bar | Yes | n/a | Dismissable. |
 | UI | Built-in smoke tests | Yes | 2/10 | Testing tab runs end-to-end checks. Useful, but this is not general CLI automation parity. |
 | UI | Auto-run smoke tests with JSON report | Yes | 2/10 | `--run-tests` writes a report and keeps the app open. This helps verification, not daily object operations. |
-| Gaps | Move and rename | No | 0/10 | Not implemented yet. |
+| Gaps | Move and rename | Yes | 7/10 | Server-side copy + delete. Move and Rename buttons in detail panel. |
 | Gaps | Search and find | Partial | 6/10 | Filter box for local listing plus recursive Find. No time/size/metadata filters yet. |
 | Gaps | Bucket delete | Yes | 7/10 | Implemented as recursive delete with typed-name confirmation. |
 | Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
@@ -84,7 +84,7 @@ MinIO.
 
 ## MinIO Client Features Not Yet In abixio-ui
 
-- Move and rename.
+- Move and rename: multi-source move, recursive prefix move (single-object move/rename exists).
 - Search and find: time, size, metadata, and tag filters (basic name/path filtering exists).
 - Presigned sharing links.
 - Recursive sync, mirror, and diff workflows.

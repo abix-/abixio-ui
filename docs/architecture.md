@@ -119,16 +119,38 @@ Features provided by rust-s3:
 - Anonymous access (no credentials)
 - Custom endpoints via `Region::Custom`
 - Path-style bucket addressing (for MinIO, AbixIO, etc.)
+- Server-side copy via `CopyObject` API
 - Multipart upload support
 
 Operations:
 - `list_buckets()`. Lists all buckets.
 - `list_objects(bucket, prefix, delimiter)`. Lists objects with prefix and delimiter support.
+- `list_objects_recursive(bucket, prefix)`. Flat listing for find/search.
 - `create_bucket(bucket)`. Creates a new bucket.
+- `delete_bucket(bucket)`. Deletes a bucket.
 - `put_object(bucket, key, data, content_type)`. Uploads an object.
 - `get_object(bucket, key)`. Downloads an object.
-- `head_object(bucket, key)`. Gets object metadata.
+- `head_object(bucket, key)`. Gets object metadata (ETag, size, content type, headers).
 - `delete_object(bucket, key)`. Deletes an object.
+- `copy_object(src_bucket, src_key, dst_bucket, dst_key)`. Server-side copy. For same-bucket operations, uses the S3 `CopyObject` API where data never leaves the server. For cross-bucket copies on the same endpoint, falls back to GET + PUT.
+
+### Copy and move strategy
+
+S3 has no native move or rename operation. Move is always copy-then-delete.
+
+For copies within the same bucket, the S3 `CopyObject` API tells the server
+to copy data internally. The data never leaves the server, and the server
+guarantees integrity. This is what MinIO Client (`mc cp` and `mc mv`) uses
+for same-server operations. The server returns an ETag in the response to
+confirm the copy succeeded.
+
+For cross-bucket copies on the same endpoint, rust-s3 only exposes
+same-bucket server-side copy (`copy_object_internal`). Cross-bucket falls
+back to downloading the object and re-uploading it. This is still correct
+but uses more bandwidth.
+
+For move operations, the source is only deleted after the copy returns
+success. If the copy fails for any reason, the source is untouched.
 
 Works with any S3-compatible server: AbixIO, AWS, MinIO, Backblaze B2, etc.
 

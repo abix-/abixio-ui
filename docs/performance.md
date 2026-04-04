@@ -10,32 +10,70 @@ egui defaults to continuous 60fps rendering. We do not want this.
 
 **Repaint only on events:**
 - User input (click, key, scroll, resize)
-- Network response received (channel has data)
+- Network response received (background task signals completion)
 - Nothing else
 
+### How it works
+
+Each async network request uses a `tokio::sync::oneshot` channel. The background
+task holds a clone of `egui::Context`. When the task completes:
+
 ```rust
-// eframe NativeOptions
-eframe::NativeOptions {
-    // only repaint when something changes
-    vsync: true,
-    ..Default::default()
-}
+// async_op.rs -- background task
+RUNTIME.spawn(async move {
+    let result = fut.await;
+    let _ = tx.send(result);
+    ctx.request_repaint();  // <-- THE ONLY repaint trigger
+});
+```
 
-// in App::update(), request repaint only when needed
-fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    // check for network responses
-    if self.rx.try_recv().is_ok() {
-        // got data, will repaint naturally this frame
-    }
+This is the **only** place `request_repaint()` is called. The UI thread's
+`logic()` method polls the channel with `try_recv()` (non-blocking) but
+**never calls request_repaint() itself**:
 
-    // if a request is in-flight, poll next frame (not continuous -- just one more)
-    if self.loading {
-        ctx.request_repaint();
-    }
+```rust
+// app.rs -- logic() runs each frame
+fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    self.perf.record_frame();
+    self.buckets_op.poll();  // try_recv(), non-blocking
+    self.objects_op.poll();
+    // ...
 
-    // otherwise: no request_repaint() = no rendering until next user input
+    // NO request_repaint() here. Background tasks wake us when done.
 }
 ```
+
+### Timeline
+
+```
+t=0  user clicks bucket "test"
+     -> request() spawns async task
+     -> UI renders loading state (1 frame)
+     -> UI goes idle (0 fps, 0 CPU)
+
+t=50ms  background task completes
+     -> sends result via oneshot channel
+     -> calls ctx.request_repaint()
+     -> UI wakes up, logic() polls result
+     -> UI renders object list (1 frame)
+     -> UI goes idle again
+
+t=50ms..infinity  user staring at screen
+     -> 0 fps, 0 CPU, 0 network
+```
+
+### Common mistake we avoid
+
+A naive approach polls for pending requests every frame:
+
+```rust
+// BAD: burns CPU while waiting for network
+if self.loading {
+    ctx.request_repaint();  // 60fps render loop during every request!
+}
+```
+
+We don't do this. The background task wakes us exactly once when done.
 
 When idle: 0 fps, 0% CPU. egui sleeps until the next OS event.
 
@@ -111,6 +149,7 @@ No thread pool. No worker pool. No timers. No scheduled tasks.
 | Anti-pattern | Why | Our approach |
 |---|---|---|
 | Continuous rendering | Burns CPU/GPU for no reason | Repaint on events only |
+| Polling repaint loop | `if pending { request_repaint() }` burns CPU while waiting | Background task calls repaint on completion |
 | Background polling | Network + CPU waste when idle | Fetch on user action only |
 | Object data caching | Memory waste, stale data | Always fetch live |
 | Prefetching | Network waste, speculative | Load on navigate only |

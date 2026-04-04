@@ -203,15 +203,9 @@ impl eframe::App for App {
             self.fetch_objects(ctx);
         }
 
-        if self.buckets_op.pending
-            || self.objects_op.pending
-            || self.upload_op.pending
-            || self.delete_op.pending
-            || self.create_bucket_op.pending
-            || self.detail_op.pending
-        {
-            ctx.request_repaint();
-        }
+        // NO request_repaint() here. Background tasks call ctx.request_repaint()
+        // when they complete (see async_op.rs:35). Between request and completion,
+        // the UI is idle -- zero CPU, zero renders. This is by design.
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

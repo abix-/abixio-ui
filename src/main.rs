@@ -2,6 +2,7 @@
 
 mod app;
 mod async_op;
+pub mod perf;
 mod s3;
 mod views;
 

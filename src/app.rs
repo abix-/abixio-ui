@@ -3,6 +3,7 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::async_op::AsyncOp;
+use crate::perf::PerfStats;
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client};
 
 #[derive(PartialEq, Clone, Copy)]
@@ -59,6 +60,7 @@ pub struct App {
     pub current_prefix: String,
     pub new_bucket_name: String,
     pub settings: AppSettings,
+    pub perf: PerfStats,
 }
 
 impl App {
@@ -84,6 +86,7 @@ impl App {
             settings: AppSettings {
                 theme: ThemeChoice::Dark,
             },
+            perf: PerfStats::new(),
         };
         app.fetch_buckets(&cc.egui_ctx);
         app
@@ -181,6 +184,7 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.perf.record_frame();
         self.buckets_op.poll();
         self.objects_op.poll();
         self.upload_op.poll();

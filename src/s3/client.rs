@@ -159,6 +159,41 @@ impl S3Client {
         }
     }
 
+    pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectDetail, String> {
+        let resp = self
+            .http
+            .head(&format!("{}/{}/{}", self.endpoint, bucket, key))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("head object: {}", resp.status()));
+        }
+
+        let h = resp.headers();
+        let get_header = |name: &str| -> String {
+            h.get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string()
+        };
+
+        let headers: Vec<(String, String)> = h
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+
+        Ok(ObjectDetail {
+            key: key.to_string(),
+            size: get_header("content-length").parse().unwrap_or(0),
+            content_type: get_header("content-type"),
+            last_modified: get_header("last-modified"),
+            etag: get_header("etag"),
+            headers,
+        })
+    }
+
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), String> {
         let resp = self
             .http
@@ -188,6 +223,16 @@ pub struct ObjectInfo {
     pub size: u64,
     pub last_modified: String,
     pub etag: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectDetail {
+    pub key: String,
+    pub size: u64,
+    pub content_type: String,
+    pub last_modified: String,
+    pub etag: String,
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]

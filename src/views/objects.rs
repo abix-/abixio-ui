@@ -125,6 +125,7 @@ impl App {
             });
 
         if let Some(obj) = clicked_obj {
+            self.fetch_detail(ui.ctx(), &bucket, &obj.key);
             self.selection = Selection::Object {
                 bucket,
                 key: obj.key.clone(),

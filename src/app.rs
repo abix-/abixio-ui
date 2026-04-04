@@ -3,7 +3,7 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::async_op::AsyncOp;
-use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectInfo, S3Client};
+use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client};
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Section {
@@ -40,6 +40,7 @@ pub struct App {
     pub upload_op: AsyncOp<String>,
     pub delete_op: AsyncOp<()>,
     pub create_bucket_op: AsyncOp<()>,
+    pub detail_op: AsyncOp<ObjectDetail>,
 
     // ui state
     pub selected_bucket: Option<String>,
@@ -49,7 +50,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, endpoint: &str) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        apply_theme(&cc.egui_ctx);
 
         let client = Arc::new(S3Client::new(endpoint));
         let mut app = Self {
@@ -63,6 +64,7 @@ impl App {
             upload_op: AsyncOp::new(),
             delete_op: AsyncOp::new(),
             create_bucket_op: AsyncOp::new(),
+            detail_op: AsyncOp::new(),
             selected_bucket: None,
             current_prefix: String::new(),
             new_bucket_name: String::new(),
@@ -123,6 +125,33 @@ impl App {
         });
     }
 
+    pub fn fetch_detail(&mut self, ctx: &egui::Context, bucket: &str, key: &str) {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        self.detail_op
+            .request(ctx, async move { client.head_object(&bucket, &key).await });
+    }
+
+    pub fn download_object(&mut self, ctx: &egui::Context, bucket: &str, key: &str) {
+        let filename = key.rsplit('/').next().unwrap_or(key).to_string();
+        let save_path = rfd::FileDialog::new().set_file_name(&filename).save_file();
+        let save_path = match save_path {
+            Some(p) => p,
+            None => return,
+        };
+
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        // reuse upload_op for download (it's AsyncOp<String>, returns path)
+        self.upload_op.request(ctx, async move {
+            let data = client.get_object(&bucket, &key).await?;
+            std::fs::write(&save_path, &data).map_err(|e| e.to_string())?;
+            Ok(save_path.to_string_lossy().to_string())
+        });
+    }
+
     pub fn delete_object(&mut self, ctx: &egui::Context, bucket: &str, key: &str) {
         let client = self.client.clone();
         let bucket = bucket.to_string();
@@ -141,6 +170,7 @@ impl eframe::App for App {
         self.upload_op.poll();
         self.delete_op.poll();
         self.create_bucket_op.poll();
+        self.detail_op.poll();
 
         if let Some(Ok(())) = self.create_bucket_op.data.take() {
             self.fetch_buckets(ctx);
@@ -158,6 +188,7 @@ impl eframe::App for App {
             || self.upload_op.pending
             || self.delete_op.pending
             || self.create_bucket_op.pending
+            || self.detail_op.pending
         {
             ctx.request_repaint();
         }
@@ -221,4 +252,42 @@ impl eframe::App for App {
             }
         });
     }
+}
+
+// -- custom theme --
+// Red = errors/destructive only. Teal accent for selection/active.
+// High contrast: light text on dark backgrounds.
+
+const BG_DEEP: egui::Color32 = egui::Color32::from_rgb(0x12, 0x12, 0x1a);
+const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(0x1a, 0x1c, 0x2e);
+const BG_WIDGET: egui::Color32 = egui::Color32::from_rgb(0x24, 0x28, 0x3e);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x2d, 0xd4, 0xbf); // teal
+const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(0xee, 0xee, 0xee);
+const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(0x88, 0x99, 0xaa);
+const SEPARATOR: egui::Color32 = egui::Color32::from_rgb(0x2a, 0x2e, 0x42);
+const LINK: egui::Color32 = egui::Color32::from_rgb(0x5c, 0xb8, 0xff); // bright blue
+pub const ERROR_COLOR: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x40, 0x40); // red = errors only
+pub const LABEL_COLOR: egui::Color32 = TEXT_MUTED;
+pub const VALUE_COLOR: egui::Color32 = TEXT_PRIMARY;
+
+fn apply_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+
+    visuals.panel_fill = BG_PANEL;
+    visuals.window_fill = BG_PANEL;
+    visuals.extreme_bg_color = BG_DEEP;
+    visuals.faint_bg_color = egui::Color32::from_rgb(0x1e, 0x20, 0x30);
+    visuals.override_text_color = Some(TEXT_PRIMARY);
+    visuals.hyperlink_color = LINK;
+
+    visuals.selection.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e); // muted teal bg
+    visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, SEPARATOR);
+    visuals.widgets.noninteractive.bg_fill = BG_PANEL;
+    visuals.widgets.inactive.bg_fill = BG_WIDGET;
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x2e, 0x34, 0x50);
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0x1a, 0x6b, 0x5e);
+
+    ctx.set_visuals(visuals);
 }

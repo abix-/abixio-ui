@@ -164,6 +164,59 @@ POST /_abixio/heal/trigger  -> force immediate integrity scan
 All return JSON. These endpoints are AbixIO-specific and do not exist on other
 S3 servers.
 
+## Layout
+
+Three-panel layout:
+
+```
++---+-- center content --+----- right detail ----+
+|nav|                     |                       |
+| B | bucket + object     | context-dependent     |
+| D | browser, or admin   | metadata panel        |
+| C | dashboard           |                       |
+| H |                     | appears on selection  |
+| + |                     | hides on ESC/close    |
++---+---------------------+-----------------------+
+40px     flexible              280px
+```
+
+- **Left**: icon rail (40px, fixed). Section navigation.
+- **Center**: main content. Changes based on selected section.
+- **Right**: detail panel. Shows full metadata for selected object/bucket.
+  Hidden when nothing is selected.
+
+## Design rules
+
+### Color
+
+- **Red is reserved for errors and destructive actions only.** A red element
+  that is not an error confuses users. Never use red for accent, selection,
+  or branding.
+- **Accent color: teal (#2dd4bf).** Used for selection highlights and active
+  states. High contrast against dark backgrounds.
+- **Text contrast:** primary text (#eeeeee) on dark panels (#1a1c2e).
+  Labels use muted (#8899aa). Minimum 4.5:1 contrast ratio.
+- **Links: bright blue (#5cb8ff).** Distinct from body text, not red.
+
+### Theme
+
+- Dark mode is the default.
+- Themes will be configurable in settings (future).
+- All color constants are defined in one place (`src/app.rs` theme section)
+  for easy swapping.
+
+### Detail panel
+
+When an object is selected, the right panel fires a HEAD request to get full
+HTTP headers, then displays:
+
+1. **Filename** (large) + full path (small, muted)
+2. **Overview**: size, content type, last modified, ETag
+3. **Storage**: bucket, key, prefix
+4. **HTTP Headers**: all raw response headers
+5. **Erasure Shards**: per-disk shard info (AbixIO only)
+6. **Actions**: Download, Delete (Delete styled as destructive/red)
+
 ## Dependencies
 
 - `eframe` -- egui desktop wrapper (windowing, rendering)

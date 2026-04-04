@@ -15,7 +15,7 @@ MinIO.
 | Connection setup and saved profiles | Saved connections, keychain-backed credentials, anonymous mode, test and connect flows | Aliases, config file, global flags, cert and TLS options, automation-oriented config | 6/10 | Partial | `abixio-ui` covers normal interactive connection management, not the full CLI and config surface. |
 | Bucket listing and object browsing | Bucket list, object list, prefix navigation, breadcrumbs, object metadata panel | `mc ls`, `mc tree`, `mc stat`, related browse and list flows | 7/10 | Partial | Strong interactive browse support, but no tree, `du`, or full stat-style command breadth. |
 | Object upload, download, metadata, and delete | Upload, download, HEAD metadata, single-object delete, AbixIO object detail | `mc cp`, `mc cat`, `mc head`, `mc stat`, `mc rm` | 8/10 | Partial | Covers the main single-object CRUD and metadata workflows. Inline content viewing and advanced copy flags are still missing. |
-| AbixIO-specific admin features | Disks, healing, shard inspection, manual heal | No direct AbixIO equivalent | n/a | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. |
+| AbixIO-specific admin features | Disks (with pluggable backend info), healing, shard inspection, manual heal | No direct AbixIO equivalent | n/a | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. AbixIO server now supports pluggable storage backends via the `Backend` trait. |
 | Copy, import, and export workflows | Single-object copy, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` workflows | 6/10 | Partial | Useful copy coverage now exists, but there is still no move, rename, multi-source copy, or advanced `mc cp` option surface. |
 | Search, find, and filtering | Filter box with substring and wildcard matching on current listing, plus recursive Find across all prefixes | `mc find` | 6/10 | Partial | Local instant filter on loaded objects plus recursive find with wildcard or substring pattern. Missing: time, size, metadata, and tag filters. |
 | Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
@@ -56,7 +56,7 @@ MinIO.
 | Connections | Anonymous connections | Yes | 6/10 | Works when no keychain entries exist. |
 | Connections | Test, edit, remove, and switch connections | Yes | 7/10 | Available in the Connections view. |
 | AbixIO | Detect AbixIO automatically | Yes | n/a | Probes `/_admin/status`. |
-| AbixIO | Disks view | Yes | n/a | Shows disk status, space, bucket counts, and object counts. |
+| AbixIO | Disks view | Yes | n/a | Shows backend status, space, bucket counts, and object counts. Server reports backend type and label (e.g. `local:/mnt/d1`). |
 | AbixIO | Healing view | Yes | n/a | Shows MRF and scanner state. |
 | AbixIO | Manual refresh for Disks and Healing | Yes | n/a | On-demand only. |
 | AbixIO | Object shard inspection | Yes | n/a | Lives in the object detail panel. |

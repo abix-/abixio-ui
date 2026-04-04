@@ -65,10 +65,10 @@ When the user is staring at a listing, zero network traffic.
 ## Memory
 
 The UI holds:
-- Current bucket listing (Vec of names + sizes) -- tiny
-- Current object listing -- tiny
-- Connection info -- tiny
-- UI state (selected bucket, prefix, section) -- tiny
+- Current bucket listing (Vec of names + sizes), tiny
+- Current object listing, tiny
+- Connection info, tiny
+- UI state (selected bucket, prefix, section), tiny
 
 No object data cached in memory. Uploads read from disk to HTTP.
 Downloads write from HTTP to disk.

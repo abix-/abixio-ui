@@ -139,14 +139,14 @@ curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-
 2. Click "+" (Connections) in the sidebar
 3. Add a connection: name=`local`, endpoint=`http://localhost:10000`, region=`us-east-1`, leave keys empty
 4. Click "add"
-5. Click "test" -- should show "connection ok" in the bottom status bar
-6. Click "connect" -- switches to Browse view, admin tabs appear
-7. Click "D" (Disks) -- shows disk table
-8. Click "H" (Healing) -- shows MRF queue + scanner stats
-9. Browse to an object and select it -- the right detail panel should show
+5. Click "test". Should show "connection ok" in the bottom status bar
+6. Click "connect". Switches to Browse view, admin tabs appear
+7. Click "D" (Disks). Shows disk table
+8. Click "H" (Healing). Shows MRF queue + scanner stats
+9. Browse to an object and select it. The right detail panel should show
    object metadata plus an AbixIO section with shard status
-10. Click `Refresh Inspect` -- shard inspection reloads
-11. Click `Heal Object` -- confirmation modal appears before the heal request is sent
+10. Click `Refresh Inspect`. Shard inspection reloads
+11. Click `Heal Object`. Confirmation modal appears before the heal request is sent
 
 ## In-app smoke tests
 

@@ -110,10 +110,10 @@ MinIO.
 
 ## Current Behavior Notes
 
-- Rough parity summary: `abixio-ui` is strongest in browse, single-object CRUD,
-  recursive import and export, saved connections, and AbixIO-specific admin. It
-  is still weak in advanced search filters, scripting parity, and advanced S3
-  management features.
+- Rough parity summary: `abixio-ui` is strongest in browse, object CRUD (copy,
+  move, rename, bulk delete), recursive import and export, saved connections,
+  and AbixIO-specific admin. It is still weak in scripting parity and advanced
+  S3 management features (versioning, tags, policies, lifecycle).
 - The Settings view shows network counters, but request and byte metrics are
   not currently wired to real network activity.
 - Leaving credential fields blank while editing a saved connection keeps the

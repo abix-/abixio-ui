@@ -6,7 +6,7 @@ app exposes the current Disks and Healing views.
 
 ## Features
 
-- **S3 object browser.** Browse buckets, navigate prefixes, create and delete buckets, upload, download, copy, or delete objects, and filter or find objects by name.
+- **S3 object browser.** Browse buckets, navigate prefixes, create and delete buckets, upload, download, copy, move, rename, or delete objects. Filter and find by name with wildcard support. Multi-select bulk delete.
 - **Multi-server connections.** Save, edit, test, and switch between endpoints.
 - **AWS Sig V4 auth.** Connect to AWS, MinIO, AbixIO, Backblaze, or any authenticated endpoint.
 - **OS keychain.** Access keys and secret keys live in Windows Credential Manager, macOS Keychain, or Linux secret-service. Secrets do not go on disk.
@@ -86,13 +86,13 @@ cargo build --release    # release binary goes to Cargo's target dir
 - Connection manager: add, edit, remove, test, switch
 - OS keychain credential storage (both access key + secret key)
 - Bucket list with create bucket modal and recursive bucket delete
-- Object browser with breadcrumb navigation, prefix drilling, filter, recursive find, and multi-select bulk delete
+- Object browser with breadcrumb navigation, prefix drilling, filter, recursive find, multi-select, and bulk delete
 - Bucket detail panel with bucket overview and recursive delete action
-- Object detail panel: full metadata from HEAD request
+- Object detail panel: full metadata from HEAD, with Copy, Move, Rename, Download, Delete actions
 - AbixIO object detail section: erasure summary, shard status, inspect refresh, confirmed manual heal
 - Upload/download via native file dialogs
-- Object delete with error display
-- Single-object copy, recursive import, and recursive export
+- Server-side copy (S3 CopyObject API), move (copy + delete source), rename
+- Recursive folder import and recursive prefix export
 - AbixIO auto-detection on connect
 - Disk health dashboard (AbixIO only)
 - Healing status monitor (AbixIO only)

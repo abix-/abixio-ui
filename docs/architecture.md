@@ -42,8 +42,9 @@ src/
     connections.rs    # connection manager UI
     disks.rs          # disk health dashboard (AbixIO only)
     healing.rs        # healing status + scanner stats (AbixIO only)
-    objects.rs        # object table with prefix navigation, filter, and recursive find
-    detail.rs         # right context panel (selected object metadata + AbixIO object admin)
+    objects.rs        # object table with prefix navigation, filter, recursive find, multi-select
+    detail.rs         # right context panel (metadata, actions, AbixIO admin, bulk delete modal)
+    transfer.rs       # copy/move/rename modal, import/export workflows
     settings.rs       # settings view (theme, perf stats, about)
     testing.rs        # in-app end-to-end smoke tests
 ```
@@ -240,7 +241,7 @@ displays:
 2. **Overview**: size, content type, last modified, ETag
 3. **Storage**: bucket, key
 4. **HTTP Headers**: selected response headers plus object metadata entries
-5. **Actions**: Download, Delete
+5. **Actions**: Download, Copy, Move, Rename, Delete
 6. **AbixIO** (when applicable): erasure summary, shard distribution,
    per-shard status/checksum, Refresh Inspect, Heal Object
 

@@ -10,86 +10,90 @@ MinIO.
 
 ## Available Now In abixio-ui
 
-| Capability area | abixio-ui | MinIO Client `mc` | Parity | Notes |
-|---|---|---|---|---|
-| Connection setup and saved profiles | Saved connections, keychain-backed credentials, anonymous mode, test/connect flows | Aliases, config file, global flags, cert/TLS options, automation-oriented config | Partial | `abixio-ui` covers normal interactive connection management, not the full CLI/config surface. |
-| Bucket listing and object browsing | Bucket list, object list, prefix navigation, object metadata panel | `mc ls`, `mc tree`, `mc stat`, related browse/list flows | Partial | Strong interactive browse support, but no tree/du/stat command breadth. |
-| Object upload/download/view metadata | Upload, download, HEAD metadata, delete, AbixIO object detail | `mc cp`, `mc cat`, `mc head`, `mc stat`, `mc rm` | Partial | Covers basic CRUD and metadata, but not the full object-operation surface. |
-| AbixIO-specific admin features | Disks, healing, shard inspection, manual heal | No direct AbixIO equivalent | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. |
-| Server-side copy/move/rename | Not implemented | `mc cp`, `mc mv` | None | No object copy, move, or rename workflow in the UI. |
-| Search/find/filtering | Prefix navigation only | `mc find` | Partial | Prefix browsing exists, but there is no search/filter query UI. |
-| Bucket create/delete | Create bucket only | `mc mb`, `mc rb` | Partial | Bucket delete is still missing in `abixio-ui`. |
-| Presigned sharing | Not implemented | `mc share` | None | No temporary share/download/upload URL generation. |
-| Recursive sync/mirror/diff | Not implemented | `mc mirror`, `mc diff` | None | No folder sync, replica, or drift comparison workflow. |
-| Versioning / recovery | Not implemented | `mc version`, `mc undo` | None | No version browse, restore, or rollback workflow. |
-| Bulk delete and batch object workflows | Single-object delete only | Recursive `mc rm`, batch-oriented workflows | None | No multi-select or recursive delete workflow. |
-| SQL/object query and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
-| Tags | Not implemented | `mc tag` | None | No bucket-tag or object-tag UI. |
-| Bucket policy / anonymous access | Not implemented | `mc anonymous` | None | No bucket policy or public-access management UI. |
-| CLI/scriptability / automation | GUI only, plus in-app smoke tests | Full CLI, JSON/quiet modes, shell automation | None | `abixio-ui` is not a scripting surface. |
-| Retention / legal hold | Not implemented | `mc retention`, `mc legalhold` | None | Governance/compliance controls are absent. |
-| Lifecycle / ILM / tiering | Not implemented | `mc ilm` | None | No lifecycle-rule or tiering controls. |
-| Encryption config | Not implemented | `mc encrypt` | None | No bucket/object encryption configuration UI. |
-| Replication / quota / events / watch | Not implemented | `mc replicate`, `mc quota`, `mc event`, `mc watch` | None | No replication, quota, event, or watch tooling. |
-| MinIO-specific admin/support/IDP/license commands | Not implemented | `mc admin`, `mc support`, `mc idp`, `mc license` | Out of scope | These are MinIO platform-management features, not current `abixio-ui` goals. |
+| Capability area | abixio-ui | MinIO Client `mc` | Parity Score | Parity | Notes |
+|---|---|---|---|---|---|
+| Connection setup and saved profiles | Saved connections, keychain-backed credentials, anonymous mode, test and connect flows | Aliases, config file, global flags, cert and TLS options, automation-oriented config | 6/10 | Partial | `abixio-ui` covers normal interactive connection management, not the full CLI and config surface. |
+| Bucket listing and object browsing | Bucket list, object list, prefix navigation, breadcrumbs, object metadata panel | `mc ls`, `mc tree`, `mc stat`, related browse and list flows | 7/10 | Partial | Strong interactive browse support, but no tree, `du`, or full stat-style command breadth. |
+| Object upload, download, metadata, and delete | Upload, download, HEAD metadata, single-object delete, AbixIO object detail | `mc cp`, `mc cat`, `mc head`, `mc stat`, `mc rm` | 8/10 | Partial | Covers the main single-object CRUD and metadata workflows. Inline content viewing and advanced copy flags are still missing. |
+| AbixIO-specific admin features | Disks, healing, shard inspection, manual heal | No direct AbixIO equivalent | n/a | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. |
+| Copy, import, and export workflows | Single-object copy, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` workflows | 6/10 | Partial | Useful copy coverage now exists, but there is still no move, rename, multi-source copy, or advanced `mc cp` option surface. |
+| Search, find, and filtering | Prefix navigation only | `mc find` | 3/10 | Partial | Prefix browsing exists, but there is no search or filter query UI. |
+| Bucket create and delete | Create bucket only | `mc mb`, `mc rb` | 4/10 | Partial | Bucket delete is still missing. |
+| Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
+| Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
+| Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
+| Bulk delete and batch object workflows | Single-object delete only | Recursive `mc rm`, batch-oriented workflows | 1/10 | None | No multi-select or recursive bulk workflow. |
+| SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
+| Tags | Not implemented | `mc tag` | 0/10 | None | No bucket-tag or object-tag UI. |
+| Bucket policy and anonymous access | Not implemented | `mc anonymous` | 0/10 | None | No bucket policy or public-access management UI. |
+| CLI, scripting, and automation | GUI only, plus in-app smoke tests and auto-run test mode | Full CLI, JSON and quiet modes, shell automation | 1/10 | None | `abixio-ui` is still a desktop app, not an operations CLI. |
+| Retention and legal hold | Not implemented | `mc retention`, `mc legalhold` | 0/10 | None | Governance and compliance controls are absent. |
+| Lifecycle, ILM, and tiering | Not implemented | `mc ilm` | 0/10 | None | No lifecycle-rule or tiering controls. |
+| Encryption config | Not implemented | `mc encrypt` | 0/10 | None | No bucket or object encryption configuration UI. |
+| Replication, quota, events, and watch | Not implemented | `mc replicate`, `mc quota`, `mc event`, `mc watch` | 0/10 | None | No replication, quota, event, or watch tooling. |
+| MinIO-specific admin, support, IDP, and license commands | Not implemented | `mc admin`, `mc support`, `mc idp`, `mc license` | n/a | Out of scope | These are MinIO platform-management features, not current `abixio-ui` goals. |
 
 ## Current abixio-ui Feature Table
 
-| Area | Feature | Status | Notes |
-|---|---|---|---|
-| Core S3 | Connect to S3-compatible endpoints over HTTP or HTTPS | Yes | Works with saved connections or direct CLI launch. |
-| Core S3 | Start from CLI endpoint and credential flags | Yes | Supports `--endpoint`, `--access-key`, and `--secret-key`. |
-| Core S3 | List buckets | Yes | Live server read. |
-| Core S3 | Create buckets | Yes | Bucket delete is still missing. |
-| Core S3 | Browse objects | Yes | Prefix navigation and breadcrumbs are implemented. |
-| Core S3 | Upload files | Yes | Uses a native file picker. |
-| Core S3 | Download files | Yes | Uses a native save dialog. |
-| Core S3 | Delete objects | Yes | Single-object delete only. |
-| Core S3 | View object metadata | Yes | Uses HEAD metadata in the detail panel. |
-| Core S3 | Close detail panel with `Esc` | Yes | Keyboard shortcut is wired. |
-| Connections | Save named connections | Yes | Stored in `~/.abixio-ui/settings.json`. |
-| Connections | Store credentials in OS keychain | Yes | Uses `keyring`. |
-| Connections | Anonymous connections | Yes | Works when no keychain entries exist. |
-| Connections | Test, edit, remove, and switch connections | Yes | Available in the Connections view. |
-| AbixIO | Detect AbixIO automatically | Yes | Probes `/_admin/status`. |
-| AbixIO | Disks view | Yes | Shows disk status, space, bucket counts, and object counts. |
-| AbixIO | Healing view | Yes | Shows MRF and scanner state. |
-| AbixIO | Manual refresh for Disks and Healing | Yes | On-demand only. |
-| AbixIO | Object shard inspection | Yes | Lives in the object detail panel. |
-| AbixIO | Manual object heal | Yes | Confirmation modal required. |
-| UI | Dark and Light theme switch | Yes | Session-only setting. |
-| UI | Top bar with active connection | Yes | Shows connection name or endpoint. |
-| UI | Bottom error bar | Yes | Dismissable. |
-| UI | Built-in smoke tests | Yes | Testing tab runs end-to-end checks. |
-| Gaps | Copy, move, rename | No | No server-side copy workflow. |
-| Gaps | Search and find | No | No search UI beyond prefix navigation. |
-| Gaps | Bucket delete | No | Not implemented yet. |
-| Gaps | Presigned sharing | No | No share-link generation. |
-| Gaps | Mirror, diff, sync | No | No recursive sync workflow. |
-| Gaps | Versioning and recovery | No | No version browser, restore, or undo flow. |
-| Gaps | Bulk object operations | No | No multi-select or recursive bulk workflow. |
-| Gaps | Object query and inline content inspection | No | No SQL query or inline object viewer. |
-| Gaps | Tags | No | No bucket-tag or object-tag UI. |
-| Gaps | Policy and anonymous access | No | No bucket policy or public access controls. |
-| Gaps | CLI or automation surface | No | This is a desktop app, not a scriptable CLI. |
-| Gaps | Retention and legal hold | No | No governance UI yet. |
-| Gaps | Lifecycle and ILM | No | No lifecycle or tiering controls. |
-| Gaps | Encryption setup | No | No encryption configuration UI. |
-| Gaps | Replication, quota, events, and watch | No | Outside current desktop workflow coverage. |
+| Area | Feature | Status | Parity Score | Notes |
+|---|---|---|---|---|
+| Core S3 | Connect to S3-compatible endpoints over HTTP or HTTPS | Yes | 8/10 | Works with saved connections or direct CLI launch. |
+| Core S3 | Start from CLI endpoint and credential flags | Yes | 6/10 | Supports `--endpoint`, `--access-key`, and `--secret-key`. |
+| Core S3 | List buckets | Yes | 8/10 | Live server read. |
+| Core S3 | Create buckets | Yes | 4/10 | Bucket delete is still missing. |
+| Core S3 | Browse objects | Yes | 7/10 | Prefix navigation and breadcrumbs are implemented. |
+| Core S3 | Upload files | Yes | 8/10 | Uses a native file picker. |
+| Core S3 | Download files | Yes | 8/10 | Uses a native save dialog. |
+| Core S3 | Delete objects | Yes | 3/10 | Single-object delete only. |
+| Core S3 | View object metadata | Yes | 8/10 | Uses HEAD metadata in the detail panel. |
+| Core S3 | Copy object | Yes | 6/10 | Single-object copy works, including overwrite handling. |
+| Core S3 | Import local folder recursively | Yes | 6/10 | Recursive local-to-S3 copy is implemented. |
+| Core S3 | Export prefix recursively | Yes | 6/10 | Recursive S3-to-local export is implemented. |
+| Core S3 | Close detail panel with `Esc` | Yes | n/a | Keyboard shortcut is wired. |
+| Connections | Save named connections | Yes | 7/10 | Stored in `~/.abixio-ui/settings.json`. |
+| Connections | Store credentials in OS keychain | Yes | 8/10 | Uses `keyring`. |
+| Connections | Anonymous connections | Yes | 6/10 | Works when no keychain entries exist. |
+| Connections | Test, edit, remove, and switch connections | Yes | 7/10 | Available in the Connections view. |
+| AbixIO | Detect AbixIO automatically | Yes | n/a | Probes `/_admin/status`. |
+| AbixIO | Disks view | Yes | n/a | Shows disk status, space, bucket counts, and object counts. |
+| AbixIO | Healing view | Yes | n/a | Shows MRF and scanner state. |
+| AbixIO | Manual refresh for Disks and Healing | Yes | n/a | On-demand only. |
+| AbixIO | Object shard inspection | Yes | n/a | Lives in the object detail panel. |
+| AbixIO | Manual object heal | Yes | n/a | Confirmation modal required. |
+| UI | Dark and Light theme switch | Yes | n/a | Session-only setting. |
+| UI | Top bar with active connection | Yes | n/a | Shows connection name or endpoint. |
+| UI | Bottom error bar | Yes | n/a | Dismissable. |
+| UI | Built-in smoke tests | Yes | 2/10 | Testing tab runs end-to-end checks. Useful, but this is not general CLI automation parity. |
+| UI | Auto-run smoke tests with JSON report | Yes | 2/10 | `--run-tests` writes a report and keeps the app open. This helps verification, not daily object operations. |
+| Gaps | Move and rename | No | 0/10 | Not implemented yet. |
+| Gaps | Search and find | No | 3/10 | No search UI beyond prefix navigation. |
+| Gaps | Bucket delete | No | 4/10 | Not implemented yet. |
+| Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
+| Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
+| Gaps | Versioning and recovery | No | 0/10 | No version browser, restore, or undo flow. |
+| Gaps | Bulk object operations | No | 1/10 | No multi-select or recursive bulk workflow. |
+| Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
+| Gaps | Tags | No | 0/10 | No bucket-tag or object-tag UI. |
+| Gaps | Policy and anonymous access | No | 0/10 | No bucket policy or public access controls. |
+| Gaps | CLI or automation surface | No | 1/10 | This is still a desktop app, not a scriptable CLI. |
+| Gaps | Retention and legal hold | No | 0/10 | No governance UI yet. |
+| Gaps | Lifecycle and ILM | No | 0/10 | No lifecycle or tiering controls. |
+| Gaps | Encryption setup | No | 0/10 | No encryption configuration UI. |
+| Gaps | Replication, quota, events, and watch | No | 0/10 | Outside current desktop workflow coverage. |
 
 ## MinIO Client Features Not Yet In abixio-ui
 
-- Object copy, move, and rename.
+- Move and rename.
 - Search and find queries beyond prefix navigation.
 - Bucket deletion.
 - Presigned sharing links.
 - Recursive sync, mirror, and diff workflows.
 - Versioning, undo, and recovery tooling.
 - Bulk object operations.
-- SQL/object query tools and inline object-content inspection.
+- SQL and object query tools, plus inline object-content inspection.
 - Bucket and object tags.
 - Bucket policy and anonymous-access management.
-- CLI/scriptable automation surface.
+- CLI and scriptable automation surface.
 - Retention and legal-hold controls.
 - Lifecycle, ILM, and tiering controls.
 - Encryption setup controls.
@@ -106,6 +110,10 @@ MinIO.
 
 ## Current Behavior Notes
 
+- Rough parity summary: `abixio-ui` is strongest in browse, single-object CRUD,
+  recursive import and export, saved connections, and AbixIO-specific admin. It
+  is still weak in search, destructive bucket workflows, scripting parity, and
+  advanced S3 management features.
 - The Settings view shows network counters, but request and byte metrics are
   not currently wired to real network activity.
 - Leaving credential fields blank while editing a saved connection keeps the

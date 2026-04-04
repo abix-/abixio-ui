@@ -75,6 +75,9 @@ it should not cause a repaint. If it does, that's a bug.
 | Click theme switch | None | 1 frame (visuals update) | Idle |
 | Press ESC | None | 1 frame (close detail panel) | Idle |
 | Type in text field | None | 1 frame per keystroke | Idle on blur |
+| Move mouse over window | None | 1 frame per mouse move event | Idle when mouse stops |
+| Hover over button/link | None | 1 frame (highlight state) | Idle when mouse stops |
+| Window resize/move | None | 1 frame per OS resize event | Idle when done |
 
 ### egui internal (interaction-driven, not continuous)
 
@@ -89,7 +92,7 @@ it should not cause a repaint. If it does, that's a bug.
 
 | Scenario | Renders |
 |---|---|
-| User idle, window focused | 0 |
+| User idle, mouse stopped, window focused | 0 |
 | User idle, window unfocused | 0 |
 | Network request in-flight | 0 (until completion signal) |
 | App minimized | 0 |

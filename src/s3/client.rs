@@ -1,5 +1,9 @@
+use std::time::Duration;
+
 use aws_credential_types::Credentials;
-use aws_sdk_s3::config::{BehaviorVersion, Builder, Region};
+use aws_credential_types::credential_fn::provide_credentials_fn;
+use aws_credential_types::provider::error::CredentialsError;
+use aws_sdk_s3::config::{AppName, BehaviorVersion, Builder, Region, timeout::TimeoutConfig};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{Delete, ObjectIdentifier};
 use aws_sdk_s3::Client;
@@ -17,18 +21,28 @@ impl S3Client {
     ) -> Result<Self, String> {
         let endpoint = endpoint.trim_end_matches('/').to_string();
 
+        let timeout = TimeoutConfig::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .operation_timeout(Duration::from_secs(60))
+            .build();
+
         let mut builder = Builder::new()
             .behavior_version(BehaviorVersion::latest())
             .endpoint_url(&endpoint)
             .region(Region::new(region_name.to_string()))
-            .force_path_style(true);
+            .force_path_style(true)
+            .timeout_config(timeout)
+            .app_name(AppName::new("abixio-ui").expect("valid app name"));
 
         builder = match creds {
             Some((access_key, secret_key)) => builder.credentials_provider(
                 Credentials::new(access_key, secret_key, None, None, "static"),
             ),
             None => builder
-                .credentials_provider(Credentials::new("", "", None, None, "anonymous")),
+                .credentials_provider(provide_credentials_fn(|| async {
+                    Err(CredentialsError::not_loaded("anonymous"))
+                }))
+                .allow_no_auth(),
         };
 
         Ok(Self {

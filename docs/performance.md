@@ -1,8 +1,50 @@
 # Performance
 
-Goal: zero waste. No CPU, disk, network, or GPU usage unless the user is
-actively doing something. The app should be indistinguishable from idle
-when nothing is happening.
+## Design principle
+
+**Minimum necessary work.** The app does the absolute minimum rendering,
+network, disk, and CPU work required to fulfill the user's action. Nothing
+more. Ever.
+
+If the user is not interacting, the process is indistinguishable from idle:
+0 fps, 0% CPU, 0 network traffic, 0 disk I/O. When the user clicks something,
+we do exactly what's needed (one fetch, one render) and go back to idle.
+
+This is not an optimization. It is the architecture. Every design decision
+flows from this:
+
+- **No polling.** We don't check if data changed. The server doesn't push to us.
+  Data is fetched when the user asks for it.
+- **No caching.** We don't store data locally. Every navigation is a live fetch.
+  This means no stale data, no cache invalidation, no disk writes.
+- **No animations.** Spinners, progress bars, and animated transitions are banned.
+  They force 60fps continuous rendering for their entire duration. We use static
+  text ("Loading...") instead.
+- **No background work.** No health checks, no keep-alive pings, no prefetching,
+  no scheduled tasks. The tokio runtime sleeps when there's no work.
+- **One repaint trigger.** The only code that calls `request_repaint()` is the
+  async task completion handler in `async_op.rs`. Nothing else. This is enforced
+  by automated tests.
+
+### What triggers a repaint
+
+| Trigger | Source | Frequency |
+|---|---|---|
+| User input (click, key, scroll) | OS event | Only when user acts |
+| Async task completes | `async_op.rs` calls `request_repaint()` | Once per completed request |
+| ScrollArea deceleration | egui internal | Decays to zero, stops on its own |
+| Tooltip delay | egui internal | One-shot timer |
+| Grid layout stabilization | egui internal | 1 extra frame |
+
+### What does NOT trigger a repaint
+
+| Scenario | Why not |
+|---|---|
+| User staring at screen | No events = no frames |
+| Network request in-flight | We don't poll; background task wakes us on completion |
+| After any operation completes | Renders once, then idle |
+| App in background/minimized | No events = no frames |
+| Between user clicks | No events = no frames |
 
 ## Rendering
 

@@ -14,15 +14,15 @@ MinIO.
 |---|---|---|---|---|---|
 | Connection setup and saved profiles | Saved connections, keychain-backed credentials, anonymous mode, test and connect flows | Aliases, config file, global flags, cert and TLS options, automation-oriented config | 6/10 | Partial | `abixio-ui` covers normal interactive connection management, not the full CLI and config surface. |
 | Bucket listing and object browsing | Bucket list, object list, prefix navigation, breadcrumbs, object metadata panel | `mc ls`, `mc tree`, `mc stat`, related browse and list flows | 7/10 | Partial | Strong interactive browse support, but no tree, `du`, or full stat-style command breadth. |
-| Object upload, download, metadata, and delete | Upload, download, HEAD metadata, single-object delete, AbixIO object detail | `mc cp`, `mc cat`, `mc head`, `mc stat`, `mc rm` | 8/10 | Partial | Covers the main single-object CRUD and metadata workflows. Inline content viewing and advanced copy flags are still missing. |
+| Object upload, download, metadata, and delete | Upload, download, HEAD metadata, single-object delete, batch delete, AbixIO object detail | `mc cp`, `mc cat`, `mc head`, `mc stat`, `mc rm` | 8/10 | Partial | Covers the main single-object CRUD and metadata workflows. Batch delete uses S3 DeleteObjects API (1000 keys/call). Inline content viewing and advanced copy flags are still missing. |
 | AbixIO-specific admin features | Disks (with pluggable backend info), healing, shard inspection, manual heal | No direct AbixIO equivalent | n/a | Out of scope | This is a deliberate `abixio-ui` specialization, not a parity gap. AbixIO server now supports pluggable storage backends via the `Backend` trait. |
-| Copy, move, rename, import, and export | Server-side copy, move (copy+delete), rename, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` and `mc mv` workflows | 7/10 | Partial | Copy uses S3 server-side CopyObject API. Move and rename use copy-then-delete. No multi-source copy or advanced `mc cp` option surface. |
+| Copy, move, rename, import, and export | Server-side copy (same-bucket and cross-bucket), move (copy+delete), rename, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` and `mc mv` workflows | 8/10 | Partial | Copy uses S3 server-side CopyObject API for both same-bucket and cross-bucket operations. Move and rename use copy-then-delete. No multi-source copy or advanced `mc cp` option surface. |
 | Search, find, and filtering | Filter box with substring and wildcard matching on current listing, plus recursive Find across all prefixes | `mc find` | 6/10 | Partial | Local instant filter on loaded objects plus recursive find with wildcard or substring pattern. Missing: time, size, metadata, and tag filters. |
 | Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
 | Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
 | Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
 | Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
-| Bulk delete and batch object workflows | Multi-select checkboxes with bulk delete, select all, confirmation modal, progress feedback | Recursive `mc rm`, batch-oriented workflows | 5/10 | Partial | Multi-select and bulk delete with confirmation. No recursive prefix delete, no time/size filters, no dry-run. |
+| Bulk delete and batch object workflows | Multi-select checkboxes with bulk delete, select all, confirmation modal, progress feedback, S3 DeleteObjects batch API | Recursive `mc rm`, batch-oriented workflows | 6/10 | Partial | Multi-select and bulk delete with confirmation. Uses S3 DeleteObjects API (1000 keys/batch). No recursive prefix delete UI, no time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
 | Tags | Not implemented | `mc tag` | 0/10 | None | No bucket-tag or object-tag UI. |
 | Bucket policy and anonymous access | Not implemented | `mc anonymous` | 0/10 | None | No bucket policy or public-access management UI. |
@@ -45,9 +45,9 @@ MinIO.
 | Core S3 | Browse objects | Yes | 7/10 | Prefix navigation and breadcrumbs are implemented. |
 | Core S3 | Upload files | Yes | 8/10 | Uses a native file picker. |
 | Core S3 | Download files | Yes | 8/10 | Uses a native save dialog. |
-| Core S3 | Delete objects | Yes | 5/10 | Single and bulk delete with multi-select. |
+| Core S3 | Delete objects | Yes | 6/10 | Single and bulk delete with multi-select. Batch delete uses S3 DeleteObjects API. |
 | Core S3 | View object metadata | Yes | 8/10 | Uses HEAD metadata in the detail panel. |
-| Core S3 | Copy object | Yes | 6/10 | Single-object copy works, including overwrite handling. |
+| Core S3 | Copy object | Yes | 8/10 | Server-side copy for same-bucket and cross-bucket via S3 CopyObject API. |
 | Core S3 | Import local folder recursively | Yes | 6/10 | Recursive local-to-S3 copy is implemented. |
 | Core S3 | Export prefix recursively | Yes | 6/10 | Recursive S3-to-local export is implemented. |
 | Core S3 | Close detail panel with `Esc` | Yes | n/a | Keyboard shortcut is wired. |
@@ -72,7 +72,7 @@ MinIO.
 | Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
 | Gaps | Versioning and recovery | No | 0/10 | No version browser, restore, or undo flow. |
-| Gaps | Bulk object operations | Partial | 5/10 | Multi-select bulk delete exists. No recursive prefix delete or time/size filtering yet. |
+| Gaps | Bulk object operations | Partial | 6/10 | Multi-select bulk delete with S3 DeleteObjects batch API. No recursive prefix delete UI or time/size filtering yet. |
 | Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
 | Gaps | Tags | No | 0/10 | No bucket-tag or object-tag UI. |
 | Gaps | Policy and anonymous access | No | 0/10 | No bucket policy or public access controls. |
@@ -89,7 +89,7 @@ MinIO.
 - Presigned sharing links.
 - Recursive sync, mirror, and diff workflows.
 - Versioning, undo, and recovery tooling.
-- Bulk object operations.
+- Bulk object operations: recursive prefix delete UI, time/size filters.
 - SQL and object query tools, plus inline object-content inspection.
 - Bucket and object tags.
 - Bucket policy and anonymous-access management.
@@ -98,6 +98,46 @@ MinIO.
 - Lifecycle, ILM, and tiering controls.
 - Encryption setup controls.
 - Replication, quota, event, and watch workflows.
+
+## S3 API Parity: mc (minio-go) vs aws-sdk-s3 vs abixio-ui
+
+`mc` talks to S3 through `minio-go`. `abixio-ui` talks to S3 through
+`aws-sdk-s3` (the official AWS SDK for Rust). This table tracks which S3
+API operations each library exposes and whether `abixio-ui` uses them.
+
+Previously used `rust-s3` 0.37, which was missing `DeleteObjects`,
+`ListObjectVersions`, `GetBucketPolicy`, and cross-bucket `CopyObject`.
+Migrated to `aws-sdk-s3` to eliminate all API blockers.
+
+| S3 API Operation | mc / minio-go | aws-sdk-s3 | abixio-ui | Notes |
+|---|---|---|---|---|
+| ListBuckets | yes | `list_buckets` | yes | |
+| CreateBucket | yes | `create_bucket` | yes | |
+| DeleteBucket | yes | `delete_bucket` | yes | |
+| ListObjectsV2 | yes | `list_objects_v2` | yes | |
+| GetObject | yes | `get_object` | yes | |
+| PutObject | yes | `put_object` | yes | |
+| HeadObject | yes | `head_object` | yes | |
+| DeleteObject | yes | `delete_object` | yes | |
+| DeleteObjects (batch) | yes (1000/req) | `delete_objects` | yes | 1000 keys/call, returns failed keys |
+| CopyObject | yes | `copy_object` | yes | same-bucket and cross-bucket server-side copy |
+| GetObjectTagging | yes | `get_object_tagging` | no | available, not yet wired |
+| PutObjectTagging | yes | `put_object_tagging` | no | available, not yet wired |
+| DeleteObjectTagging | yes | `delete_object_tagging` | no | available, not yet wired |
+| GetBucketLifecycle | yes | `get_bucket_lifecycle` | no | available, not yet wired |
+| PutBucketLifecycle | yes | `put_bucket_lifecycle` | no | available, not yet wired |
+| DeleteBucketLifecycle | yes | `delete_bucket_lifecycle` | no | available, not yet wired |
+| Presign GET | yes | presigning config | no | available, not yet wired |
+| Presign PUT | yes | presigning config | no | available, not yet wired |
+| ListObjectVersions | yes | `list_object_versions` | no | available, not yet wired |
+| GetBucketPolicy | yes | `get_bucket_policy` | no | available, not yet wired |
+| PutBucketPolicy | yes | `put_bucket_policy` | no | available, not yet wired |
+| GetBucketVersioning | yes | `get_bucket_versioning` | no | available, not yet wired |
+| PutObjectRetention | yes | `put_object_retention` | no | available, not yet wired |
+| PutBucketEncryption | yes | `put_bucket_encryption` | no | available, not yet wired |
+
+No API blockers remain. Every S3 operation mc uses is available in aws-sdk-s3.
+Features listed as "not yet wired" can be added without library changes.
 
 ## Intentional Scope Differences
 

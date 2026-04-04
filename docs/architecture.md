@@ -112,43 +112,45 @@ event triggers a full UI rebuild.
 
 ## S3 client
 
-Uses [rust-s3](https://github.com/durch/rust-s3) v0.37 for all S3 operations.
-Thin wrapper in `s3/client.rs` maps rust-s3 types to our app types.
+Uses [aws-sdk-s3](https://docs.rs/aws-sdk-s3) (the official AWS SDK for Rust)
+for all S3 operations. Thin wrapper in `s3/client.rs` maps SDK types to our
+app types.
 
-Features provided by rust-s3:
-- AWS Signature V4 request signing (hmac-sha256)
-- Anonymous access (no credentials)
-- Custom endpoints via `Region::Custom`
-- Path-style bucket addressing (for MinIO, AbixIO, etc.)
-- Server-side copy via `CopyObject` API
-- Multipart upload support
+Previously used `rust-s3` 0.37, which was missing critical APIs (`DeleteObjects`
+batch delete, `ListObjectVersions`, `GetBucketPolicy`, cross-bucket `CopyObject`).
+Migrated to `aws-sdk-s3` to eliminate all API blockers.
+
+Features provided by aws-sdk-s3:
+- AWS Signature V4 request signing
+- Anonymous access (empty credentials)
+- Custom endpoints via `endpoint_url` (for MinIO, AbixIO, etc.)
+- Path-style bucket addressing via `force_path_style`
+- Server-side copy via `CopyObject` API (same-bucket and cross-bucket)
+- Batch delete via `DeleteObjects` API (up to 1000 keys per request)
+- Full S3 API surface (versioning, tagging, policies, lifecycle, presigning)
 
 Operations:
 - `list_buckets()`. Lists all buckets.
-- `list_objects(bucket, prefix, delimiter)`. Lists objects with prefix and delimiter support.
-- `list_objects_recursive(bucket, prefix)`. Flat listing for find/search.
+- `list_objects(bucket, prefix, delimiter)`. Lists objects with prefix and delimiter support. Handles pagination automatically.
+- `list_objects_recursive(bucket, prefix)`. Flat listing for find/search. Handles pagination automatically.
 - `create_bucket(bucket)`. Creates a new bucket.
 - `delete_bucket(bucket)`. Deletes a bucket.
 - `put_object(bucket, key, data, content_type)`. Uploads an object.
 - `get_object(bucket, key)`. Downloads an object.
 - `head_object(bucket, key)`. Gets object metadata (ETag, size, content type, headers).
-- `delete_object(bucket, key)`. Deletes an object.
-- `copy_object(src_bucket, src_key, dst_bucket, dst_key)`. Server-side copy. For same-bucket operations, uses the S3 `CopyObject` API where data never leaves the server. For cross-bucket copies on the same endpoint, falls back to GET + PUT.
+- `delete_object(bucket, key)`. Deletes a single object.
+- `delete_objects(bucket, keys)`. Batch delete up to 1000 keys per call using the S3 DeleteObjects API. Returns list of failed keys.
+- `copy_object(src_bucket, src_key, dst_bucket, dst_key)`. Server-side copy using the S3 CopyObject API. Works for both same-bucket and cross-bucket copies -- data never leaves the server.
 
 ### Copy and move strategy
 
 S3 has no native move or rename operation. Move is always copy-then-delete.
 
-For copies within the same bucket, the S3 `CopyObject` API tells the server
-to copy data internally. The data never leaves the server, and the server
-guarantees integrity. This is what MinIO Client (`mc cp` and `mc mv`) uses
-for same-server operations. The server returns an ETag in the response to
-confirm the copy succeeded.
-
-For cross-bucket copies on the same endpoint, rust-s3 only exposes
-same-bucket server-side copy (`copy_object_internal`). Cross-bucket falls
-back to downloading the object and re-uploading it. This is still correct
-but uses more bandwidth.
+The S3 `CopyObject` API tells the server to copy data internally. The data
+never leaves the server, and the server guarantees integrity. This is what
+MinIO Client (`mc cp` and `mc mv`) uses for same-server operations. With
+aws-sdk-s3, this works for both same-bucket and cross-bucket copies using
+the `copy_source` parameter (`bucket/key` format).
 
 For move operations, the source is only deleted after the copy returns
 success. If the copy fails for any reason, the source is untouched.
@@ -254,7 +256,7 @@ object-inspection admin calls.
 ## Dependencies
 
 - `iced` 0.14. GUI framework with reactive rendering and Elm architecture.
-- `rust-s3` 0.37. S3 client with Sig V4 signing. It brings in `reqwest` and `quick-xml`.
+- `aws-sdk-s3` 1.x. Official AWS S3 SDK for Rust. Full S3 API surface with SigV4 signing.
 - `tokio`. Async runtime managed by iced internally.
 - `keyring` 3. OS keychain access for Windows Credential Manager, macOS Keychain, and Linux secret-service.
 - `dirs` 6. Cross-platform home directory resolution.

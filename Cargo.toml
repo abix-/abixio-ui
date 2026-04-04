@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 iced = { version = "0.14", features = ["tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "fs"] }
-rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
+aws-sdk-s3 = "1"
+aws-config = "1"
+aws-credential-types = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 hmac = "0.12"
 sha2 = "0.10"

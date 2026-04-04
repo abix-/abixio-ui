@@ -4,20 +4,22 @@ use iced::{Element, Length};
 use crate::app::{App, Message, Section};
 
 impl App {
-    pub fn sidebar_view(&self) -> Element<Message> {
-        column![
-            self.nav_btn("B", Section::Browse),
-            self.nav_btn("+", Section::Connections),
-            iced::widget::space::vertical(),
-            self.nav_btn("S", Section::Settings),
-        ]
-        .spacing(4)
-        .padding(4)
-        .height(Length::Fill)
-        .into()
+    pub fn sidebar_view(&self) -> Element<'_, Message> {
+        let mut col = column![self.nav_btn("B", Section::Browse),].spacing(4).padding(4);
+
+        if self.is_abixio {
+            col = col.push(self.nav_btn("D", Section::Disks));
+            col = col.push(self.nav_btn("H", Section::Healing));
+        }
+
+        col = col.push(self.nav_btn("+", Section::Connections));
+        col = col.push(iced::widget::space::vertical());
+        col = col.push(self.nav_btn("S", Section::Settings));
+
+        col.height(Length::Fill).into()
     }
 
-    fn nav_btn(&self, label: &str, section: Section) -> Element<Message> {
+    fn nav_btn(&self, label: &str, section: Section) -> Element<'_, Message> {
         let is_active = self.section == section;
         button(text(label.to_string()).size(14).center())
             .width(32)

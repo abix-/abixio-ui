@@ -4,6 +4,8 @@ use iced::keyboard;
 use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Subscription, Task, Theme};
 
+use crate::abixio::client::AdminClient;
+use crate::abixio::types::{DisksResponse, HealStatusResponse, StatusResponse};
 use crate::config::{self, Connection, Settings};
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, S3Client};
 
@@ -47,6 +49,13 @@ pub enum Message {
     NewConnRegionChanged(String),
     NewConnAccessKeyChanged(String),
     NewConnSecretKeyChanged(String),
+
+    // admin (abixio-specific)
+    AbixioDetected(Option<StatusResponse>),
+    DisksLoaded(Result<DisksResponse, String>),
+    HealStatusLoaded(Result<HealStatusResponse, String>),
+    RefreshDisks,
+    RefreshHealStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +110,13 @@ pub struct App {
     pub active_connection: Option<String>,
     pub editing_connection: Option<String>,
 
+    // admin (abixio-specific)
+    pub admin_client: Option<Arc<AdminClient>>,
+    pub is_abixio: bool,
+    pub server_status: Option<StatusResponse>,
+    pub disks_data: Option<Result<DisksResponse, String>>,
+    pub heal_data: Option<Result<HealStatusResponse, String>>,
+
     // connection form
     pub new_conn_name: String,
     pub new_conn_endpoint: String,
@@ -153,6 +169,11 @@ impl App {
             settings,
             active_connection: None,
             editing_connection: None,
+            admin_client: None,
+            is_abixio: false,
+            server_status: None,
+            disks_data: None,
+            heal_data: None,
             new_conn_name: String::new(),
             new_conn_endpoint: String::new(),
             new_conn_region: "us-east-1".to_string(),
@@ -398,7 +419,26 @@ impl App {
                         self.selected_bucket = None;
                         self.current_prefix.clear();
                         self.loading_buckets = true;
-                        self.cmd_fetch_buckets()
+                        self.is_abixio = false;
+                        self.server_status = None;
+                        self.disks_data = None;
+                        self.heal_data = None;
+
+                        // create admin client and probe for AbixIO
+                        let admin = Arc::new(AdminClient::new(
+                            &conn.endpoint,
+                            creds.as_ref().map(|(a, s)| (a.as_str(), s.as_str())),
+                            &conn.region,
+                        ));
+                        self.admin_client = Some(admin.clone());
+
+                        Task::batch(vec![
+                            self.cmd_fetch_buckets(),
+                            Task::perform(
+                                async move { admin.probe().await },
+                                Message::AbixioDetected,
+                            ),
+                        ])
                     }
                     Err(e) => {
                         self.error = Some(format!("connect failed: {}", e));
@@ -545,6 +585,79 @@ impl App {
                 self.new_conn_secret_key = v;
                 Task::none()
             }
+
+            // -- admin (abixio-specific) --
+            Message::AbixioDetected(status) => {
+                if let Some(s) = status {
+                    self.is_abixio = true;
+                    self.server_status = Some(s);
+                    // auto-fetch disks + heal status
+                    let admin = self.admin_client.clone();
+                    return Task::batch(vec![
+                        Task::perform(
+                            async move {
+                                if let Some(a) = admin.as_ref() {
+                                    a.disks().await
+                                } else {
+                                    Err("no admin client".to_string())
+                                }
+                            },
+                            Message::DisksLoaded,
+                        ),
+                        {
+                            let admin = self.admin_client.clone();
+                            Task::perform(
+                                async move {
+                                    if let Some(a) = admin.as_ref() {
+                                        a.heal_status().await
+                                    } else {
+                                        Err("no admin client".to_string())
+                                    }
+                                },
+                                Message::HealStatusLoaded,
+                            )
+                        },
+                    ]);
+                } else {
+                    self.is_abixio = false;
+                    self.server_status = None;
+                }
+                Task::none()
+            }
+            Message::DisksLoaded(result) => {
+                self.disks_data = Some(result);
+                Task::none()
+            }
+            Message::HealStatusLoaded(result) => {
+                self.heal_data = Some(result);
+                Task::none()
+            }
+            Message::RefreshDisks => {
+                let admin = self.admin_client.clone();
+                Task::perform(
+                    async move {
+                        if let Some(a) = admin.as_ref() {
+                            a.disks().await
+                        } else {
+                            Err("no admin client".to_string())
+                        }
+                    },
+                    Message::DisksLoaded,
+                )
+            }
+            Message::RefreshHealStatus => {
+                let admin = self.admin_client.clone();
+                Task::perform(
+                    async move {
+                        if let Some(a) = admin.as_ref() {
+                            a.heal_status().await
+                        } else {
+                            Err("no admin client".to_string())
+                        }
+                    },
+                    Message::HealStatusLoaded,
+                )
+            }
         }
     }
 
@@ -553,6 +666,8 @@ impl App {
         let content: Element<Message> = match self.section {
             Section::Browse => self.browse_view(),
             Section::Connections => self.connections_view(),
+            Section::Disks if self.is_abixio => self.disks_view(),
+            Section::Healing if self.is_abixio => self.healing_view(),
             Section::Settings => self.settings_view(),
             _ => container(text("Coming soon").size(14)).padding(20).into(),
         };

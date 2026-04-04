@@ -1,6 +1,8 @@
 pub mod buckets;
 pub mod connections;
 pub mod detail;
+pub mod disks;
+pub mod healing;
 pub mod objects;
 pub mod settings;
 pub mod sidebar;

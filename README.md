@@ -6,15 +6,15 @@ app exposes the current Disks and Healing views.
 
 ## Features
 
-- **S3 object browser** -- browse buckets, navigate prefixes, upload/download/delete
-- **Multi-server connections** -- save, edit, test, and switch between endpoints
-- **AWS Sig V4 auth** -- connect to AWS, MinIO, AbixIO, Backblaze, or any authenticated endpoint
-- **OS keychain** -- access keys and secret keys stored in Windows Credential Manager / macOS Keychain / Linux secret-service. Zero secrets on disk
-- **AbixIO admin** -- when connected to an AbixIO server, the UI auto-detects it and enables:
-  - **Disk health dashboard** -- per-disk status, space usage, bucket/object counts
-  - **Healing monitor** -- MRF queue depth, integrity scanner stats, refresh-on-demand
-  - **Object admin detail panel** -- shard inspection, manual inspect refresh, confirmed manual heal
-- **Built-in smoke tests** -- a Testing tab can run end-to-end checks against the current server
+- **S3 object browser.** Browse buckets, navigate prefixes, and upload, download, or delete objects.
+- **Multi-server connections.** Save, edit, test, and switch between endpoints.
+- **AWS Sig V4 auth.** Connect to AWS, MinIO, AbixIO, Backblaze, or any authenticated endpoint.
+- **OS keychain.** Access keys and secret keys live in Windows Credential Manager, macOS Keychain, or Linux secret-service. Secrets do not go on disk.
+- **AbixIO admin.** When connected to an AbixIO server, the UI auto-detects it and enables:
+  - **Disk health dashboard.** Shows per-disk status, space usage, and bucket or object counts.
+  - **Healing monitor.** Shows MRF queue depth, integrity scanner stats, and refresh-on-demand.
+  - **Object admin detail panel.** Shows shard inspection, manual inspect refresh, and confirmed manual heal.
+- **Built-in smoke tests.** A Testing tab can run end-to-end checks against the current server.
 
 ## How it works
 
@@ -22,15 +22,15 @@ Built with [iced](https://iced.rs) 0.14 (reactive rendering, Elm architecture). 
 
 When connected to an [AbixIO](https://github.com/abix-/abixio) server, the UI
 probes `/_admin/status`. If it responds with `"server": "abixio"`, admin tabs
-(Disks, Healing) appear in the sidebar. Non-AbixIO S3 endpoints work fine --
+(Disks, Healing) appear in the sidebar. Non-AbixIO S3 endpoints work fine. The
 admin tabs are simply hidden.
 
 ### Data authority
 
 - **S3 endpoint** is the single source of truth for all bucket/object data
 - **OS keychain** stores access keys and secret keys (encrypted by OS)
-- **Local config** (`~/.abixio-ui/settings.json`) stores connection profiles (name, endpoint, region -- no secrets)
-- No local caching -- every navigation action fetches live from the server
+- **Local config** (`~/.abixio-ui/settings.json`) stores connection profiles such as name, endpoint, and region. It does not store secrets.
+- No local caching. Every navigation action fetches live from the server.
 
 ## Usage
 
@@ -109,8 +109,9 @@ cargo build --release    # release binary goes to Cargo's target dir
 - Custom theme colors (using stock iced Dark/Light for now)
 - Multipart upload progress
 
-See [docs/features.md](docs/features.md) for the current feature set, plus
-[docs/](docs/) for architecture, credential storage, data authority, and more.
+See [docs/features.md](docs/features.md) for the current feature set and MinIO
+Client `mc` parity view, plus [docs/](docs/) for architecture, credential
+storage, data authority, and more.
 
 ## License
 

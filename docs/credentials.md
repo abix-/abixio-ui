@@ -6,7 +6,7 @@ How abixio-ui stores connection profiles and credentials.
 
 1. **No secrets on disk.** Access keys and secret keys are stored only in the
    OS keychain. The on-disk settings file contains names, endpoints, and regions
-   -- never any keys.
+   It never stores keys.
 
 2. **One profile, one entry.** Each connection is a single profile with
    everything needed to connect: name, endpoint, region, and optionally
@@ -71,8 +71,8 @@ credential manager:
 
 Each connection stores two keychain entries:
 
-- `{name}.access-key` -- the access key ID (e.g. `AKIA...`)
-- `{name}.secret-key` -- the secret access key
+- `{name}.access-key`. The access key ID, for example `AKIA...`.
+- `{name}.secret-key`. The secret access key.
 
 The service name for all entries is `abixio-ui`.
 
@@ -101,7 +101,7 @@ When you add a new connection:
 4. Save the connection (name, endpoint, region) to `settings.json`
 
 If you leave the access key and secret key fields empty, the connection is
-saved as anonymous -- no keychain entries are created.
+saved as anonymous. No keychain entries are created.
 
 ## Edit flow
 
@@ -120,7 +120,7 @@ existing saved connection back to anonymous.
 When you delete a connection:
 
 1. Remove the keychain entries `{name}.access-key` and `{name}.secret-key`
-   (best-effort -- if they don't exist, that's fine)
+   This is best-effort. If they do not exist, that is fine.
 2. Remove the connection from `settings.json`
 
 ## CLI override
@@ -172,7 +172,7 @@ secret data in the OS keychain. This means:
 
 ## Relevant source files
 
-- `src/config.rs` -- Settings struct, load/save, add/remove connections
-- `src/keychain.rs` -- OS keychain wrapper (store_keys, get_keys, delete_keys)
-- `src/views/connections.rs` -- connection manager UI
-- `src/app.rs` -- ConnectTo message handler (resolve keys + create client)
+- `src/config.rs`. Settings struct plus load, save, add, and remove connection logic.
+- `src/keychain.rs`. OS keychain wrapper with store, get, and delete helpers.
+- `src/views/connections.rs`. Connection manager UI.
+- `src/app.rs`. `ConnectTo` message handler that resolves keys and creates the client.

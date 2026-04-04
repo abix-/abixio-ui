@@ -61,7 +61,7 @@ iced uses the Elm architecture: Model-View-Update (MVU).
 - Receives a Message (user action or async result)
 - Mutates state
 - Returns Task for any async work needed
-- Never blocks -- file dialogs are the one exception (known limitation)
+- Never blocks. File dialogs are the one exception.
 
 **View:** `App::view(&self) -> Element<'_, Message>`
 - Pure function of state, no mutation
@@ -96,7 +96,7 @@ Message::BucketsLoaded(Err(e)) => {
 ```
 
 iced manages the tokio runtime internally. We don't create or manage one.
-`async_op.rs` exists only for the CPU idle tests -- the app uses Task::perform.
+`async_op.rs` exists only for the CPU idle tests. The app uses `Task::perform`.
 
 ## Reactive rendering
 
@@ -122,13 +122,13 @@ Features provided by rust-s3:
 - Multipart upload support
 
 Operations:
-- `list_buckets()` -- list all buckets
-- `list_objects(bucket, prefix, delimiter)` -- list objects with prefix/delimiter
-- `create_bucket(bucket)` -- create a new bucket
-- `put_object(bucket, key, data, content_type)` -- upload an object
-- `get_object(bucket, key)` -- download an object
-- `head_object(bucket, key)` -- get object metadata
-- `delete_object(bucket, key)` -- delete an object
+- `list_buckets()`. Lists all buckets.
+- `list_objects(bucket, prefix, delimiter)`. Lists objects with prefix and delimiter support.
+- `create_bucket(bucket)`. Creates a new bucket.
+- `put_object(bucket, key, data, content_type)`. Uploads an object.
+- `get_object(bucket, key)`. Downloads an object.
+- `head_object(bucket, key)`. Gets object metadata.
+- `delete_object(bucket, key)`. Deletes an object.
 
 Works with any S3-compatible server: AbixIO, AWS, MinIO, Backblaze B2, etc.
 
@@ -230,12 +230,12 @@ object-inspection admin calls.
 
 ## Dependencies
 
-- `iced` 0.14 -- GUI framework (reactive rendering, Elm architecture)
-- `rust-s3` 0.37 -- S3 client with Sig V4 signing (brings reqwest, quick-xml internally)
-- `tokio` -- async runtime (managed by iced internally)
-- `keyring` 3 -- OS keychain access (Windows Credential Manager, macOS Keychain, Linux secret-service)
-- `dirs` 6 -- cross-platform home directory resolution
-- `serde` / `serde_json` -- serialization
-- `rfd` -- native file dialogs (upload/download)
-- `clap` -- CLI argument parsing
-- `tracing` -- logging
+- `iced` 0.14. GUI framework with reactive rendering and Elm architecture.
+- `rust-s3` 0.37. S3 client with Sig V4 signing. It brings in `reqwest` and `quick-xml`.
+- `tokio`. Async runtime managed by iced internally.
+- `keyring` 3. OS keychain access for Windows Credential Manager, macOS Keychain, and Linux secret-service.
+- `dirs` 6. Cross-platform home directory resolution.
+- `serde` / `serde_json`. Serialization.
+- `rfd`. Native file dialogs for upload and download.
+- `clap`. CLI argument parsing.
+- `tracing`. Logging.

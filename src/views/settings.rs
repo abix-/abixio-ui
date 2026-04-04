@@ -33,6 +33,10 @@ impl App {
             iced::widget::rule::horizontal(1),
             // connection
             text("Connection").size(13),
+            row![
+                text("Active").size(11),
+                text(self.active_connection.as_deref().unwrap_or("none")).size(11)
+            ].spacing(8),
             row![text("Endpoint").size(11), text(&self.endpoint).size(11)].spacing(8),
             iced::widget::rule::horizontal(1),
             // performance

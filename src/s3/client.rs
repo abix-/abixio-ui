@@ -1,45 +1,60 @@
-use reqwest::Client;
-
-use super::xml::{ListAllMyBucketsResult, ListBucketResult};
+use s3::bucket::Bucket;
+use s3::creds::Credentials;
+use s3::region::Region;
+use s3::BucketConfiguration;
 
 #[derive(Clone)]
 pub struct S3Client {
-    endpoint: String,
-    http: Client,
+    region: Region,
+    credentials: Credentials,
+    path_style: bool,
 }
 
 impl S3Client {
-    pub fn new(endpoint: &str) -> Self {
-        Self {
+    pub fn new(endpoint: &str, creds: Option<(&str, &str)>, region_name: &str) -> Result<Self, String> {
+        let region = Region::Custom {
+            region: region_name.to_string(),
             endpoint: endpoint.trim_end_matches('/').to_string(),
-            http: Client::new(),
-        }
+        };
+        let credentials = match creds {
+            Some((access_key, secret_key)) => {
+                Credentials::new(Some(access_key), Some(secret_key), None, None, None)
+                    .map_err(|e| e.to_string())?
+            }
+            None => Credentials::anonymous().map_err(|e| e.to_string())?,
+        };
+        Ok(Self {
+            region,
+            credentials,
+            path_style: true,
+        })
+    }
+
+    /// Create an anonymous client (no auth) for the given endpoint.
+    pub fn anonymous(endpoint: &str) -> Result<Self, String> {
+        Self::new(endpoint, None, "us-east-1")
+    }
+
+    fn bucket(&self, name: &str) -> Result<Box<Bucket>, String> {
+        let b = Bucket::new(name, self.region.clone(), self.credentials.clone())
+            .map_err(|e| e.to_string())?;
+        Ok(if self.path_style {
+            b.with_path_style()
+        } else {
+            b
+        })
     }
 
     pub async fn list_buckets(&self) -> Result<Vec<BucketInfo>, String> {
-        let resp = self
-            .http
-            .get(&format!("{}/", self.endpoint))
-            .send()
+        let resp = Bucket::list_buckets(self.region.clone(), self.credentials.clone())
             .await
             .map_err(|e| e.to_string())?;
 
-        let status = resp.status();
-        let body = resp.text().await.map_err(|e| e.to_string())?;
-        if !status.is_success() {
-            return Err(format!("list buckets: {} {}", status, body));
-        }
-
-        let parsed: ListAllMyBucketsResult =
-            quick_xml::de::from_str(&body).map_err(|e| format!("xml parse: {}", e))?;
-
-        Ok(parsed
-            .buckets
-            .bucket
-            .into_iter()
-            .map(|b| BucketInfo {
-                name: b.name,
-                creation_date: b.creation_date,
+        Ok(resp
+            .bucket_names()
+            .map(|name| BucketInfo {
+                name,
+                creation_date: String::new(),
             })
             .collect())
     }
@@ -50,64 +65,58 @@ impl S3Client {
         prefix: &str,
         delimiter: &str,
     ) -> Result<ListObjectsResult, String> {
-        let mut url = format!("{}/{}?list-type=2", self.endpoint, bucket);
-        if !prefix.is_empty() {
-            url.push_str(&format!("&prefix={}", prefix));
-        }
-        if !delimiter.is_empty() {
-            url.push_str(&format!("&delimiter={}", delimiter));
-        }
+        let b = self.bucket(bucket)?;
+        let delim = if delimiter.is_empty() {
+            None
+        } else {
+            Some(delimiter.to_string())
+        };
 
-        let resp = self
-            .http
-            .get(&url)
-            .send()
+        let results = b
+            .list(prefix.to_string(), delim)
             .await
             .map_err(|e| e.to_string())?;
 
-        let status = resp.status();
-        let body = resp.text().await.map_err(|e| e.to_string())?;
-        if !status.is_success() {
-            return Err(format!("list objects: {} {}", status, body));
+        let mut objects = Vec::new();
+        let mut common_prefixes = Vec::new();
+        let mut is_truncated = false;
+
+        for page in &results {
+            for obj in &page.contents {
+                objects.push(ObjectInfo {
+                    key: obj.key.clone(),
+                    size: obj.size,
+                    last_modified: obj.last_modified.clone(),
+                    etag: obj.e_tag.clone().unwrap_or_default(),
+                });
+            }
+            if let Some(prefixes) = &page.common_prefixes {
+                for p in prefixes {
+                    common_prefixes.push(p.prefix.clone());
+                }
+            }
+            if page.is_truncated {
+                is_truncated = true;
+            }
         }
 
-        let parsed: ListBucketResult =
-            quick_xml::de::from_str(&body).map_err(|e| format!("xml parse: {}", e))?;
-
         Ok(ListObjectsResult {
-            objects: parsed
-                .contents
-                .into_iter()
-                .map(|o| ObjectInfo {
-                    key: o.key,
-                    size: o.size,
-                    last_modified: o.last_modified,
-                    etag: o.etag,
-                })
-                .collect(),
-            common_prefixes: parsed
-                .common_prefixes
-                .into_iter()
-                .map(|p| p.prefix)
-                .collect(),
-            is_truncated: parsed.is_truncated,
+            objects,
+            common_prefixes,
+            is_truncated,
         })
     }
 
     pub async fn create_bucket(&self, bucket: &str) -> Result<(), String> {
-        let resp = self
-            .http
-            .put(&format!("{}/{}", self.endpoint, bucket))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if resp.status().is_success() {
-            Ok(())
-        } else {
-            let body = resp.text().await.unwrap_or_default();
-            Err(format!("create bucket: {}", body))
-        }
+        Bucket::create_with_path_style(
+            bucket,
+            self.region.clone(),
+            self.credentials.clone(),
+            BucketConfiguration::default(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub async fn put_object(
@@ -117,96 +126,103 @@ impl S3Client {
         data: Vec<u8>,
         content_type: &str,
     ) -> Result<String, String> {
-        let resp = self
-            .http
-            .put(&format!("{}/{}/{}", self.endpoint, bucket, key))
-            .header("Content-Type", content_type)
-            .body(data)
-            .send()
+        let b = self.bucket(bucket)?;
+        let resp = b
+            .put_object_with_content_type(key, &data, content_type)
             .await
             .map_err(|e| e.to_string())?;
 
-        if resp.status().is_success() {
-            let etag = resp
-                .headers()
-                .get("etag")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            Ok(etag)
+        if (200..300).contains(&resp.status_code()) {
+            Ok(String::new())
         } else {
-            let body = resp.text().await.unwrap_or_default();
-            Err(format!("put object: {}", body))
+            Err(format!(
+                "put object: {} {}",
+                resp.status_code(),
+                String::from_utf8_lossy(resp.as_slice())
+            ))
         }
     }
 
     pub async fn get_object(&self, bucket: &str, key: &str) -> Result<Vec<u8>, String> {
-        let resp = self
-            .http
-            .get(&format!("{}/{}/{}", self.endpoint, bucket, key))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        let b = self.bucket(bucket)?;
+        let resp = b.get_object(key).await.map_err(|e| e.to_string())?;
 
-        if resp.status().is_success() {
-            resp.bytes()
-                .await
-                .map(|b| b.to_vec())
-                .map_err(|e| e.to_string())
+        if (200..300).contains(&resp.status_code()) {
+            Ok(resp.to_vec())
         } else {
-            let body = resp.text().await.unwrap_or_default();
-            Err(format!("get object: {}", body))
+            Err(format!(
+                "get object: {} {}",
+                resp.status_code(),
+                String::from_utf8_lossy(resp.as_slice())
+            ))
         }
     }
 
     pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectDetail, String> {
-        let resp = self
-            .http
-            .head(&format!("{}/{}/{}", self.endpoint, bucket, key))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        let b = self.bucket(bucket)?;
+        let (head, code) = b.head_object(key).await.map_err(|e| e.to_string())?;
 
-        if !resp.status().is_success() {
-            return Err(format!("head object: {}", resp.status()));
+        if !(200..300).contains(&code) {
+            return Err(format!("head object: {}", code));
         }
 
-        let h = resp.headers();
-        let get_header = |name: &str| -> String {
-            h.get(name)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string()
-        };
-
-        let headers: Vec<(String, String)> = h
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
+        let mut headers = Vec::new();
+        if let Some(v) = &head.content_type {
+            headers.push(("content-type".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.content_length {
+            headers.push(("content-length".to_string(), v.to_string()));
+        }
+        if let Some(v) = &head.last_modified {
+            headers.push(("last-modified".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.e_tag {
+            headers.push(("etag".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.cache_control {
+            headers.push(("cache-control".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.content_disposition {
+            headers.push(("content-disposition".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.content_encoding {
+            headers.push(("content-encoding".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.accept_ranges {
+            headers.push(("accept-ranges".to_string(), v.clone()));
+        }
+        if let Some(v) = &head.expiration {
+            headers.push(("x-amz-expiration".to_string(), v.clone()));
+        }
+        if let Some(meta) = &head.metadata {
+            for (k, v) in meta {
+                headers.push((format!("x-amz-meta-{}", k), v.clone()));
+            }
+        }
 
         Ok(ObjectDetail {
             key: key.to_string(),
-            size: get_header("content-length").parse().unwrap_or(0),
-            content_type: get_header("content-type"),
-            last_modified: get_header("last-modified"),
-            etag: get_header("etag"),
+            size: head.content_length.unwrap_or(0) as u64,
+            content_type: head.content_type.unwrap_or_default(),
+            last_modified: head.last_modified.unwrap_or_default(),
+            etag: head.e_tag.unwrap_or_default(),
             headers,
         })
     }
 
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), String> {
-        let resp = self
-            .http
-            .delete(&format!("{}/{}/{}", self.endpoint, bucket, key))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        let b = self.bucket(bucket)?;
+        let resp = b.delete_object(key).await.map_err(|e| e.to_string())?;
 
-        if resp.status().is_success() || resp.status().as_u16() == 204 {
+        let code = resp.status_code();
+        if (200..300).contains(&code) {
             Ok(())
         } else {
-            let body = resp.text().await.unwrap_or_default();
-            Err(format!("delete object: {}", body))
+            Err(format!(
+                "delete object: {} {}",
+                code,
+                String::from_utf8_lossy(resp.as_slice())
+            ))
         }
     }
 }

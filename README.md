@@ -14,7 +14,7 @@ Native desktop S3 manager. Browse, upload, download, and manage objects on any S
 
 ## How it works
 
-abixio-ui is a standalone native desktop app built with [iced](https://iced.rs) 0.14. It connects to any S3-compatible endpoint over HTTP. No AWS SDK required -- it speaks raw S3 protocol.
+abixio-ui is a standalone native desktop app built with [iced](https://iced.rs) 0.14. It connects to any S3-compatible endpoint using the [rust-s3](https://github.com/durch/rust-s3) library with full AWS Signature V4 authentication support.
 
 When connected to an [AbixIO](https://github.com/abix-/abixio) server, additional management features (disk health, shard inspection, config) are automatically enabled.
 
@@ -30,11 +30,14 @@ iced 0.14 uses reactive rendering -- widgets only redraw when their state actual
 ## Usage
 
 ```bash
-# connect to local AbixIO
+# connect to local AbixIO (no auth)
 abixio-ui --endpoint http://localhost:9000
 
-# connect to any S3 endpoint
-abixio-ui --endpoint http://minio.home:9000
+# connect to any S3 endpoint with credentials
+abixio-ui --endpoint http://minio.home:9000 --access-key minioadmin --secret-key minioadmin
+
+# launch without args to manage connections in the UI
+abixio-ui
 ```
 
 ## Build
@@ -48,10 +51,13 @@ cargo build --release
 **Done:**
 - Three-panel layout: icon sidebar + center content + right detail panel
 - Dark / Light theme switching in Settings
-- S3 client (raw HTTP via reqwest, XML parsing)
+- S3 client via [rust-s3](https://github.com/durch/rust-s3) with AWS Sig V4 signing
+- **Connection manager** -- add, remove, switch connections from the UI
+- **Credential manager** -- separate credentials from connections, one credential shared across many connections
+- **OS keychain storage** -- secret keys stored in Windows Credential Manager / macOS Keychain / Linux secret-service
 - Bucket list sidebar with create bucket
 - Object browser with breadcrumb navigation and prefix drilling
-- Object detail panel: full metadata from HEAD request (size, type, etag, all HTTP headers)
+- Object detail panel: full metadata from HEAD request (size, type, etag, headers)
 - Upload via native file dialog
 - Download via native save dialog
 - Delete with error display
@@ -59,12 +65,10 @@ cargo build --release
 - Error bar with dismiss for failed operations
 - Settings view: theme, connection info, performance stats, about
 - Performance stats: message count, frame time tracking (5m sliding window)
+- CLI args: `--endpoint`, `--access-key`, `--secret-key` for scripted use
 
 **Not yet implemented:**
-- Connection manager (multi-server, saved connections)
-- OS keychain credential storage
 - AbixIO-specific features (disk health, object inspector, config)
-- Auth (AWS Sig V4 signing)
 - Custom theme colors (using stock iced Dark/Light for now)
 
 See [docs/](docs/) for architecture, data authority, performance, and iced standards.

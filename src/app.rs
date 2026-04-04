@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use iced::keyboard;
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Subscription, Task, Theme};
 
+use crate::connection::Connection;
+use crate::credential::StoredCredential;
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, S3Client};
 
 // -- messages --
@@ -33,6 +35,22 @@ pub enum Message {
     SetTheme(AppTheme),
     NewBucketNameChanged(String),
     DismissError,
+
+    // connection manager
+    ConnectTo(String),
+    AddConnection,
+    RemoveConnection(String),
+    NewConnNameChanged(String),
+    NewConnEndpointChanged(String),
+    NewConnCredentialChanged(String),
+
+    // credential manager
+    AddCredential,
+    RemoveCredential(String),
+    NewCredNameChanged(String),
+    NewCredAccessKeyChanged(String),
+    NewCredSecretKeyChanged(String),
+    NewCredRegionChanged(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,15 +99,53 @@ pub struct App {
 
     pub error: Option<String>,
     pub perf: crate::perf::PerfStats,
+
+    // connection manager
+    pub connections: Vec<Connection>,
+    pub credentials: Vec<StoredCredential>,
+    pub active_connection: Option<String>,
+
+    // connection form
+    pub new_conn_name: String,
+    pub new_conn_endpoint: String,
+    pub new_conn_credential: String,
+
+    // credential form
+    pub new_cred_name: String,
+    pub new_cred_access_key: String,
+    pub new_cred_secret_key: String,
+    pub new_cred_region: String,
 }
 
 impl App {
-    pub fn new(endpoint: String) -> (Self, Task<Message>) {
-        let client = Arc::new(S3Client::new(&endpoint));
+    pub fn new(endpoint: Option<String>, creds: Option<(String, String)>) -> (Self, Task<Message>) {
+        let connections = crate::connection::load().unwrap_or_default();
+        let credentials = crate::credential::load().unwrap_or_default();
+
+        let (client, start_endpoint, section, loading_buckets) = if let Some(ref ep) = endpoint {
+            let c = match &creds {
+                Some((ak, sk)) => S3Client::new(ep, Some((ak, sk)), "us-east-1"),
+                None => S3Client::anonymous(ep),
+            };
+            match c {
+                Ok(client) => (Arc::new(client), ep.clone(), Section::Browse, true),
+                Err(e) => {
+                    tracing::error!("failed to create s3 client: {}", e);
+                    let fallback = S3Client::anonymous("http://localhost:9000")
+                        .expect("fallback client");
+                    (Arc::new(fallback), String::new(), Section::Connections, false)
+                }
+            }
+        } else {
+            let fallback =
+                S3Client::anonymous("http://localhost:9000").expect("fallback client");
+            (Arc::new(fallback), String::new(), Section::Connections, false)
+        };
+
         let app = Self {
             client: client.clone(),
-            endpoint,
-            section: Section::Browse,
+            endpoint: start_endpoint,
+            section,
             selection: Selection::None,
             theme: AppTheme::Dark,
             buckets: None,
@@ -98,18 +154,31 @@ impl App {
             selected_bucket: None,
             current_prefix: String::new(),
             new_bucket_name: String::new(),
-            loading_buckets: true,
+            loading_buckets,
             loading_objects: false,
             loading_detail: false,
             error: None,
             perf: crate::perf::PerfStats::new(),
+            connections,
+            credentials,
+            active_connection: None,
+            new_conn_name: String::new(),
+            new_conn_endpoint: String::new(),
+            new_conn_credential: String::new(),
+            new_cred_name: String::new(),
+            new_cred_access_key: String::new(),
+            new_cred_secret_key: String::new(),
+            new_cred_region: "us-east-1".to_string(),
         };
-        let task = {
+
+        let task = if loading_buckets {
             let c = client.clone();
             Task::perform(
                 async move { c.list_buckets().await },
                 Message::BucketsLoaded,
             )
+        } else {
+            Task::none()
         };
         (app, task)
     }
@@ -304,6 +373,197 @@ impl App {
                 self.error = None;
                 Task::none()
             }
+
+            // -- connection manager --
+            Message::ConnectTo(name) => {
+                let conn = match self.connections.iter().find(|c| c.name == name) {
+                    Some(c) => c.clone(),
+                    None => {
+                        self.error = Some(format!("connection '{}' not found", name));
+                        return Task::none();
+                    }
+                };
+
+                let creds: Option<(String, String)> = if let Some(ref cred_name) = conn.credential
+                {
+                    match self.credentials.iter().find(|c| &c.name == cred_name) {
+                        Some(cred) => match cred.resolve() {
+                            Ok(pair) => Some(pair),
+                            Err(e) => {
+                                self.error = Some(format!("keychain error: {}", e));
+                                return Task::none();
+                            }
+                        },
+                        None => {
+                            self.error =
+                                Some(format!("credential '{}' not found", cred_name));
+                            return Task::none();
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let region = if let Some(ref cred_name) = conn.credential {
+                    self.credentials
+                        .iter()
+                        .find(|c| &c.name == cred_name)
+                        .map(|c| c.region.as_str())
+                        .unwrap_or("us-east-1")
+                } else {
+                    "us-east-1"
+                };
+
+                match S3Client::new(
+                    &conn.endpoint,
+                    creds.as_ref().map(|(a, s)| (a.as_str(), s.as_str())),
+                    region,
+                ) {
+                    Ok(client) => {
+                        self.client = Arc::new(client);
+                        self.endpoint = conn.endpoint.clone();
+                        self.active_connection = Some(name);
+                        self.section = Section::Browse;
+                        self.selection = Selection::None;
+                        self.buckets = None;
+                        self.objects = None;
+                        self.detail = None;
+                        self.selected_bucket = None;
+                        self.current_prefix.clear();
+                        self.loading_buckets = true;
+                        self.cmd_fetch_buckets()
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("connect failed: {}", e));
+                        Task::none()
+                    }
+                }
+            }
+            Message::AddConnection => {
+                let name = self.new_conn_name.trim().to_string();
+                let endpoint = self.new_conn_endpoint.trim().to_string();
+                let cred = self.new_conn_credential.trim().to_string();
+
+                if name.is_empty() || endpoint.is_empty() {
+                    self.error = Some("connection name and endpoint are required".to_string());
+                    return Task::none();
+                }
+                if !crate::credential::is_valid_name(&name) {
+                    self.error =
+                        Some("name must start with a letter, only alphanumeric/dash/underscore".to_string());
+                    return Task::none();
+                }
+                if !crate::connection::is_valid_endpoint(&endpoint) {
+                    self.error = Some("endpoint must start with http:// or https://".to_string());
+                    return Task::none();
+                }
+
+                let credential = if cred.is_empty() { None } else { Some(cred) };
+                let conn = Connection {
+                    name,
+                    endpoint,
+                    credential,
+                };
+
+                if let Err(e) = crate::connection::add(&mut self.connections, conn) {
+                    self.error = Some(format!("save failed: {}", e));
+                } else {
+                    self.new_conn_name.clear();
+                    self.new_conn_endpoint.clear();
+                    self.new_conn_credential.clear();
+                }
+                Task::none()
+            }
+            Message::RemoveConnection(name) => {
+                if let Err(e) = crate::connection::remove(&mut self.connections, &name) {
+                    self.error = Some(format!("remove failed: {}", e));
+                }
+                if self.active_connection.as_deref() == Some(&name) {
+                    self.active_connection = None;
+                }
+                Task::none()
+            }
+            Message::NewConnNameChanged(v) => {
+                self.new_conn_name = v;
+                Task::none()
+            }
+            Message::NewConnEndpointChanged(v) => {
+                self.new_conn_endpoint = v;
+                Task::none()
+            }
+            Message::NewConnCredentialChanged(v) => {
+                self.new_conn_credential = v;
+                Task::none()
+            }
+
+            // -- credential manager --
+            Message::AddCredential => {
+                let name = self.new_cred_name.trim().to_string();
+                let access_key = self.new_cred_access_key.trim().to_string();
+                let secret_key = self.new_cred_secret_key.clone();
+                let region = self.new_cred_region.trim().to_string();
+
+                if name.is_empty() || access_key.is_empty() || secret_key.is_empty() {
+                    self.error =
+                        Some("name, access key, and secret key are required".to_string());
+                    return Task::none();
+                }
+                if !crate::credential::is_valid_name(&name) {
+                    self.error =
+                        Some("name must start with a letter, only alphanumeric/dash/underscore".to_string());
+                    return Task::none();
+                }
+                if !crate::credential::is_valid_access_key(&access_key) {
+                    self.error = Some("access key must be at least 3 characters".to_string());
+                    return Task::none();
+                }
+                if !crate::credential::is_valid_secret_key(&secret_key) {
+                    self.error = Some("secret key must be at least 8 characters".to_string());
+                    return Task::none();
+                }
+
+                let cred = StoredCredential {
+                    name,
+                    access_key_id: access_key,
+                    region: if region.is_empty() {
+                        "us-east-1".to_string()
+                    } else {
+                        region
+                    },
+                };
+
+                if let Err(e) = crate::credential::add(&mut self.credentials, cred, &secret_key) {
+                    self.error = Some(format!("save failed: {}", e));
+                } else {
+                    self.new_cred_name.clear();
+                    self.new_cred_access_key.clear();
+                    self.new_cred_secret_key.clear();
+                    self.new_cred_region = "us-east-1".to_string();
+                }
+                Task::none()
+            }
+            Message::RemoveCredential(name) => {
+                if let Err(e) = crate::credential::remove(&mut self.credentials, &name) {
+                    self.error = Some(format!("remove failed: {}", e));
+                }
+                Task::none()
+            }
+            Message::NewCredNameChanged(v) => {
+                self.new_cred_name = v;
+                Task::none()
+            }
+            Message::NewCredAccessKeyChanged(v) => {
+                self.new_cred_access_key = v;
+                Task::none()
+            }
+            Message::NewCredSecretKeyChanged(v) => {
+                self.new_cred_secret_key = v;
+                Task::none()
+            }
+            Message::NewCredRegionChanged(v) => {
+                self.new_cred_region = v;
+                Task::none()
+            }
         }
     }
 
@@ -311,6 +571,7 @@ impl App {
         let sidebar = self.sidebar_view();
         let content: Element<Message> = match self.section {
             Section::Browse => self.browse_view(),
+            Section::Connections => self.connections_view(),
             Section::Settings => self.settings_view(),
             _ => container(text("Coming soon").size(14)).padding(20).into(),
         };
@@ -321,11 +582,16 @@ impl App {
             main_row = main_row.push(container(self.detail_view()).width(280));
         }
 
+        let conn_label = match &self.active_connection {
+            Some(name) => format!("{} ({})", name, self.endpoint),
+            None if !self.endpoint.is_empty() => self.endpoint.clone(),
+            None => "not connected".to_string(),
+        };
         let top_bar = container(
             row![
                 text("abixio-ui").size(14),
                 text(" | ").size(14),
-                text(&self.endpoint).size(12),
+                text(conn_label).size(12),
             ]
             .spacing(4)
             .padding(6),

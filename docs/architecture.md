@@ -21,14 +21,17 @@ src/
   app.rs              # App state, Message enum, update(), view()
   async_op.rs         # AsyncOp helper (used by tests, not the app)
   perf.rs             # performance stats (5m sliding window)
+  connection.rs       # connection model + JSON persistence
+  credential.rs       # credential model + JSON persistence + keychain resolve
+  keychain.rs         # OS keychain wrapper (Windows/macOS/Linux)
   s3/
     mod.rs
-    client.rs         # raw S3 HTTP calls via reqwest
-    xml.rs            # S3 XML response deserialization
+    client.rs         # thin wrapper around rust-s3 Bucket API
   views/
     mod.rs
     sidebar.rs        # left icon rail navigation
     buckets.rs        # bucket list + browse_view (bucket panel + object panel)
+    connections.rs    # connection + credential manager UI
     objects.rs        # object table with prefix navigation
     detail.rs         # right context panel (object/bucket metadata)
     settings.rs       # settings view (theme, perf stats, about)
@@ -96,17 +99,37 @@ event triggers a full UI rebuild.
 
 ## S3 client
 
-Raw HTTP via reqwest. No AWS SDK. Parses S3 XML responses with quick-xml.
+Uses [rust-s3](https://github.com/durch/rust-s3) v0.37 for all S3 operations.
+Thin wrapper in `s3/client.rs` maps rust-s3 types to our app types.
+
+Features provided by rust-s3:
+- AWS Signature V4 request signing (hmac-sha256)
+- Anonymous access (no credentials)
+- Custom endpoints via `Region::Custom`
+- Path-style bucket addressing (for MinIO, AbixIO, etc.)
+- Multipart upload support
 
 Operations:
-- `list_buckets(endpoint)` -- GET /
-- `list_objects(endpoint, bucket, prefix, delimiter)` -- GET /bucket?list-type=2&...
-- `put_object(endpoint, bucket, key, data, content_type)` -- PUT /bucket/key
-- `get_object(endpoint, bucket, key)` -- GET /bucket/key
-- `head_object(endpoint, bucket, key)` -- HEAD /bucket/key (returns all headers)
-- `delete_object(endpoint, bucket, key)` -- DELETE /bucket/key
+- `list_buckets()` -- list all buckets
+- `list_objects(bucket, prefix, delimiter)` -- list objects with prefix/delimiter
+- `create_bucket(bucket)` -- create a new bucket
+- `put_object(bucket, key, data, content_type)` -- upload an object
+- `get_object(bucket, key)` -- download an object
+- `head_object(bucket, key)` -- get object metadata
+- `delete_object(bucket, key)` -- delete an object
 
 Works with any S3-compatible server: AbixIO, AWS, MinIO, Backblaze B2, etc.
+
+## Connection manager
+
+Connections and credentials are stored separately:
+
+- `~/.abixio-ui/connections.json` -- endpoint + optional credential reference
+- `~/.abixio-ui/credentials.json` -- access key ID + region (no secrets)
+- OS keychain -- secret keys only (Windows Credential Manager, macOS Keychain, Linux secret-service)
+
+One credential can be shared across multiple connections. Connections without
+credentials use anonymous access.
 
 ## AbixIO detection
 
@@ -169,9 +192,10 @@ HTTP headers, then displays:
 ## Dependencies
 
 - `iced` 0.14 -- GUI framework (reactive rendering, Elm architecture)
-- `reqwest` -- async HTTP client
+- `rust-s3` 0.37 -- S3 client with Sig V4 signing (brings reqwest, quick-xml internally)
 - `tokio` -- async runtime (managed by iced internally)
-- `quick-xml` -- S3 XML response parsing
+- `keyring` 3 -- OS keychain access (Windows Credential Manager, macOS Keychain, Linux secret-service)
+- `dirs` 6 -- cross-platform home directory resolution
 - `serde` / `serde_json` -- serialization
 - `rfd` -- native file dialogs (upload/download)
 - `clap` -- CLI argument parsing

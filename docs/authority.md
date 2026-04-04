@@ -8,9 +8,10 @@ Who owns what data, where it lives, and how it flows.
 |------|---------------------|---------------|
 | Buckets, objects, metadata | S3 endpoint (server) | None -- always fetched live |
 | Disk health, shard info | AbixIO server (/_abixio/ API) | None -- always fetched live |
-| Connection list | `~/.abixio-ui/connections.json` | Name, endpoint URL, access key ID |
+| Connection list | `~/.abixio-ui/settings.json` | Name, endpoint URL, region |
+| Access keys | OS keychain | Never written to disk |
 | Secret keys | OS keychain | Never written to disk |
-| UI preferences | `~/.abixio-ui/preferences.json` | Window size, theme, last connection |
+| UI preferences | `~/.abixio-ui/settings.json` (planned) | Window size, theme, last connection |
 
 ## Rules
 
@@ -18,10 +19,11 @@ Who owns what data, where it lives, and how it flows.
    The UI never caches bucket listings, object data, or metadata locally.
    Every navigation action triggers a live fetch from the server.
 
-2. **Secret keys never touch the filesystem.**
-   Stored in the OS keychain only (Windows Credential Manager, macOS Keychain,
-   Linux secret-service). `connections.json` stores the access key ID but never
-   the secret key.
+2. **Keys never touch the filesystem.**
+   Both access keys and secret keys are stored in the OS keychain only
+   (Windows Credential Manager, macOS Keychain, Linux secret-service).
+   `settings.json` stores connection names, endpoints, and regions -- never
+   any keys.
 
 3. **No optimistic updates.**
    All mutations (upload, delete, create bucket) go directly to the server.
@@ -76,22 +78,29 @@ create bucket:
 ## Credential storage
 
 ```
-~/.abixio-ui/connections.json (on disk, not secret):
-  [
-    {"name": "home", "endpoint": "http://nas:9000", "access_key": "mykey"},
-    {"name": "aws", "endpoint": "https://s3.amazonaws.com", "access_key": "AKIA..."}
-  ]
+~/.abixio-ui/settings.json (on disk, not secret):
+  {
+    "connections": [
+      {"name": "home", "endpoint": "http://nas:9000", "region": "us-east-1"},
+      {"name": "aws", "endpoint": "https://s3.amazonaws.com", "region": "us-west-2"}
+    ]
+  }
 
 OS keychain (encrypted by OS, per-connection):
-  keyring::Entry::new("abixio-ui", "home") -> "secret-key-here"
-  keyring::Entry::new("abixio-ui", "aws")  -> "aws-secret-key"
+  service "abixio-ui":
+    "home.access-key" -> "mykey"
+    "home.secret-key" -> "secret-key-here"
+    "aws.access-key"  -> "AKIA..."
+    "aws.secret-key"  -> "aws-secret-key"
 ```
 
 On connect:
-1. Read `connections.json` for endpoint URL + access key ID
-2. Read secret key from OS keychain by connection name
-3. If both present: sign requests with AWS Signature V4
-4. If no credentials: connect without auth (for --no-auth endpoints)
+1. Read `settings.json` for endpoint URL + region
+2. Read access key and secret key from OS keychain by connection name
+3. If both keys present: sign requests with AWS Signature V4
+4. If no keys: connect without auth (anonymous)
+
+See [docs/credentials.md](credentials.md) for full details.
 
 Keychain backends:
 - Windows: Credential Manager

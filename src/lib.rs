@@ -2,8 +2,7 @@
 
 pub mod app;
 pub mod async_op;
-pub mod connection;
-pub mod credential;
+pub mod config;
 pub mod keychain;
 pub mod perf;
 pub mod s3;

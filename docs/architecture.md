@@ -21,8 +21,7 @@ src/
   app.rs              # App state, Message enum, update(), view()
   async_op.rs         # AsyncOp helper (used by tests, not the app)
   perf.rs             # performance stats (5m sliding window)
-  connection.rs       # connection model + JSON persistence
-  credential.rs       # credential model + JSON persistence + keychain resolve
+  config.rs           # settings.json persistence (connections + regions, no secrets)
   keychain.rs         # OS keychain wrapper (Windows/macOS/Linux)
   s3/
     mod.rs
@@ -122,14 +121,13 @@ Works with any S3-compatible server: AbixIO, AWS, MinIO, Backblaze B2, etc.
 
 ## Connection manager
 
-Connections and credentials are stored separately:
+Each connection is a single profile stored in `~/.abixio-ui/settings.json`:
 
-- `~/.abixio-ui/connections.json` -- endpoint + optional credential reference
-- `~/.abixio-ui/credentials.json` -- access key ID + region (no secrets)
-- OS keychain -- secret keys only (Windows Credential Manager, macOS Keychain, Linux secret-service)
+- **On disk**: name, endpoint, region (no secrets)
+- **OS keychain**: access key + secret key (encrypted by OS)
 
-One credential can be shared across multiple connections. Connections without
-credentials use anonymous access.
+If a connection has no keychain entries, it connects anonymously.
+See [docs/credentials.md](credentials.md) for full details.
 
 ## AbixIO detection
 

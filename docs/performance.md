@@ -144,6 +144,33 @@ Two threads total:
 
 No thread pool. No worker pool. No timers. No scheduled tasks.
 
+## Verified idle: real CPU measurement tests
+
+Every idle code path is tested with Windows `GetProcessTimes`. Each test measures
+actual process CPU time over a 2-second idle window. Threshold: <50ms CPU (<2.5%).
+A 60fps render loop would consume ~2000ms (100% of one core) -- these tests catch it.
+
+Run: `cargo test --test cpu_idle -- --ignored --test-threads=1`
+
+| Test | Scenario | Proves |
+|---|---|---|
+| `perf_stats_idle` | Create PerfStats, don't call record_frame, sleep 2s | Stats module has zero background cost |
+| `tokio_runtime_idle` | Init tokio runtime, no work, sleep 2s | Runtime thread sleeps when idle |
+| `async_op_idle_after_completion` | Fire request, wait for done, sleep 2s | No lingering work after completion |
+| `async_op_multiple_requests_then_idle` | Fire 5 sequential requests, all complete, sleep 2s | Idle after burst of activity |
+| `perf_stats_after_recording_then_idle` | Record 100 frames + 100 requests, sleep 2s | Stats recording has no background effect |
+| `async_op_created_but_never_used` | Create 3 AsyncOps, never fire, sleep 2s | Unused ops have zero overhead |
+| `polling_completed_ops_does_not_spin` | Poll completed op 1000x, sleep 2s | Repeated polling is a no-op |
+| `busy_loop_detected_as_high_cpu` | Spin for 200ms | Sanity: measurement actually works |
+
+Source-level guards (run with `cargo test --test idle_guard`):
+
+| Test | What it checks |
+|---|---|
+| `no_repaint_in_app_logic` | Zero `request_repaint()` calls in `src/app.rs` |
+| `no_repaint_in_views` | Zero `request_repaint()` calls in any `src/views/*.rs` |
+| `async_op_has_exactly_one_repaint` | Exactly 1 `request_repaint()` in `src/async_op.rs` (the completion handler) |
+
 ## What we explicitly avoid
 
 | Anti-pattern | Why | Our approach |

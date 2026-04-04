@@ -1,17 +1,34 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Element, Length};
+use serde::Serialize;
 
 use crate::abixio::client::AdminClient;
-use crate::app::{App, Message};
+use crate::app::{
+    App, CURRENT_CONNECTION_ID, Message, OverwritePolicy, TransferEndpoint, TransferItem,
+    TransferStepResult, prepare_export_items, prepare_import_items, run_transfer_step,
+};
 use crate::s3::client::S3Client;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TestResult {
     pub name: String,
     pub passed: bool,
     pub detail: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestReport {
+    pub app_version: String,
+    pub endpoint: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub results: Vec<TestResult>,
 }
 
 impl App {
@@ -253,6 +270,204 @@ pub async fn run_e2e_tests(
     let r = client.get_object(&bucket, "hello.txt").await;
     t.check("get after delete fails", r.is_err(), "");
 
+    // --- Transfer workflows ---
+
+    let r = client
+        .put_object(
+            &bucket,
+            "copy-source.txt",
+            b"copy this object".to_vec(),
+            "text/plain",
+        )
+        .await;
+    t.check(
+        "transfer setup copy source",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+
+    let copy_item = TransferItem {
+        source: TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "copy-source.txt".to_string(),
+        },
+        destination: TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "copies/copy-source.txt".to_string(),
+        },
+    };
+    let r = run_transfer_step(
+        client.clone(),
+        Some(client.clone()),
+        copy_item.clone(),
+        OverwritePolicy::Ask,
+    )
+    .await;
+    match &r {
+        Ok(TransferStepResult::Copied(_)) => {
+            let copied = client.get_object(&bucket, "copies/copy-source.txt").await;
+            match copied {
+                Ok(data) => {
+                    t.check(
+                        "copy object content",
+                        data == b"copy this object".to_vec(),
+                        &String::from_utf8_lossy(&data),
+                    );
+                }
+                Err(e) => t.check("copy object verify", false, &e),
+            }
+        }
+        Ok(other) => t.check(
+            "copy object",
+            false,
+            &format!("unexpected result: {:?}", other),
+        ),
+        Err(e) => t.check("copy object", false, e),
+    }
+
+    let r = client
+        .put_object(
+            &bucket,
+            "copies/existing.txt",
+            b"old data".to_vec(),
+            "text/plain",
+        )
+        .await;
+    t.check(
+        "transfer setup overwrite target",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+    let overwrite_item = TransferItem {
+        source: TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "copy-source.txt".to_string(),
+        },
+        destination: TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "copies/existing.txt".to_string(),
+        },
+    };
+    let r = run_transfer_step(
+        client.clone(),
+        Some(client.clone()),
+        overwrite_item.clone(),
+        OverwritePolicy::Ask,
+    )
+    .await;
+    t.check(
+        "copy conflict detected",
+        matches!(r, Ok(TransferStepResult::Conflict(_))),
+        "",
+    );
+    let r = run_transfer_step(
+        client.clone(),
+        Some(client.clone()),
+        overwrite_item,
+        OverwritePolicy::OverwriteAll,
+    )
+    .await;
+    t.check(
+        "copy overwrite allowed",
+        matches!(r, Ok(TransferStepResult::Copied(_))),
+        &format!("{:?}", r),
+    );
+    match client.get_object(&bucket, "copies/existing.txt").await {
+        Ok(data) => t.check(
+            "copy overwrite content",
+            data == b"copy this object".to_vec(),
+            &String::from_utf8_lossy(&data),
+        ),
+        Err(e) => t.check("copy overwrite verify", false, &e),
+    }
+
+    let import_root = std::env::temp_dir().join(format!(
+        "abixio-ui-import-e2e-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let nested = import_root.join("nested");
+    let _ = tokio::fs::create_dir_all(&nested).await;
+    let _ = tokio::fs::write(import_root.join("alpha.txt"), b"alpha").await;
+    let _ = tokio::fs::write(nested.join("beta.txt"), b"beta").await;
+    let import_items = prepare_import_items(import_root.clone(), &bucket, "imported/");
+    match import_items {
+        Ok(items) => {
+            t.check(
+                "prepare import items count",
+                items.len() == 2,
+                &format!("{}", items.len()),
+            );
+            let mut all_imported = true;
+            for item in items {
+                let result = run_transfer_step(
+                    client.clone(),
+                    Some(client.clone()),
+                    item,
+                    OverwritePolicy::Ask,
+                )
+                .await;
+                if !matches!(result, Ok(TransferStepResult::Copied(_))) {
+                    all_imported = false;
+                }
+            }
+            t.check("import folder recursive copy", all_imported, "");
+            match client.get_object(&bucket, "imported/alpha.txt").await {
+                Ok(data) => t.check("imported alpha exists", data == b"alpha".to_vec(), ""),
+                Err(e) => t.check("imported alpha exists", false, &e),
+            }
+            match client.get_object(&bucket, "imported/nested/beta.txt").await {
+                Ok(data) => t.check("imported nested beta exists", data == b"beta".to_vec(), ""),
+                Err(e) => t.check("imported nested beta exists", false, &e),
+            }
+        }
+        Err(e) => t.check("prepare import items", false, &e),
+    }
+
+    let export_root = std::env::temp_dir().join(format!(
+        "abixio-ui-export-e2e-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let export_items =
+        prepare_export_items(client.clone(), &bucket, "imported/", &export_root).await;
+    match export_items {
+        Ok(items) => {
+            t.check(
+                "prepare export items count",
+                items.len() >= 2,
+                &format!("{}", items.len()),
+            );
+            let mut all_exported = true;
+            for item in items {
+                let result =
+                    run_transfer_step(client.clone(), None, item, OverwritePolicy::Ask).await;
+                if !matches!(result, Ok(TransferStepResult::Copied(_))) {
+                    all_exported = false;
+                }
+            }
+            t.check("export prefix recursive copy", all_exported, "");
+            match tokio::fs::read(export_root.join("alpha.txt")).await {
+                Ok(data) => t.check("exported alpha exists", data == b"alpha".to_vec(), ""),
+                Err(e) => t.check("exported alpha exists", false, &e.to_string()),
+            }
+            match tokio::fs::read(export_root.join(PathBuf::from("nested").join("beta.txt"))).await
+            {
+                Ok(data) => t.check("exported nested beta exists", data == b"beta".to_vec(), ""),
+                Err(e) => t.check("exported nested beta exists", false, &e.to_string()),
+            }
+        }
+        Err(e) => t.check("prepare export items", false, &e),
+    }
+
     // --- Admin API (abixio only) ---
 
     if let Some(ref admin) = admin {
@@ -343,6 +558,29 @@ pub async fn run_e2e_tests(
             }
             Err(e) => t.check("admin inspect", false, e),
         }
+
+        let encoded_key = "dir-one/inspect-me.txt";
+        let _ = client
+            .put_object(
+                &bucket,
+                encoded_key,
+                b"encoded admin object".to_vec(),
+                "text/plain",
+            )
+            .await;
+
+        let r = admin.inspect_object(&bucket, encoded_key).await;
+        match &r {
+            Ok(data) => {
+                t.check("inspect encoded key", data.key == encoded_key, &data.key);
+                t.check(
+                    "inspect encoded size",
+                    data.size == 20,
+                    &format!("{}", data.size),
+                );
+            }
+            Err(e) => t.check("admin inspect encoded key", false, e),
+        }
     } else {
         t.check("admin tests skipped (not abixio)", true, "");
     }
@@ -354,9 +592,24 @@ pub async fn run_e2e_tests(
             let _ = client.delete_object(&bucket, &obj.key).await;
         }
     }
+    let _ = tokio::fs::remove_dir_all(import_root).await;
+    let _ = tokio::fs::remove_dir_all(export_root).await;
     // delete bucket -- use reqwest directly since S3Client doesn't expose delete_bucket
     // we'll just leave it; the test bucket name is timestamped so no collision
     // TODO: add delete_bucket to S3Client if cleanup matters
 
     t.results
+}
+
+pub async fn write_test_report(path: PathBuf, report: TestReport) -> Result<PathBuf, String> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    let data = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, data)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path)
 }

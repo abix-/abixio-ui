@@ -31,6 +31,12 @@ impl AdminClient {
         format!("{}/_admin/{}", self.endpoint, path)
     }
 
+    fn url_with_query(&self, path: &str, params: &[(&str, &str)]) -> String {
+        let mut url = reqwest::Url::parse(&self.url(path)).expect("valid admin url");
+        url.query_pairs_mut().extend_pairs(params);
+        url.into()
+    }
+
     async fn signed_get(&self, url: &str) -> Result<reqwest::Response, String> {
         let mut builder = self.http.get(url);
 
@@ -91,13 +97,13 @@ impl AdminClient {
         bucket: &str,
         key: &str,
     ) -> Result<ObjectInspectResponse, String> {
-        let url = format!("{}?bucket={}&key={}", self.url("object"), bucket, key);
+        let url = self.url_with_query("object", &[("bucket", bucket), ("key", key)]);
         let resp = self.signed_get(&url).await?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
     pub async fn heal_object(&self, bucket: &str, key: &str) -> Result<HealResponse, String> {
-        let url = format!("{}?bucket={}&key={}", self.url("heal"), bucket, key);
+        let url = self.url_with_query("heal", &[("bucket", bucket), ("key", key)]);
         let resp = self.signed_post(&url).await?;
         resp.json().await.map_err(|e| e.to_string())
     }
@@ -131,19 +137,9 @@ fn sig_v4_headers(
         None => parsed.host_str().unwrap_or("localhost").to_string(),
     };
     let path = parsed.path();
-    let _query = parsed.query().unwrap_or("");
+    let raw_query = parsed.query().unwrap_or("");
 
-    // canonical query string (sorted)
-    let mut query_pairs: Vec<(String, String)> = parsed
-        .query_pairs()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-    query_pairs.sort();
-    let canonical_query: String = query_pairs
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect::<Vec<_>>()
-        .join("&");
+    let canonical_query = canonical_query_string(raw_query);
 
     // canonical headers (sorted)
     let signed_headers = "host;x-amz-content-sha256;x-amz-date";
@@ -194,4 +190,40 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut mac = HmacSha256::new_from_slice(key).expect("valid key length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
+}
+
+fn canonical_query_string(query: &str) -> String {
+    if query.is_empty() {
+        return String::new();
+    }
+
+    let mut pairs: Vec<&str> = query.split('&').collect();
+    pairs.sort_unstable();
+    pairs.join("&")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdminClient, canonical_query_string};
+
+    #[test]
+    fn admin_url_builder_encodes_bucket_and_key() {
+        let client = AdminClient::new("http://127.0.0.1:10000", None, "us-east-1");
+        let url = client.url_with_query(
+            "object",
+            &[("bucket", "my bucket"), ("key", "dir one/inspect me.txt")],
+        );
+
+        assert_eq!(
+            url,
+            "http://127.0.0.1:10000/_admin/object?bucket=my+bucket&key=dir+one%2Finspect+me.txt"
+        );
+    }
+
+    #[test]
+    fn canonical_query_keeps_encoded_values_sorted() {
+        let canonical = canonical_query_string("key=dir+one%2Finspect+me.txt&bucket=my+bucket");
+
+        assert_eq!(canonical, "bucket=my+bucket&key=dir+one%2Finspect+me.txt");
+    }
 }

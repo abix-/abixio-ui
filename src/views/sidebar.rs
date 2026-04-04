@@ -1,55 +1,33 @@
-use eframe::egui;
+use iced::widget::{button, column, text};
+use iced::{Element, Length};
 
-use crate::app::{App, Section};
+use crate::app::{App, Message, Section};
 
 impl App {
-    pub fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui: &mut egui::Ui| {
-            ui.add_space(8.0);
-
-            self.nav_button(ui, "B", "Browse", Section::Browse);
-            ui.add_space(4.0);
-
-            if self.is_abixio {
-                self.nav_button(ui, "D", "Disks", Section::Disks);
-                ui.add_space(4.0);
-                self.nav_button(ui, "C", "Config", Section::Config);
-                ui.add_space(4.0);
-                self.nav_button(ui, "H", "Healing", Section::Healing);
-                ui.add_space(4.0);
-            }
-
-            // bottom section: connections + settings
-            ui.with_layout(
-                egui::Layout::bottom_up(egui::Align::Center),
-                |ui: &mut egui::Ui| {
-                    ui.add_space(8.0);
-                    self.nav_button(ui, "S", "Settings", Section::Settings);
-                    ui.add_space(4.0);
-                    self.nav_button(ui, "+", "Connections", Section::Connections);
-                },
-            );
-        });
+    pub fn sidebar_view(&self) -> Element<Message> {
+        column![
+            self.nav_btn("B", Section::Browse),
+            self.nav_btn("+", Section::Connections),
+            iced::widget::space::vertical(),
+            self.nav_btn("S", Section::Settings),
+        ]
+        .spacing(4)
+        .padding(4)
+        .height(Length::Fill)
+        .into()
     }
 
-    fn nav_button(&mut self, ui: &mut egui::Ui, icon: &str, tooltip: &str, section: Section) {
-        let active = self.current_section == section;
-        let btn = egui::Button::new(egui::RichText::new(icon).size(16.0).strong().color(
-            if active {
-                egui::Color32::WHITE
+    fn nav_btn(&self, label: &str, section: Section) -> Element<Message> {
+        let is_active = self.section == section;
+        button(text(label.to_string()).size(14).center())
+            .width(32)
+            .height(32)
+            .style(if is_active {
+                button::primary
             } else {
-                egui::Color32::GRAY
-            },
-        ))
-        .min_size(egui::vec2(32.0, 32.0))
-        .fill(if active {
-            ui.visuals().selection.bg_fill
-        } else {
-            egui::Color32::TRANSPARENT
-        });
-
-        if ui.add(btn).on_hover_text(tooltip).clicked() {
-            self.current_section = section;
-        }
+                button::text
+            })
+            .on_press(Message::SelectSection(section))
+            .into()
     }
 }

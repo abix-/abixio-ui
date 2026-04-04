@@ -1,57 +1,60 @@
-use eframe::egui;
+use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::{Element, Length};
 
-use crate::app::{App, Selection};
+use crate::app::{App, Message};
 
 impl App {
-    /// The full browse view: bucket sidebar + object table
-    pub fn browse_view(&mut self, ui: &mut egui::Ui) {
-        egui::SidePanel::left("buckets")
-            .default_width(160.0)
-            .show_inside(ui, |ui: &mut egui::Ui| {
-                self.bucket_panel(ui);
-            });
+    pub fn browse_view(&self) -> Element<Message> {
+        let bucket_panel = self.bucket_list_view();
+        let object_panel = self.object_list_view();
 
-        egui::CentralPanel::default().show_inside(ui, |ui: &mut egui::Ui| {
-            self.object_panel(ui);
-        });
+        row![container(bucket_panel).width(180), object_panel,]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
-    fn bucket_panel(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Buckets");
-        ui.separator();
+    fn bucket_list_view(&self) -> Element<Message> {
+        let mut col = column![text("Buckets").size(14), iced::widget::rule::horizontal(1)]
+            .spacing(4)
+            .padding(8);
 
-        if self.buckets_op.pending {
-            // no ui.spinner() -- it forces continuous 60fps repainting
-            ui.label(egui::RichText::new("Loading...").color(crate::app::LABEL_COLOR));
+        if self.loading_buckets {
+            col = col.push(text("Loading...").size(12));
         }
 
-        if let Some(Ok(buckets)) = &self.buckets_op.data {
-            let buckets = buckets.clone();
-            for bucket in &buckets {
+        if let Some(Ok(buckets)) = &self.buckets {
+            for bucket in buckets {
                 let is_selected = self.selected_bucket.as_deref() == Some(&bucket.name);
-                let resp = ui.selectable_label(is_selected, &bucket.name);
-                if resp.clicked() {
-                    self.selected_bucket = Some(bucket.name.clone());
-                    self.current_prefix.clear();
-                    self.selection = Selection::Bucket(bucket.name.clone());
-                    self.fetch_objects(ui.ctx());
-                }
+                let name = bucket.name.clone();
+                col = col.push(
+                    button(text(&bucket.name).size(12))
+                        .width(Length::Fill)
+                        .style(if is_selected {
+                            button::primary
+                        } else {
+                            button::text
+                        })
+                        .on_press(Message::SelectBucket(name)),
+                );
             }
         }
 
-        if let Some(Err(e)) = &self.buckets_op.data {
-            ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
+        if let Some(Err(e)) = &self.buckets {
+            col = col.push(text(format!("Error: {}", e)).size(11));
         }
 
-        ui.separator();
+        col = col.push(iced::widget::rule::horizontal(1));
+        col = col.push(
+            row![
+                text_input("new bucket", &self.new_bucket_name)
+                    .on_input(Message::NewBucketNameChanged)
+                    .size(11),
+                button(text("+").size(12)).on_press(Message::CreateBucket),
+            ]
+            .spacing(4),
+        );
 
-        ui.horizontal(|ui: &mut egui::Ui| {
-            ui.text_edit_singleline(&mut self.new_bucket_name);
-            if ui.button("+").clicked() && !self.new_bucket_name.is_empty() {
-                let name = self.new_bucket_name.clone();
-                self.new_bucket_name.clear();
-                self.create_bucket(ui.ctx(), &name);
-            }
-        });
+        scrollable(col).height(Length::Fill).into()
     }
 }

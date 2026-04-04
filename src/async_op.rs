@@ -1,13 +1,13 @@
 use std::future::Future;
 use std::sync::LazyLock;
 
-use eframe::egui;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
 pub static RUNTIME: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("failed to create tokio runtime"));
 
+/// AsyncOp is available for testing. The app itself uses iced's Task::perform.
 pub struct AsyncOp<T> {
     rx: Option<oneshot::Receiver<Result<T, String>>>,
     pub data: Option<Result<T, String>>,
@@ -23,16 +23,14 @@ impl<T: Send + 'static> AsyncOp<T> {
         }
     }
 
-    pub fn request<F>(&mut self, ctx: &egui::Context, fut: F)
+    pub fn request<F>(&mut self, fut: F)
     where
         F: Future<Output = Result<T, String>> + Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
-        let ctx = ctx.clone();
         RUNTIME.spawn(async move {
             let result = fut.await;
             let _ = tx.send(result);
-            ctx.request_repaint();
         });
         self.rx = Some(rx);
         self.pending = true;

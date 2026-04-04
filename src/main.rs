@@ -1,5 +1,4 @@
 use clap::Parser;
-use eframe::egui;
 
 #[derive(Parser)]
 #[command(name = "abixio-ui", about = "native desktop s3 manager")]
@@ -8,21 +7,17 @@ struct Args {
     endpoint: String,
 }
 
-fn main() {
+fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
+    let endpoint = args.endpoint;
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("abixio-ui")
-            .with_inner_size([1024.0, 768.0]),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "abixio-ui",
-        options,
-        Box::new(|cc| Ok(Box::new(abixio_ui::app::App::new(cc, &args.endpoint)))),
+    iced::application(
+        move || abixio_ui::app::App::new(endpoint.clone()),
+        abixio_ui::app::App::update,
+        abixio_ui::app::App::view,
     )
-    .unwrap();
+    .theme(abixio_ui::app::App::theme)
+    .title(abixio_ui::app::App::title)
+    .run()
 }

@@ -1,137 +1,125 @@
-use eframe::egui;
+use iced::widget::{button, column, container, row, scrollable, text};
+use iced::{Element, Length};
 
-use crate::app::{App, Selection};
-use crate::s3::client::ObjectInfo;
+use crate::app::{App, Message, Selection};
 
 impl App {
-    pub fn object_panel(&mut self, ui: &mut egui::Ui) {
+    pub fn object_list_view(&self) -> Element<Message> {
         let bucket = match &self.selected_bucket {
             Some(b) => b.clone(),
             None => {
-                ui.centered_and_justified(|ui: &mut egui::Ui| {
-                    ui.label("Select a bucket");
-                });
-                return;
+                return container(text("Select a bucket").size(14))
+                    .padding(20)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
             }
         };
 
-        // breadcrumb + actions bar
-        let prefix = self.current_prefix.clone();
-        let mut nav_to: Option<String> = None;
+        // breadcrumb bar
+        let mut breadcrumbs = row![
+            button(text(bucket.clone()).size(12))
+                .style(button::text)
+                .on_press(Message::NavigatePrefix(String::new())),
+        ]
+        .spacing(2);
 
-        ui.horizontal(|ui: &mut egui::Ui| {
-            if ui.link(&bucket).clicked() {
-                nav_to = Some(String::new());
+        if !self.current_prefix.is_empty() {
+            let parts: Vec<&str> = self
+                .current_prefix
+                .trim_end_matches('/')
+                .split('/')
+                .collect();
+            for (i, part) in parts.iter().enumerate() {
+                let prefix = parts[..=i].join("/") + "/";
+                breadcrumbs = breadcrumbs.push(text("/").size(12));
+                breadcrumbs = breadcrumbs.push(
+                    button(text(*part).size(12))
+                        .style(button::text)
+                        .on_press(Message::NavigatePrefix(prefix)),
+                );
             }
-            if !prefix.is_empty() {
-                ui.label("/");
-                let parts: Vec<&str> = prefix.trim_end_matches('/').split('/').collect();
-                for (i, part) in parts.iter().enumerate() {
-                    if ui.link(*part).clicked() {
-                        nav_to = Some(parts[..=i].join("/") + "/");
-                    }
-                    if i < parts.len() - 1 {
-                        ui.label("/");
-                    }
-                }
+        }
+
+        let actions = row![
+            button(text("Upload").size(11)).on_press(Message::Upload),
+            button(text("Refresh").size(11)).on_press(Message::Refresh),
+        ]
+        .spacing(4);
+
+        let toolbar = row![breadcrumbs, iced::widget::space::horizontal(), actions]
+            .spacing(8)
+            .padding(4);
+
+        let mut content = column![toolbar, iced::widget::rule::horizontal(1)].spacing(4);
+
+        if self.loading_objects {
+            content = content.push(text("Loading...").size(12));
+        } else if let Some(Ok(result)) = &self.objects {
+            // folders
+            for cp in &result.common_prefixes {
+                let display = cp.strip_prefix(&self.current_prefix).unwrap_or(cp);
+                let prefix = cp.clone();
+                content = content.push(
+                    button(text(format!("  {}", display)).size(12))
+                        .width(Length::Fill)
+                        .style(button::text)
+                        .on_press(Message::NavigatePrefix(prefix)),
+                );
             }
 
-            ui.with_layout(
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui: &mut egui::Ui| {
-                    if ui.button("Refresh").clicked() {
-                        nav_to = Some(prefix.clone());
-                    }
-                    if ui.button("Upload").clicked() {
-                        self.upload_file(ui.ctx());
-                    }
-                },
+            // header
+            content = content.push(
+                row![
+                    text("Name").size(11).width(Length::FillPortion(4)),
+                    text("Size").size(11).width(Length::FillPortion(1)),
+                    text("Modified").size(11).width(Length::FillPortion(2)),
+                ]
+                .spacing(8)
+                .padding([2, 4]),
             );
-        });
 
-        if let Some(new_prefix) = nav_to {
-            self.current_prefix = new_prefix;
-            self.selection = Selection::None;
-            self.fetch_objects(ui.ctx());
+            // objects
+            for obj in &result.objects {
+                let display_key = obj
+                    .key
+                    .strip_prefix(&self.current_prefix)
+                    .unwrap_or(&obj.key);
+                let is_selected = matches!(
+                    &self.selection,
+                    Selection::Object { key, .. } if *key == obj.key
+                );
+                let key = obj.key.clone();
+                content = content.push(
+                    button(
+                        row![
+                            text(display_key).size(11).width(Length::FillPortion(4)),
+                            text(format_size(obj.size))
+                                .size(11)
+                                .width(Length::FillPortion(1)),
+                            text(&obj.last_modified)
+                                .size(11)
+                                .width(Length::FillPortion(2)),
+                        ]
+                        .spacing(8),
+                    )
+                    .width(Length::Fill)
+                    .style(if is_selected {
+                        button::primary
+                    } else {
+                        button::text
+                    })
+                    .on_press(Message::SelectObject(key)),
+                );
+            }
+        } else if let Some(Err(e)) = &self.objects {
+            content = content.push(text(format!("Error: {}", e)).size(11));
         }
 
-        ui.separator();
-
-        if self.objects_op.pending {
-            ui.label(egui::RichText::new("Loading...").color(crate::app::LABEL_COLOR));
-            return;
-        }
-
-        if let Some(Err(e)) = &self.objects_op.data {
-            ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
-            return;
-        }
-
-        let result = match &self.objects_op.data {
-            Some(Ok(r)) => r.clone(),
-            _ => return,
-        };
-
-        let current_prefix = self.current_prefix.clone();
-
-        // folders (common prefixes)
-        let mut folder_nav: Option<String> = None;
-        for cp in &result.common_prefixes {
-            let display = cp.strip_prefix(&current_prefix).unwrap_or(cp);
-            ui.horizontal(|ui: &mut egui::Ui| {
-                ui.label("  ");
-                if ui.link(format!("{}", display)).clicked() {
-                    folder_nav = Some(cp.clone());
-                }
-            });
-        }
-
-        if let Some(p) = folder_nav {
-            self.current_prefix = p;
-            self.selection = Selection::None;
-            self.fetch_objects(ui.ctx());
-            return;
-        }
-
-        // objects table
-        let mut clicked_obj: Option<ObjectInfo> = None;
-
-        egui::Grid::new("objects_grid")
-            .striped(true)
-            .min_col_width(80.0)
-            .show(ui, |ui: &mut egui::Ui| {
-                ui.strong("Name");
-                ui.strong("Size");
-                ui.strong("Modified");
-                ui.end_row();
-
-                for obj in &result.objects {
-                    let display_key = obj.key.strip_prefix(&current_prefix).unwrap_or(&obj.key);
-
-                    let is_selected = matches!(
-                        &self.selection,
-                        Selection::Object { key, .. } if *key == obj.key
-                    );
-
-                    let resp = ui.selectable_label(is_selected, display_key);
-                    if resp.clicked() {
-                        clicked_obj = Some(obj.clone());
-                    }
-
-                    ui.label(format_size(obj.size));
-                    ui.label(&obj.last_modified);
-                    ui.end_row();
-                }
-            });
-
-        if let Some(obj) = clicked_obj {
-            self.fetch_detail(ui.ctx(), &bucket, &obj.key);
-            self.selection = Selection::Object {
-                bucket,
-                key: obj.key.clone(),
-                info: Some(obj),
-            };
-        }
+        scrollable(content.padding(4))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 

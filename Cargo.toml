@@ -1,11 +1,10 @@
 [package]
 name = "abixio-ui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.34"
-egui_extras = "0.34"
+iced = { version = "0.14", features = ["tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 quick-xml = { version = "0.39", features = ["serialize"] }
@@ -19,4 +18,3 @@ anyhow = "1"
 
 [dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }
-egui = "0.34"

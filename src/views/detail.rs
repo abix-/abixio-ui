@@ -1,151 +1,91 @@
-use eframe::egui;
+use iced::widget::{button, column, row, scrollable, text};
+use iced::{Element, Length};
 
-use crate::app::{App, LABEL_COLOR, Selection, VALUE_COLOR};
+use crate::app::{App, Message, Selection};
 
 impl App {
-    pub fn detail_panel(&mut self, ui: &mut egui::Ui) {
-        let selection = self.selection.clone();
+    pub fn detail_view(&self) -> Element<Message> {
+        let mut col = column![].spacing(4).padding(8);
 
-        egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
-            match &selection {
-                Selection::None => {}
-                Selection::Bucket(name) => self.detail_bucket(ui, name),
-                Selection::Object { bucket, key, .. } => {
-                    self.detail_object(ui, &bucket.clone(), &key.clone())
+        match &self.selection {
+            Selection::None => {}
+            Selection::Bucket(name) => {
+                col = col.push(text(name).size(16));
+                col = col.push(text("Bucket").size(11));
+                col = col.push(iced::widget::rule::horizontal(1));
+            }
+            Selection::Object { bucket, key } => {
+                let short = key.rsplit('/').next().unwrap_or(key);
+                col = col.push(text(short).size(16));
+                col = col.push(text(format!("{} / {}", bucket, key)).size(10));
+                col = col.push(iced::widget::rule::horizontal(1));
+
+                if self.loading_detail {
+                    col = col.push(text("Loading...").size(11));
+                } else if let Some(Ok(detail)) = &self.detail {
+                    col = col.push(section("Overview"));
+                    col = col.push(meta_row("Size", &format_size(detail.size)));
+                    col = col.push(meta_row("Type", &detail.content_type));
+                    col = col.push(meta_row("Modified", &detail.last_modified));
+                    col = col.push(meta_row("ETag", &detail.etag));
+
+                    col = col.push(section("Storage"));
+                    col = col.push(meta_row("Bucket", bucket));
+                    col = col.push(meta_row("Key", key));
+
+                    col = col.push(section("HTTP Headers"));
+                    for (name, value) in &detail.headers {
+                        col = col.push(meta_row(name, value));
+                    }
+
+                    col = col.push(section("Actions"));
+                    col = col.push(
+                        row![
+                            button(text("Download").size(11))
+                                .on_press(Message::Download(bucket.clone(), key.clone())),
+                            button(text("Delete").size(11))
+                                .on_press(Message::Delete(bucket.clone(), key.clone())),
+                        ]
+                        .spacing(4),
+                    );
+                } else if let Some(Err(e)) = &self.detail {
+                    col = col.push(text(format!("Error: {}", e)).size(11));
                 }
             }
-
-            ui.add_space(12.0);
-            ui.separator();
-            if ui.small_button("Close [ESC]").clicked() {
-                self.selection = Selection::None;
-            }
-        });
-    }
-
-    fn detail_bucket(&mut self, ui: &mut egui::Ui, name: &str) {
-        ui.add_space(8.0);
-        ui.heading(name);
-        ui.label(egui::RichText::new("Bucket").size(11.0).color(LABEL_COLOR));
-        ui.add_space(12.0);
-
-        if let Some(Ok(result)) = &self.objects_op.data {
-            section_header(ui, "Contents");
-            meta_row(ui, "Objects", &result.objects.len().to_string());
-            meta_row(ui, "Prefixes", &result.common_prefixes.len().to_string());
         }
-    }
 
-    fn detail_object(&mut self, ui: &mut egui::Ui, bucket: &str, key: &str) {
-        // filename
-        let short = key.rsplit('/').next().unwrap_or(key);
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new(short).size(18.0).strong());
-
-        // full path
-        ui.label(
-            egui::RichText::new(format!("{} / {}", bucket, key))
-                .size(11.0)
-                .color(LABEL_COLOR),
+        col = col.push(iced::widget::rule::horizontal(1));
+        col = col.push(
+            button(text("Close [ESC]").size(10))
+                .style(button::text)
+                .on_press(Message::ClearSelection),
         );
 
-        ui.add_space(12.0);
-
-        // check if we have detail data from HEAD
-        if self.detail_op.pending {
-            ui.label(egui::RichText::new("Loading...").color(crate::app::LABEL_COLOR));
-            return;
-        }
-
-        if let Some(Ok(detail)) = &self.detail_op.data {
-            let detail = detail.clone();
-
-            // -- overview --
-            section_header(ui, "Overview");
-            meta_row(ui, "Size", &format_size(detail.size));
-            meta_row(ui, "Type", &detail.content_type);
-            meta_row(ui, "Modified", &detail.last_modified);
-            meta_row(ui, "ETag", &detail.etag);
-
-            ui.add_space(8.0);
-
-            // -- storage --
-            section_header(ui, "Storage");
-            meta_row(ui, "Bucket", bucket);
-            meta_row(ui, "Key", key);
-            let prefix = if key.contains('/') {
-                key.rsplit_once('/')
-                    .map(|(p, _)| format!("{}/", p))
-                    .unwrap_or_default()
-            } else {
-                "(root)".to_string()
-            };
-            meta_row(ui, "Prefix", &prefix);
-
-            ui.add_space(8.0);
-
-            // -- all HTTP headers --
-            section_header(ui, "HTTP Headers");
-            for (name, value) in &detail.headers {
-                meta_row(ui, name, value);
-            }
-
-            ui.add_space(8.0);
-
-            // -- AbixIO shards --
-            if self.is_abixio {
-                section_header(ui, "Erasure Shards");
-                ui.label(
-                    egui::RichText::new("Requires /_abixio/object-info endpoint")
-                        .size(11.0)
-                        .color(LABEL_COLOR),
-                );
-            }
-        } else if let Some(Err(e)) = &self.detail_op.data {
-            ui.colored_label(crate::app::ERROR_COLOR, format!("Error: {}", e));
-        } else {
-            // no data yet and not pending -- shouldn't happen, but show basic info
-            ui.label("Loading...");
-        }
-
-        ui.add_space(12.0);
-
-        // -- actions --
-        section_header(ui, "Actions");
-        ui.horizontal(|ui: &mut egui::Ui| {
-            if ui.button("Download").clicked() {
-                self.download_object(ui.ctx(), bucket, key);
-            }
-            if ui
-                .button(egui::RichText::new("Delete").color(crate::app::ERROR_COLOR))
-                .clicked()
-            {
-                self.delete_object(ui.ctx(), bucket, key);
-            }
-        });
+        scrollable(col).height(Length::Fill).into()
     }
 }
 
-fn section_header(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(text)
-            .size(12.0)
-            .strong()
-            .color(LABEL_COLOR),
-    );
-    ui.separator();
+fn section(label: &str) -> Element<'static, Message> {
+    column![
+        text(label.to_string()).size(11),
+        iced::widget::rule::horizontal(1)
+    ]
+    .spacing(2)
+    .padding(4)
+    .into()
 }
 
-fn meta_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.horizontal(|ui: &mut egui::Ui| {
-        ui.label(
-            egui::RichText::new(format!("{}  ", label))
-                .size(12.0)
-                .color(LABEL_COLOR),
-        );
-        ui.label(egui::RichText::new(value).size(12.0).color(VALUE_COLOR));
-    });
+fn meta_row(label: &str, value: &str) -> Element<'static, Message> {
+    row![
+        text(label.to_string())
+            .size(10)
+            .width(Length::FillPortion(2)),
+        text(value.to_string())
+            .size(10)
+            .width(Length::FillPortion(3)),
+    ]
+    .spacing(4)
+    .into()
 }
 
 fn format_size(bytes: u64) -> String {
@@ -153,16 +93,10 @@ fn format_size(bytes: u64) -> String {
         format!("{} B", bytes)
     } else if bytes < 1024 * 1024 {
         format!("{:.1} KB ({} bytes)", bytes as f64 / 1024.0, bytes)
-    } else if bytes < 1024 * 1024 * 1024 {
+    } else {
         format!(
             "{:.1} MB ({} bytes)",
             bytes as f64 / (1024.0 * 1024.0),
-            bytes
-        )
-    } else {
-        format!(
-            "{:.1} GB ({} bytes)",
-            bytes as f64 / (1024.0 * 1024.0 * 1024.0),
             bytes
         )
     }

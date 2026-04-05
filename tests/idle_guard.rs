@@ -30,7 +30,7 @@ fn count_repaint_calls(source: &str) -> usize {
 
 #[test]
 fn no_repaint_in_app_logic() {
-    let source = read_source("src/app.rs");
+    let source = read_source("src/app/mod.rs");
     let count = count_repaint_calls(&source);
     assert_eq!(
         count, 0,
@@ -81,7 +81,7 @@ fn no_spinners_anywhere() {
     let forbidden = ["spinner()"];
 
     for pattern in &forbidden {
-        for dir in &["src/app.rs", "src/views"] {
+        for dir in &["src/app", "src/views"] {
             let base = Path::new(env!("CARGO_MANIFEST_DIR")).join(dir);
             let files: Vec<_> = if base.is_file() {
                 vec![base.clone()]

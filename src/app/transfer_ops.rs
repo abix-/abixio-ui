@@ -1,0 +1,304 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+use crate::s3::client::S3Client;
+
+use super::types::{
+    CURRENT_CONNECTION_ID, OverwritePolicy, TransferEndpoint, TransferItem, TransferStepResult,
+};
+
+impl TransferItem {
+    pub(crate) fn label(&self) -> String {
+        match (&self.source, &self.destination) {
+            (
+                TransferEndpoint::S3 { bucket, key, .. },
+                TransferEndpoint::S3 {
+                    bucket: dest_bucket,
+                    key: dest_key,
+                    ..
+                },
+            ) => format!("{}/{} -> {}/{}", bucket, key, dest_bucket, dest_key),
+            (TransferEndpoint::Local { path }, TransferEndpoint::S3 { bucket, key, .. }) => {
+                format!("{} -> {}/{}", path.display(), bucket, key)
+            }
+            (TransferEndpoint::S3 { bucket, key, .. }, TransferEndpoint::Local { path }) => {
+                format!("{}/{} -> {}", bucket, key, path.display())
+            }
+            (TransferEndpoint::Local { path }, TransferEndpoint::Local { path: dest }) => {
+                format!("{} -> {}", path.display(), dest.display())
+            }
+        }
+    }
+}
+
+pub fn now_rfc3339() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn relative_key(root: &Path, path: &Path) -> Result<String, String> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(relative)
+}
+
+fn join_s3_key(prefix: &str, relative: &str) -> String {
+    if prefix.is_empty() {
+        relative.to_string()
+    } else {
+        format!("{}{}", prefix, relative)
+    }
+}
+
+fn guess_content_type(path: &Path) -> String {
+    mime_guess::from_path(path)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+        .to_string()
+}
+
+pub fn prepare_import_items(
+    root: PathBuf,
+    bucket: &str,
+    prefix: &str,
+) -> Result<Vec<TransferItem>, String> {
+    let mut items = Vec::new();
+    for entry in walkdir::WalkDir::new(&root) {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let path = entry.path().to_path_buf();
+        let relative = relative_key(&root, &path)?;
+        items.push(TransferItem {
+            source: TransferEndpoint::Local { path },
+            destination: TransferEndpoint::S3 {
+                connection_id: CURRENT_CONNECTION_ID.to_string(),
+                bucket: bucket.to_string(),
+                key: join_s3_key(prefix, &relative),
+            },
+        });
+    }
+    Ok(items)
+}
+
+pub async fn prepare_export_items(
+    client: Arc<S3Client>,
+    bucket: &str,
+    prefix: &str,
+    root: &Path,
+) -> Result<Vec<TransferItem>, String> {
+    let listing = client.list_objects(bucket, prefix, "").await?;
+    let mut items = Vec::new();
+    for object in listing.objects {
+        let relative = object
+            .key
+            .strip_prefix(prefix)
+            .unwrap_or(&object.key)
+            .replace('/', "\\");
+        items.push(TransferItem {
+            source: TransferEndpoint::S3 {
+                connection_id: CURRENT_CONNECTION_ID.to_string(),
+                bucket: bucket.to_string(),
+                key: object.key,
+            },
+            destination: TransferEndpoint::Local {
+                path: root.join(relative),
+            },
+        });
+    }
+    Ok(items)
+}
+
+pub async fn run_transfer_step(
+    source_client: Arc<S3Client>,
+    destination_client: Option<Arc<S3Client>>,
+    item: TransferItem,
+    overwrite_policy: OverwritePolicy,
+    is_move: bool,
+) -> Result<TransferStepResult, String> {
+    match &item.destination {
+        TransferEndpoint::S3 { bucket, key, .. } => {
+            let dest_client = destination_client.ok_or("missing destination client")?;
+            let exists = dest_client.head_object(bucket, key).await.is_ok();
+            if exists {
+                match overwrite_policy {
+                    OverwritePolicy::Ask => return Ok(TransferStepResult::Conflict(item)),
+                    OverwritePolicy::SkipAll => {
+                        return Ok(TransferStepResult::Skipped(item.label()));
+                    }
+                    OverwritePolicy::OverwriteAll => {}
+                }
+            }
+            match &item.source {
+                TransferEndpoint::S3 {
+                    bucket: src_bucket,
+                    key: src_key,
+                    ..
+                } => {
+                    // server-side copy when possible (same client/endpoint)
+                    source_client
+                        .copy_object(src_bucket, src_key, bucket, key)
+                        .await?;
+                    // for move: delete source after confirmed copy
+                    if is_move {
+                        source_client
+                            .delete_object(src_bucket, src_key)
+                            .await?;
+                    }
+                }
+                TransferEndpoint::Local { path } => {
+                    let data =
+                        tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+                    let content_type = guess_content_type(path);
+                    dest_client
+                        .put_object(bucket, key, data, &content_type)
+                        .await?;
+                }
+            }
+            Ok(TransferStepResult::Copied(item.label()))
+        }
+        TransferEndpoint::Local { path } => {
+            let exists = path.exists();
+            if exists {
+                match overwrite_policy {
+                    OverwritePolicy::Ask => return Ok(TransferStepResult::Conflict(item)),
+                    OverwritePolicy::SkipAll => {
+                        return Ok(TransferStepResult::Skipped(item.label()));
+                    }
+                    OverwritePolicy::OverwriteAll => {}
+                }
+            }
+            let TransferEndpoint::S3 { bucket, key, .. } = &item.source else {
+                return Err("local to local transfer is unsupported".to_string());
+            };
+            let data = source_client.get_object(bucket, key).await?;
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            tokio::fs::write(path, data)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(TransferStepResult::Copied(item.label()))
+        }
+    }
+}
+
+/// Wildcard match supporting `*` (any sequence) and `?` (any single char).
+/// If the pattern contains no wildcards, falls back to case-insensitive
+/// substring match. Matching is always case-insensitive.
+pub fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pat_lower = pattern.to_ascii_lowercase();
+    let text_lower = text.to_ascii_lowercase();
+
+    if !pat_lower.contains('*') && !pat_lower.contains('?') {
+        return text_lower.contains(&pat_lower);
+    }
+
+    let pat: Vec<char> = pat_lower.chars().collect();
+    let txt: Vec<char> = text_lower.chars().collect();
+    let (plen, tlen) = (pat.len(), txt.len());
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
+
+    while ti < tlen {
+        if pi < plen && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < plen && pat[pi] == '*' {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < plen && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == plen
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::{prepare_import_items, wildcard_match};
+    use crate::app::types::TransferEndpoint;
+
+    #[test]
+    fn wildcard_match_substring() {
+        assert!(wildcard_match("hello", "say hello world"));
+        assert!(wildcard_match("HELLO", "say hello world"));
+        assert!(!wildcard_match("goodbye", "say hello world"));
+    }
+
+    #[test]
+    fn wildcard_match_star() {
+        assert!(wildcard_match("*.txt", "readme.txt"));
+        assert!(wildcard_match("*.txt", "docs/readme.txt"));
+        assert!(!wildcard_match("*.txt", "readme.md"));
+        assert!(wildcard_match("docs/*", "docs/readme.txt"));
+        assert!(wildcard_match("*read*", "docs/readme.txt"));
+    }
+
+    #[test]
+    fn wildcard_match_question() {
+        assert!(wildcard_match("?.txt", "a.txt"));
+        assert!(!wildcard_match("?.txt", "ab.txt"));
+    }
+
+    #[test]
+    fn wildcard_match_case_insensitive() {
+        assert!(wildcard_match("*.TXT", "readme.txt"));
+        assert!(wildcard_match("*.txt", "README.TXT"));
+    }
+
+    #[test]
+    fn wildcard_match_empty() {
+        assert!(wildcard_match("", "anything"));
+        assert!(wildcard_match("*", "anything"));
+    }
+
+    #[test]
+    fn prepare_import_items_maps_relative_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "abixio-ui-import-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let nested = root.join("docs");
+        fs::create_dir_all(&nested).expect("create import test dir");
+        fs::write(nested.join("readme.txt"), b"hello").expect("write import test file");
+
+        let items = prepare_import_items(root.clone(), "bucket-a", "prefix/")
+            .expect("prepare import items");
+
+        assert_eq!(items.len(), 1);
+        match &items[0].destination {
+            TransferEndpoint::S3 { bucket, key, .. } => {
+                assert_eq!(bucket, "bucket-a");
+                assert_eq!(key, "prefix/docs/readme.txt");
+            }
+            _ => panic!("expected s3 destination"),
+        }
+
+        fs::remove_dir_all(root).expect("cleanup import test dir");
+    }
+}

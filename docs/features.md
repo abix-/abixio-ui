@@ -137,8 +137,8 @@ Migrated to `aws-sdk-s3` to eliminate all API blockers.
 
 No API blockers remain. Every S3 operation mc uses is available in aws-sdk-s3.
 Most operations are wired to the UI. Remaining unwired operations
-(`PutBucketLifecycle`, `PutBucketPolicy`, `Presign PUT`, `PutObjectRetention`,
-`PutBucketEncryption`) can be added without library changes.
+(`Presign PUT`, `PutObjectRetention`, `PutBucketEncryption`) can be added
+without library changes.
 
 ## Intentional Scope Differences
 

@@ -32,7 +32,7 @@ cargo build --release
 ## Not yet implemented
 
 - Presigned upload URLs (download URLs implemented)
-- `Diff`, `Copy`, and guarded `Sync` with concurrent transfers, rclone-compatible filters, and throughput telemetry are shipped. The next sync gap is bandwidth enforcement and watch mode; see `docs/sync.md`.
+- Bandwidth enforcement and watch mode for sync (see `docs/sync.md`)
 - Full inline content viewer (first 4KB text preview exists)
 
 ## Documentation
@@ -44,7 +44,7 @@ cargo build --release
 | [architecture.md](docs/architecture.md) | App architecture, layout, async model |
 | [sync.md](docs/sync.md) | Sync design, performance model, and phased rollout |
 | [credentials.md](docs/credentials.md) | OS keychain credential storage |
-| [testing.md](docs/testing.md) | Smoke test system |
+| [testing.md](docs/testing.md) | In-app smoke tests and automated integration test harness |
 
 ## Related
 

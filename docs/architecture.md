@@ -263,35 +263,37 @@ See [s3.md](s3.md) for full details on each operation and UI feature.
 
 ## Sync architecture
 
-The sync feature is being built as a separate subsystem, not an extension of
-the existing copy/move/import/export modal.
+The sync feature is a separate subsystem, not an extension of the existing
+copy/move/import/export modal.
 
-Current scaffold:
+Components:
 
 - `src/app/types.rs`
   Sync state, plan, telemetry, tuning, and endpoint types
 - `src/app/handlers/sync.rs`
-  Sync message/update routing and async orchestration skeleton
+  Sync message/update routing, execution dispatch, concurrent worker pool
 - `src/app/sync_ops.rs`
-  Planner helpers, filter handling, and compare engine entry points
+  Planner helpers, filter handling, compare engine, enumeration
 - `src/views/sync.rs`
-  Sync section UI with source/destination config, tuning fields, and plan area
+  Sync section UI with source/destination config, tuning fields, plan preview,
+  execution telemetry
 - `src/s3/client.rs`
   Sync-oriented recursive S3 listing helper
 
-The intended execution model is staged:
+Execution model:
 
 1. source enumerate
 2. destination enumerate
 3. compare
 4. plan build
 5. preview
-6. later: execute plan for copy or sync
+6. execute plan (copy or sync with concurrent transfer workers)
 
-This separation is deliberate. Sync needs its own performance tunables,
-telemetry, and destructive-operation guardrails.
+Phases 1-4 are shipped: preview planner, copy execution, guarded sync
+execution with deletes, concurrent transfer workers, rclone-compatible filters
+(size suffixes, time filters, `**` globs), and throughput telemetry.
 
-See [sync.md](sync.md) for the detailed phased plan.
+See [sync.md](sync.md) for the full design and rollout plan.
 
 ## Testing tab
 

@@ -155,11 +155,9 @@ pub async fn run_transfer_step(
                     }
                 }
                 TransferEndpoint::Local { path } => {
-                    let data =
-                        tokio::fs::read(path).await.map_err(|e| e.to_string())?;
                     let content_type = guess_content_type(path);
                     dest_client
-                        .put_object(bucket, key, data, &content_type)
+                        .upload_file(bucket, key, path, &content_type)
                         .await?;
                 }
             }

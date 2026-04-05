@@ -201,9 +201,8 @@ impl App {
         let key = format!("{}{}", prefix, filename);
         Task::perform(
             async move {
-                let data = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
                 client
-                    .put_object(&bucket, &key, data, "application/octet-stream")
+                    .upload_file(&bucket, &key, &file, "application/octet-stream")
                     .await
             },
             Message::UploadDone,

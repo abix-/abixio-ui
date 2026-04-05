@@ -62,7 +62,7 @@ smoke tests cover happy paths but miss:
 
 use mockall or manual mocks for the aws-sdk-s3 client trait if needed.
 
-## 5. multipart upload
+## ~~5. multipart upload~~ (done)
 
 aws-sdk-s3 supports CreateMultipartUpload / UploadPart / CompleteMultipartUpload
 natively. without this, uploads over ~5GB fail silently on most S3 backends.

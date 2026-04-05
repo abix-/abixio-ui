@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -9,9 +10,13 @@ use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_s3::config::{AppName, BehaviorVersion, Builder, Region, timeout::TimeoutConfig};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
-    BucketVersioningStatus, Delete, ObjectIdentifier, Tag, Tagging, VersioningConfiguration,
+    BucketVersioningStatus, CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier,
+    Tag, Tagging, VersioningConfiguration,
 };
 use aws_sdk_s3::Client;
+
+const MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024; // 8MB
+const MULTIPART_PART_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
 /// Shared atomic counters for S3 network activity.
 #[derive(Default)]
@@ -213,6 +218,165 @@ impl S3Client {
         self.record_request();
         self.record_bytes_out(len);
         Ok(String::new())
+    }
+
+    /// Upload a local file. Uses multipart upload for files > 8MB,
+    /// single PutObject for smaller files. On multipart failure,
+    /// aborts the upload to prevent orphaned parts.
+    pub async fn upload_file(
+        &self,
+        bucket: &str,
+        key: &str,
+        path: &Path,
+        content_type: &str,
+    ) -> Result<String, String> {
+        let meta = tokio::fs::metadata(path)
+            .await
+            .map_err(|e| e.to_string())?;
+        let size = meta.len();
+
+        if size <= MULTIPART_THRESHOLD {
+            let data = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+            return self.put_object(bucket, key, data, content_type).await;
+        }
+
+        // multipart upload
+        let upload_id = self.create_multipart_upload(bucket, key, content_type).await?;
+        match self.upload_parts(bucket, key, &upload_id, path, size).await {
+            Ok(parts) => {
+                self.complete_multipart_upload(bucket, key, &upload_id, parts).await?;
+                Ok(String::new())
+            }
+            Err(e) => {
+                let _ = self.abort_multipart_upload(bucket, key, &upload_id).await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn create_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        content_type: &str,
+    ) -> Result<String, String> {
+        let resp = self
+            .client
+            .create_multipart_upload()
+            .bucket(bucket)
+            .key(key)
+            .content_type(content_type)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.record_request();
+
+        resp.upload_id()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "server did not return upload_id".to_string())
+    }
+
+    async fn upload_parts(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        path: &Path,
+        size: u64,
+    ) -> Result<Vec<CompletedPart>, String> {
+        use tokio::io::AsyncReadExt;
+
+        let mut file = tokio::fs::File::open(path)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut parts = Vec::new();
+        let mut part_number: i32 = 1;
+        let mut remaining = size;
+
+        while remaining > 0 {
+            let chunk_size = (remaining as usize).min(MULTIPART_PART_SIZE);
+            let mut buf = vec![0u8; chunk_size];
+            let mut read = 0;
+            while read < chunk_size {
+                let n = file
+                    .read(&mut buf[read..])
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if n == 0 {
+                    break;
+                }
+                read += n;
+            }
+            buf.truncate(read);
+            remaining -= read as u64;
+
+            let resp = self
+                .client
+                .upload_part()
+                .bucket(bucket)
+                .key(key)
+                .upload_id(upload_id)
+                .part_number(part_number)
+                .body(ByteStream::from(buf.clone()))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            self.record_request();
+            self.record_bytes_out(buf.len() as u64);
+
+            let etag = resp.e_tag().unwrap_or_default().to_string();
+            parts.push(
+                CompletedPart::builder()
+                    .e_tag(etag)
+                    .part_number(part_number)
+                    .build(),
+            );
+            part_number += 1;
+        }
+
+        Ok(parts)
+    }
+
+    async fn complete_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        parts: Vec<CompletedPart>,
+    ) -> Result<(), String> {
+        let completed = CompletedMultipartUpload::builder()
+            .set_parts(Some(parts))
+            .build();
+
+        self.client
+            .complete_multipart_upload()
+            .bucket(bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .multipart_upload(completed)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.record_request();
+        Ok(())
+    }
+
+    async fn abort_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+    ) -> Result<(), String> {
+        self.client
+            .abort_multipart_upload()
+            .bucket(bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.record_request();
+        Ok(())
     }
 
     pub async fn get_object(&self, bucket: &str, key: &str) -> Result<Vec<u8>, String> {

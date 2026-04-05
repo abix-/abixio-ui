@@ -18,10 +18,10 @@ operator expectations shaped by tools like MinIO Client `mc mirror` and
 
 ## Current Status
 
-The repo now contains the Phase 1 scaffold:
+The repo now contains the planner and the first execution phase:
 
 - sync state and message plumbing in `src/app/mod.rs` and `src/app/types.rs`
-- sync handler skeleton in `src/app/handlers/sync.rs`
+- sync handler and copy execution flow in `src/app/handlers/sync.rs`
 - sync planner module in `src/app/sync_ops.rs`
 - sync UI section in `src/views/sync.rs`
 - sync-oriented recursive S3 listing helper in `src/s3/client.rs`
@@ -34,17 +34,17 @@ What is present today:
 - advanced tuning and filter form fields
 - sync telemetry/state storage
 - a real preview planner wired to local and S3 enumeration
+- copy execution from the current plan
+- explicit execution strategies for upload, download, server-side copy, and client relay
 
 What is not present yet:
-
-- real source enumeration in the handler flow
-- real destination enumeration in the handler flow
-- full diff preview from actual snapshots
-- copy or sync execution
+- delete-capable sync execution
 - delete guardrails
 - bandwidth and multipart tunables
+- worker-pool concurrency
+- richer execution telemetry
 
-This means sync is **scaffolded, not shipped**.
+This means the sync subsystem is **partially shipped**: planning and non-destructive copy execution exist, but full sync execution does not.
 
 ## Product Model
 
@@ -193,8 +193,10 @@ Deliver:
 - execute `create` and `update` plan items
 - server-side copy for S3 -> S3 where possible
 - multipart upload for large local -> S3 operations
-- execution telemetry
-- retry and overwrite policy integration
+- streamed S3 -> local downloads
+- explicit client-relay strategy for cross-endpoint S3 -> S3 copy
+- basic execution telemetry and summary
+- sequential execution from the reviewed plan
 
 No deletes yet.
 
@@ -241,6 +243,6 @@ Possible additions:
 
 The sync subsystem is being built as a first-class feature with a real planning
 engine, not a larger copy modal. The current repo now has a working preview
-planner for `Diff`, `Copy`, and policy-backed `Sync`. The next implementation
-milestone is execution: first copy-from-plan, then destructive sync with
-guardrails.
+planner for `Diff`, `Copy`, and policy-backed `Sync`, plus non-destructive
+`Copy` execution from that plan. The next implementation milestone is
+destructive `Sync` execution with delete guardrails.

@@ -2,11 +2,14 @@ use std::path::PathBuf;
 
 use iced::Task;
 
-use crate::app::sync_ops::{build_sync_plan, enumerate_local_for_sync, enumerate_s3_for_sync};
-use crate::app::transfer_ops::now_rfc3339;
+use crate::app::sync_ops::{
+    build_sync_plan, enumerate_local_for_sync, enumerate_s3_for_sync, prepare_copy_run_plan,
+};
+use crate::app::transfer_ops::{execute_sync_run_item, now_rfc3339};
 use crate::app::{
     App, Message, SyncCompareMode, SyncDeletePhase, SyncDestinationNewerPolicy, SyncEndpointKind,
-    SyncListMode, SyncMode, SyncObject, SyncPlan, SyncPreset, SyncState,
+    SyncExecutionState, SyncListMode, SyncMode, SyncObject, SyncPlan, SyncPreset, SyncRunItem,
+    SyncState, TransferEndpoint,
 };
 use crate::s3::client::BucketInfo;
 
@@ -523,11 +526,99 @@ impl App {
         match result {
             Ok(plan) => {
                 sync.telemetry.compared = plan.items.len();
+                sync.run_plan = if sync.mode == SyncMode::Copy {
+                    match prepare_copy_run_plan(sync, &plan) {
+                        Ok(items) => Some(items),
+                        Err(error) => {
+                            sync.error = Some(error);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
                 sync.plan = Some(plan);
             }
             Err(error) => sync.error = Some(error),
         }
         Task::none()
+    }
+
+    pub(crate) fn handle_start_sync_copy(&mut self) -> Task<Message> {
+        let Some(sync) = self.sync.as_mut() else {
+            return Task::none();
+        };
+        if sync.mode != SyncMode::Copy {
+            return Task::none();
+        }
+        let Some(items) = sync.run_plan.clone() else {
+            sync.error = Some("Build a copy plan before running copy.".to_string());
+            return Task::none();
+        };
+        if items.is_empty() {
+            sync.error = Some("The current copy plan has no actionable items.".to_string());
+            return Task::none();
+        }
+
+        let total_bytes = items.iter().map(|item| item.bytes).sum();
+        let has_client_relay = items.iter().any(|item| {
+            matches!(
+                item.strategy,
+                crate::app::SyncExecutionStrategy::ClientRelay
+            )
+        });
+        sync.execution = Some(SyncExecutionState {
+            items: items.clone(),
+            next_index: 0,
+            completed: 0,
+            skipped: 0,
+            failed: 0,
+            bytes_done: 0,
+            total_bytes,
+            current_item: None,
+            current_strategy: None,
+            running: true,
+            summary: None,
+            has_client_relay,
+        });
+        sync.telemetry.stage = "Copying".to_string();
+        sync.telemetry.last_update_at = Some(now_rfc3339());
+        self.cmd_process_next_sync_copy_step()
+    }
+
+    pub(crate) fn handle_sync_copy_step_finished(
+        &mut self,
+        result: Result<SyncRunItem, String>,
+    ) -> Task<Message> {
+        let Some(sync) = self.sync.as_mut() else {
+            return Task::none();
+        };
+        let Some(execution) = sync.execution.as_mut() else {
+            return Task::none();
+        };
+
+        match result {
+            Ok(item) => {
+                execution.completed += 1;
+                execution.bytes_done += item.bytes;
+                execution.next_index += 1;
+                execution.current_item = Some(item.relative_path);
+                execution.current_strategy = Some(item.strategy);
+                sync.telemetry.last_update_at = Some(now_rfc3339());
+                self.cmd_process_next_sync_copy_step()
+            }
+            Err(error) => {
+                execution.failed += 1;
+                execution.next_index += 1;
+                execution.summary = Some(format!(
+                    "Copy failed on item {} of {}.",
+                    execution.next_index,
+                    execution.items.len()
+                ));
+                self.error = Some(format!("Copy failed: {}", error));
+                self.cmd_process_next_sync_copy_step()
+            }
+        }
     }
 
     pub(crate) fn cmd_fetch_sync_source_buckets(&self, connection_id: &str) -> Task<Message> {
@@ -556,10 +647,76 @@ impl App {
             ),
         }
     }
+
+    pub(crate) fn cmd_process_next_sync_copy_step(&mut self) -> Task<Message> {
+        let Some(sync) = self.sync.as_mut() else {
+            return Task::none();
+        };
+        let Some(execution) = sync.execution.as_mut() else {
+            return Task::none();
+        };
+
+        if execution.next_index >= execution.items.len() {
+            execution.running = false;
+            execution.current_strategy = None;
+            execution.current_item = None;
+            execution.summary = Some(format!(
+                "Done. Copied: {}. Failed: {}. Bytes: {} / {}.",
+                execution.completed, execution.failed, execution.bytes_done, execution.total_bytes
+            ));
+            sync.telemetry.stage = "Idle".to_string();
+            sync.telemetry.last_update_at = Some(now_rfc3339());
+            return Task::none();
+        }
+
+        let item = execution.items[execution.next_index].clone();
+        execution.current_item = Some(item.relative_path.clone());
+        execution.current_strategy = Some(item.strategy);
+        execution.running = true;
+
+        let source_client = match &item.source {
+            TransferEndpoint::S3 { connection_id, .. } => {
+                match self.make_client_for_connection(connection_id) {
+                    Ok(client) => Some(client),
+                    Err(error) => {
+                        return Task::perform(
+                            async move { Err(error) },
+                            Message::SyncCopyStepFinished,
+                        );
+                    }
+                }
+            }
+            TransferEndpoint::Local { .. } => None,
+        };
+        let destination_client = match &item.destination {
+            TransferEndpoint::S3 { connection_id, .. } => {
+                match self.make_client_for_connection(connection_id) {
+                    Ok(client) => Some(client),
+                    Err(error) => {
+                        return Task::perform(
+                            async move { Err(error) },
+                            Message::SyncCopyStepFinished,
+                        );
+                    }
+                }
+            }
+            TransferEndpoint::Local { .. } => None,
+        };
+        Task::perform(
+            async move {
+                execute_sync_run_item(source_client, destination_client, &item)
+                    .await
+                    .map(|_| item)
+            },
+            Message::SyncCopyStepFinished,
+        )
+    }
 }
 
 fn clear_sync_plan(sync: &mut SyncState) {
     sync.plan = None;
+    sync.run_plan = None;
+    sync.execution = None;
     sync.error = None;
     sync.source_snapshot = None;
     sync.destination_snapshot = None;

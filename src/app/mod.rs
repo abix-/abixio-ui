@@ -28,9 +28,10 @@ pub use types::{
     BucketDeleteState, BucketDeleteStepResult, BucketDocumentKind, BucketDocumentLoadState,
     BucketDocumentState, BulkDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy,
     PrefixDeleteState, StartupOptions, SyncCompareMode, SyncDeletePhase,
-    SyncDestinationNewerPolicy, SyncEndpoint, SyncEndpointKind, SyncFilterSet, SyncListMode,
-    SyncMode, SyncObject, SyncPlan, SyncPlanAction, SyncPlanItem, SyncPlanReason, SyncPlanSummary,
-    SyncPolicy, SyncPreset, SyncState, SyncTelemetry, SyncTuning, TransferEndpoint, TransferItem,
+    SyncDestinationNewerPolicy, SyncEndpoint, SyncEndpointKind, SyncExecutionState,
+    SyncExecutionStrategy, SyncFilterSet, SyncListMode, SyncMode, SyncObject, SyncPlan,
+    SyncPlanAction, SyncPlanItem, SyncPlanReason, SyncPlanSummary, SyncPolicy, SyncPreset,
+    SyncRunItem, SyncState, SyncTelemetry, SyncTuning, TransferEndpoint, TransferItem,
     TransferMode, TransferState, TransferStepResult,
 };
 
@@ -135,6 +136,8 @@ pub enum Message {
     SyncSourceEnumerated(Result<Vec<SyncObject>, String>),
     SyncDestinationEnumerated(Result<Vec<SyncObject>, String>),
     SyncPlanBuilt(Result<SyncPlan, String>),
+    StartSyncCopy,
+    SyncCopyStepFinished(Result<SyncRunItem, String>),
 
     // connection manager
     ConnectTo(String),
@@ -793,6 +796,8 @@ impl App {
             Message::SyncSourceEnumerated(r) => self.handle_sync_source_enumerated(r),
             Message::SyncDestinationEnumerated(r) => self.handle_sync_destination_enumerated(r),
             Message::SyncPlanBuilt(r) => self.handle_sync_plan_built(r),
+            Message::StartSyncCopy => self.handle_start_sync_copy(),
+            Message::SyncCopyStepFinished(r) => self.handle_sync_copy_step_finished(r),
 
             // -- testing --
             Message::RunTests => self.handle_run_tests(),
@@ -977,7 +982,8 @@ mod tests {
 
     use super::types::{
         BucketDeleteState, BucketDocumentLoadState, CURRENT_CONNECTION_ID, OverwritePolicy,
-        SyncDeletePhase, SyncDestinationNewerPolicy, SyncPreset, TransferMode, TransferState,
+        SyncDeletePhase, SyncDestinationNewerPolicy, SyncExecutionStrategy, SyncMode, SyncPreset,
+        TransferMode, TransferState,
     };
     use super::{App, BucketDocumentKind, Message, Selection, StartupOptions};
     use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
@@ -1288,5 +1294,43 @@ mod tests {
         let sync = app.sync.expect("sync state should exist");
         assert_eq!(sync.preset, SyncPreset::Custom);
         assert!(!sync.policy.delete_extras);
+    }
+
+    #[test]
+    fn copy_plan_builds_run_plan() {
+        let (mut app, _) = App::new(empty_startup());
+
+        let _ = app.update(Message::OpenSync);
+        let sync = app.sync.as_mut().expect("sync state should exist");
+        sync.mode = SyncMode::Copy;
+        sync.source_kind = super::SyncEndpointKind::S3;
+        sync.destination_kind = super::SyncEndpointKind::S3;
+        sync.source_connection_id = CURRENT_CONNECTION_ID.to_string();
+        sync.destination_connection_id = CURRENT_CONNECTION_ID.to_string();
+        sync.source_bucket = "source".to_string();
+        sync.destination_bucket = "destination".to_string();
+        sync.plan = Some(super::SyncPlan {
+            items: vec![super::SyncPlanItem {
+                action: super::SyncPlanAction::Create,
+                reason: super::SyncPlanReason::MissingOnDestination,
+                relative_path: "file.txt".to_string(),
+                source: Some(super::SyncObject {
+                    relative_path: "file.txt".to_string(),
+                    size: 10,
+                    modified: None,
+                    etag: None,
+                    is_dir_marker: false,
+                }),
+                destination: None,
+            }],
+            summary: super::SyncPlanSummary::default(),
+        });
+
+        let _ = app.update(Message::SyncPlanBuilt(Ok(app.sync.as_ref().unwrap().plan.clone().unwrap())));
+
+        let sync = app.sync.expect("sync state should exist");
+        let run_plan = sync.run_plan.expect("run plan should exist");
+        assert_eq!(run_plan.len(), 1);
+        assert_eq!(run_plan[0].strategy, SyncExecutionStrategy::ServerSideCopy);
     }
 }

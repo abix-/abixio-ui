@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::app::{
-    SyncCompareMode, SyncDestinationNewerPolicy, SyncFilterSet, SyncMode, SyncObject, SyncPlan,
-    SyncPlanAction, SyncPlanItem, SyncPlanReason, SyncPlanSummary, SyncPolicy, wildcard_match,
+    SyncCompareMode, SyncDestinationNewerPolicy, SyncEndpointKind, SyncExecutionStrategy,
+    SyncFilterSet, SyncMode, SyncObject, SyncPlan, SyncPlanAction, SyncPlanItem, SyncPlanReason,
+    SyncPlanSummary, SyncPolicy, SyncRunItem, SyncState, TransferEndpoint, wildcard_match,
 };
 use crate::s3::client::S3Client;
 
@@ -163,6 +164,9 @@ pub fn build_sync_plan(
         let destination = destination_map.get(&path).cloned();
 
         let (action, reason) = match (&source, &destination) {
+            (Some(source), Some(destination)) if mode == SyncMode::Copy => {
+                compare_copy_objects(source, destination, compare_mode)
+            }
             (Some(source), Some(destination)) => {
                 compare_sync_objects(source, destination, compare_mode, policy)
             }
@@ -200,6 +204,60 @@ pub fn build_sync_plan(
     SyncPlan { items, summary }
 }
 
+fn compare_copy_objects(
+    source: &SyncObject,
+    destination: &SyncObject,
+    mode: SyncCompareMode,
+) -> (SyncPlanAction, SyncPlanReason) {
+    match mode {
+        SyncCompareMode::AlwaysOverwrite => (SyncPlanAction::Update, SyncPlanReason::SourceNewer),
+        SyncCompareMode::SizeOnly => {
+            if source.size == destination.size {
+                (SyncPlanAction::Skip, SyncPlanReason::Identical)
+            } else {
+                (SyncPlanAction::Update, SyncPlanReason::SizeMismatch)
+            }
+        }
+        SyncCompareMode::SizeAndModTime => {
+            if source.size != destination.size {
+                (SyncPlanAction::Update, SyncPlanReason::SizeMismatch)
+            } else if source.modified == destination.modified {
+                (SyncPlanAction::Skip, SyncPlanReason::Identical)
+            } else {
+                (SyncPlanAction::Update, SyncPlanReason::SourceNewer)
+            }
+        }
+        SyncCompareMode::UpdateIfSourceNewer => {
+            if source.size != destination.size {
+                (SyncPlanAction::Update, SyncPlanReason::SizeMismatch)
+            } else if source.modified == destination.modified {
+                (SyncPlanAction::Skip, SyncPlanReason::Identical)
+            } else {
+                match (&source.modified, &destination.modified) {
+                    (Some(source_modified), Some(destination_modified))
+                        if source_modified <= destination_modified =>
+                    {
+                        (SyncPlanAction::Skip, SyncPlanReason::DestinationNewer)
+                    }
+                    _ => (SyncPlanAction::Update, SyncPlanReason::SourceNewer),
+                }
+            }
+        }
+        SyncCompareMode::ChecksumIfAvailable => {
+            if source.etag.is_some()
+                && source.etag == destination.etag
+                && source.size == destination.size
+            {
+                (SyncPlanAction::Skip, SyncPlanReason::Identical)
+            } else if source.size != destination.size {
+                (SyncPlanAction::Update, SyncPlanReason::SizeMismatch)
+            } else {
+                (SyncPlanAction::Update, SyncPlanReason::ChecksumMismatch)
+            }
+        }
+    }
+}
+
 fn missing_on_source_action(
     mode: SyncMode,
     policy: SyncPolicy,
@@ -210,6 +268,126 @@ fn missing_on_source_action(
             (SyncPlanAction::Delete, SyncPlanReason::MissingOnSource)
         }
         SyncMode::Sync | SyncMode::Diff => (SyncPlanAction::Skip, SyncPlanReason::MissingOnSource),
+    }
+}
+
+pub fn prepare_copy_run_plan(
+    sync: &SyncState,
+    plan: &SyncPlan,
+) -> Result<Vec<SyncRunItem>, String> {
+    let mut items = Vec::new();
+    for plan_item in &plan.items {
+        if !matches!(
+            plan_item.action,
+            SyncPlanAction::Create | SyncPlanAction::Update
+        ) {
+            continue;
+        }
+        let source = build_transfer_endpoint(sync, true, &plan_item.relative_path)?;
+        let destination = build_transfer_endpoint(sync, false, &plan_item.relative_path)?;
+        let strategy = determine_execution_strategy(&source, &destination)?;
+        let bytes = plan_item
+            .source
+            .as_ref()
+            .map(|object| object.size)
+            .unwrap_or(0);
+        items.push(SyncRunItem {
+            relative_path: plan_item.relative_path.clone(),
+            action: plan_item.action,
+            source,
+            destination,
+            strategy,
+            bytes,
+        });
+    }
+    Ok(items)
+}
+
+fn build_transfer_endpoint(
+    sync: &SyncState,
+    source: bool,
+    relative_path: &str,
+) -> Result<TransferEndpoint, String> {
+    let path_fragment = relative_path.replace('/', std::path::MAIN_SEPARATOR_STR);
+    match if source {
+        sync.source_kind
+    } else {
+        sync.destination_kind
+    } {
+        SyncEndpointKind::S3 => Ok(TransferEndpoint::S3 {
+            connection_id: if source {
+                sync.source_connection_id.clone()
+            } else {
+                sync.destination_connection_id.clone()
+            },
+            bucket: if source {
+                sync.source_bucket.clone()
+            } else {
+                sync.destination_bucket.clone()
+            },
+            key: join_s3_key(
+                if source {
+                    &sync.source_prefix
+                } else {
+                    &sync.destination_prefix
+                },
+                relative_path,
+            ),
+        }),
+        SyncEndpointKind::Local => {
+            let root = if source {
+                sync.source_local_path.clone()
+            } else {
+                sync.destination_local_path.clone()
+            }
+            .ok_or_else(|| "Local path is required.".to_string())?;
+            Ok(TransferEndpoint::Local {
+                path: root.join(path_fragment),
+            })
+        }
+    }
+}
+
+fn determine_execution_strategy(
+    source: &TransferEndpoint,
+    destination: &TransferEndpoint,
+) -> Result<SyncExecutionStrategy, String> {
+    match (source, destination) {
+        (TransferEndpoint::Local { .. }, TransferEndpoint::S3 { .. }) => {
+            Ok(SyncExecutionStrategy::Upload)
+        }
+        (TransferEndpoint::S3 { .. }, TransferEndpoint::Local { .. }) => {
+            Ok(SyncExecutionStrategy::Download)
+        }
+        (
+            TransferEndpoint::S3 {
+                connection_id: source_connection,
+                ..
+            },
+            TransferEndpoint::S3 {
+                connection_id: destination_connection,
+                ..
+            },
+        ) => {
+            if source_connection == destination_connection {
+                Ok(SyncExecutionStrategy::ServerSideCopy)
+            } else {
+                Ok(SyncExecutionStrategy::ClientRelay)
+            }
+        }
+        (TransferEndpoint::Local { .. }, TransferEndpoint::Local { .. }) => {
+            Err("Local to local copy is not supported in sync execution.".to_string())
+        }
+    }
+}
+
+fn join_s3_key(prefix: &str, relative: &str) -> String {
+    if prefix.is_empty() {
+        relative.to_string()
+    } else if prefix.ends_with('/') {
+        format!("{}{}", prefix, relative)
+    } else {
+        format!("{}/{}", prefix, relative)
     }
 }
 
@@ -324,6 +502,32 @@ mod tests {
     }
 
     #[test]
+    fn copy_mode_skips_destination_newer_objects_for_update_if_source_newer() {
+        let plan = build_sync_plan(
+            vec![SyncObject {
+                relative_path: "file.txt".to_string(),
+                size: 5,
+                modified: Some("2025-01-01T00:00:00Z".to_string()),
+                etag: None,
+                is_dir_marker: false,
+            }],
+            vec![SyncObject {
+                relative_path: "file.txt".to_string(),
+                size: 5,
+                modified: Some("2026-01-01T00:00:00Z".to_string()),
+                etag: None,
+                is_dir_marker: false,
+            }],
+            SyncMode::Copy,
+            crate::app::SyncPreset::Converge.policy(),
+            SyncCompareMode::UpdateIfSourceNewer,
+        );
+        assert_eq!(plan.summary.skips, 1);
+        assert_eq!(plan.summary.conflicts, 0);
+        assert_eq!(plan.summary.updates, 0);
+    }
+
+    #[test]
     fn advanced_policy_without_overwrite_marks_conflict() {
         let mut policy = crate::app::SyncPreset::Converge.policy();
         policy.overwrite_changed = false;
@@ -373,5 +577,35 @@ mod tests {
             ..object
         };
         assert!(!apply_sync_filters(&excluded, &filters));
+    }
+
+    #[test]
+    fn prepare_copy_run_plan_marks_cross_endpoint_s3_as_client_relay() {
+        let mut sync = crate::app::SyncState::new("source-a".to_string());
+        sync.mode = SyncMode::Copy;
+        sync.source_kind = SyncEndpointKind::S3;
+        sync.destination_kind = SyncEndpointKind::S3;
+        sync.source_connection_id = "source-a".to_string();
+        sync.destination_connection_id = "dest-b".to_string();
+        sync.source_bucket = "source-bucket".to_string();
+        sync.destination_bucket = "dest-bucket".to_string();
+
+        let plan = build_sync_plan(
+            vec![SyncObject {
+                relative_path: "file.txt".to_string(),
+                size: 5,
+                modified: None,
+                etag: None,
+                is_dir_marker: false,
+            }],
+            Vec::new(),
+            SyncMode::Copy,
+            crate::app::SyncPreset::Converge.policy(),
+            SyncCompareMode::SizeOnly,
+        );
+
+        let run_plan = prepare_copy_run_plan(&sync, &plan).expect("copy run plan");
+        assert_eq!(run_plan.len(), 1);
+        assert_eq!(run_plan[0].strategy, SyncExecutionStrategy::ClientRelay);
     }
 }

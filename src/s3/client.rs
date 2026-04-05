@@ -402,6 +402,108 @@ impl S3Client {
         Ok(data)
     }
 
+    pub async fn download_object_to_file(
+        &self,
+        bucket: &str,
+        key: &str,
+        path: &Path,
+    ) -> Result<u64, String> {
+        use tokio::io::AsyncWriteExt;
+
+        let resp = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.record_request();
+
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+
+        let mut file = tokio::fs::File::create(path)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut reader = resp.body.into_async_read();
+        let copied = tokio::io::copy(&mut reader, &mut file)
+            .await
+            .map_err(|e| e.to_string())?;
+        file.flush().await.map_err(|e| e.to_string())?;
+        self.record_bytes_in(copied);
+        Ok(copied)
+    }
+
+    pub async fn put_object_stream(
+        &self,
+        bucket: &str,
+        key: &str,
+        body: ByteStream,
+        content_type: &str,
+        content_length: Option<u64>,
+    ) -> Result<(), String> {
+        let mut request = self
+            .client
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .content_type(content_type)
+            .body(body);
+        if let Some(length) = content_length {
+            request = request.content_length(length as i64);
+        }
+        request.send().await.map_err(|e| e.to_string())?;
+        self.record_request();
+        if let Some(length) = content_length {
+            self.record_bytes_out(length);
+        }
+        Ok(())
+    }
+
+    pub async fn relay_object_to_s3(
+        &self,
+        bucket: &str,
+        key: &str,
+        destination_client: &S3Client,
+        destination_bucket: &str,
+        destination_key: &str,
+    ) -> Result<u64, String> {
+        let resp = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.record_request();
+
+        let content_type = resp
+            .content_type()
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let content_length = resp.content_length().map(|length| length as u64);
+        destination_client
+            .put_object_stream(
+                destination_bucket,
+                destination_key,
+                resp.body,
+                &content_type,
+                content_length,
+            )
+            .await?;
+        if let Some(length) = content_length {
+            self.record_bytes_in(length);
+            Ok(length)
+        } else {
+            Ok(0)
+        }
+    }
+
     pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectDetail, String> {
         let resp = self
             .client

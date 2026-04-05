@@ -272,6 +272,40 @@ pub struct SyncPlan {
     pub summary: SyncPlanSummary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncExecutionStrategy {
+    Upload,
+    Download,
+    ServerSideCopy,
+    ClientRelay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncRunItem {
+    pub relative_path: String,
+    pub action: SyncPlanAction,
+    pub source: TransferEndpoint,
+    pub destination: TransferEndpoint,
+    pub strategy: SyncExecutionStrategy,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncExecutionState {
+    pub items: Vec<SyncRunItem>,
+    pub next_index: usize,
+    pub completed: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub bytes_done: u64,
+    pub total_bytes: u64,
+    pub current_item: Option<String>,
+    pub current_strategy: Option<SyncExecutionStrategy>,
+    pub running: bool,
+    pub summary: Option<String>,
+    pub has_client_relay: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncTelemetry {
     pub stage: String,
@@ -306,8 +340,10 @@ pub struct SyncState {
     pub filters: SyncFilterSet,
     pub running: bool,
     pub plan: Option<SyncPlan>,
+    pub run_plan: Option<Vec<SyncRunItem>>,
     pub source_snapshot: Option<Vec<SyncObject>>,
     pub destination_snapshot: Option<Vec<SyncObject>>,
+    pub execution: Option<SyncExecutionState>,
     pub telemetry: SyncTelemetry,
     pub error: Option<String>,
     pub show_advanced: bool,
@@ -354,8 +390,10 @@ impl SyncState {
             },
             running: false,
             plan: None,
+            run_plan: None,
             source_snapshot: None,
             destination_snapshot: None,
+            execution: None,
             telemetry: SyncTelemetry {
                 stage: "Idle".to_string(),
                 source_scanned: 0,

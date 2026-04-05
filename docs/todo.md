@@ -25,7 +25,8 @@ Recursive import/export exists, but there is no sync-style workflow.
 
 Current status:
 - The app now has a real preview planner for `Diff`, `Copy`, and policy-backed `Sync`
-- execution is still pending; there is no shipped copy/sync run engine yet
+- `Copy` execution from plan is now shipped
+- `Sync` execution with deletes and guardrails is still pending
 
 Implementation phases:
 - Phase 1: harden diff planning and preview

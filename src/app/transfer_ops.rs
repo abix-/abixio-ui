@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -7,7 +8,8 @@ use time::format_description::well_known::Rfc3339;
 use crate::s3::client::S3Client;
 
 use super::types::{
-    CURRENT_CONNECTION_ID, OverwritePolicy, TransferEndpoint, TransferItem, TransferStepResult,
+    CURRENT_CONNECTION_ID, OverwritePolicy, SyncExecutionStrategy, SyncRunItem, TransferEndpoint,
+    TransferItem, TransferStepResult,
 };
 
 impl TransferItem {
@@ -187,6 +189,128 @@ pub async fn run_transfer_step(
             Ok(TransferStepResult::Copied(item.label()))
         }
     }
+}
+
+pub async fn execute_sync_run_item(
+    source_client: Option<Arc<S3Client>>,
+    destination_client: Option<Arc<S3Client>>,
+    item: &SyncRunItem,
+) -> Result<(), String> {
+    match item.strategy {
+        SyncExecutionStrategy::Upload => {
+            let TransferEndpoint::Local { path } = &item.source else {
+                return Err("upload strategy requires a local source".to_string());
+            };
+            let TransferEndpoint::S3 { bucket, key, .. } = &item.destination else {
+                return Err("upload strategy requires an s3 destination".to_string());
+            };
+            let destination_client = destination_client.ok_or("missing destination client")?;
+            let content_type = guess_content_type(path);
+            destination_client
+                .upload_file(bucket, key, path, &content_type)
+                .await?;
+            Ok(())
+        }
+        SyncExecutionStrategy::Download => {
+            let TransferEndpoint::S3 { bucket, key, .. } = &item.source else {
+                return Err("download strategy requires an s3 source".to_string());
+            };
+            let TransferEndpoint::Local { path } = &item.destination else {
+                return Err("download strategy requires a local destination".to_string());
+            };
+            let source_client = source_client.ok_or("missing source client")?;
+            source_client
+                .download_object_to_file(bucket, key, path)
+                .await?;
+            Ok(())
+        }
+        SyncExecutionStrategy::ServerSideCopy => {
+            let TransferEndpoint::S3 {
+                bucket: source_bucket,
+                key: source_key,
+                ..
+            } = &item.source
+            else {
+                return Err("server-side copy requires an s3 source".to_string());
+            };
+            let TransferEndpoint::S3 {
+                bucket: destination_bucket,
+                key: destination_key,
+                ..
+            } = &item.destination
+            else {
+                return Err("server-side copy requires an s3 destination".to_string());
+            };
+            let source_client = source_client.ok_or("missing source client")?;
+            source_client
+                .copy_object(
+                    source_bucket,
+                    source_key,
+                    destination_bucket,
+                    destination_key,
+                )
+                .await?;
+            Ok(())
+        }
+        SyncExecutionStrategy::ClientRelay => {
+            let TransferEndpoint::S3 {
+                bucket: source_bucket,
+                key: source_key,
+                ..
+            } = &item.source
+            else {
+                return Err("client relay requires an s3 source".to_string());
+            };
+            let TransferEndpoint::S3 {
+                bucket: destination_bucket,
+                key: destination_key,
+                ..
+            } = &item.destination
+            else {
+                return Err("client relay requires an s3 destination".to_string());
+            };
+            let source_client = source_client.ok_or("missing source client")?;
+            let destination_client = destination_client.ok_or("missing destination client")?;
+
+            if item.bytes > 5 * 1024 * 1024 * 1024 {
+                let spool_path = relay_spool_path(source_key);
+                source_client
+                    .download_object_to_file(source_bucket, source_key, &spool_path)
+                    .await?;
+                let content_type = guess_content_type(&spool_path);
+                let upload_result = destination_client
+                    .upload_file(
+                        destination_bucket,
+                        destination_key,
+                        &spool_path,
+                        &content_type,
+                    )
+                    .await;
+                let _ = tokio::fs::remove_file(&spool_path).await;
+                upload_result.map(|_| ())
+            } else {
+                source_client
+                    .relay_object_to_s3(
+                        source_bucket,
+                        source_key,
+                        destination_client.as_ref(),
+                        destination_bucket,
+                        destination_key,
+                    )
+                    .await
+                    .map(|_| ())
+            }
+        }
+    }
+}
+
+fn relay_spool_path(source_key: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sanitized = source_key.replace(['/', '\\', ':'], "_");
+    std::env::temp_dir().join(format!("abixio-ui-sync-relay-{}-{}", nanos, sanitized))
 }
 
 /// Wildcard match supporting `*` (any sequence) and `?` (any single char).

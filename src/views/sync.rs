@@ -5,7 +5,8 @@ use iced::{Element, Length};
 
 use crate::app::{
     App, CURRENT_CONNECTION_ID, Message, SyncCompareMode, SyncDeletePhase,
-    SyncDestinationNewerPolicy, SyncEndpointKind, SyncListMode, SyncMode, SyncPreset,
+    SyncDestinationNewerPolicy, SyncEndpointKind, SyncExecutionStrategy, SyncListMode, SyncMode,
+    SyncPreset,
 };
 
 impl App {
@@ -322,6 +323,27 @@ impl App {
                     button(text(build_plan_label(sync.mode)).size(11))
                         .on_press(Message::StartSyncPlan)
                 },
+                if sync.mode == SyncMode::Copy
+                    && sync.plan.is_some()
+                    && sync
+                        .run_plan
+                        .as_ref()
+                        .is_some_and(|items| !items.is_empty())
+                    && !sync
+                        .execution
+                        .as_ref()
+                        .is_some_and(|execution| execution.running)
+                {
+                    button(text("Run Copy").size(11)).on_press(Message::StartSyncCopy)
+                } else if sync
+                    .execution
+                    .as_ref()
+                    .is_some_and(|execution| execution.running)
+                {
+                    button(text("Copying...").size(11))
+                } else {
+                    button(text("Run Copy").size(11))
+                },
                 button(text("Reset").size(11)).on_press(Message::OpenSync),
             ]
             .spacing(8),
@@ -355,18 +377,68 @@ impl App {
                 plan.summary.bytes_to_update,
                 plan.summary.bytes_to_delete
             )));
+            if let Some(run_plan) = &sync.run_plan {
+                let relay_count = run_plan
+                    .iter()
+                    .filter(|item| item.strategy == SyncExecutionStrategy::ClientRelay)
+                    .count();
+                if relay_count > 0 {
+                    content = content.push(
+                        text(format!(
+                            "Warning: {} copy item(s) will use client relay instead of server-side copy.",
+                            relay_count
+                        ))
+                        .size(11),
+                    );
+                }
+            }
             if plan.items.is_empty() {
                 content = content.push(text("No plan items yet.").size(11));
             } else {
                 for item in &plan.items {
+                    let strategy = sync.run_plan.as_ref().and_then(|items| {
+                        items
+                            .iter()
+                            .find(|run_item| run_item.relative_path == item.relative_path)
+                            .map(|run_item| run_item.strategy)
+                    });
                     content = content.push(text(format!(
-                        "{:?}  {}  {:?}",
-                        item.action, item.relative_path, item.reason
+                        "{:?}  {}  {:?}{}",
+                        item.action,
+                        item.relative_path,
+                        item.reason,
+                        strategy
+                            .map(|strategy| format!("  [{}]", strategy))
+                            .unwrap_or_default()
                     )));
                 }
             }
         } else {
             content = content.push(text("No plan built yet.").size(11));
+        }
+
+        if let Some(execution) = &sync.execution {
+            content = content.push(iced::widget::rule::horizontal(1));
+            content = content.push(text("Copy Execution").size(12));
+            content = content.push(text(format!(
+                "Copied: {}  Failed: {}  Bytes: {} / {}",
+                execution.completed, execution.failed, execution.bytes_done, execution.total_bytes
+            )));
+            if execution.has_client_relay {
+                content = content.push(
+                    text("Execution includes client-relayed S3 copies. Data will traverse this client.")
+                        .size(11),
+                );
+            }
+            if let Some(item) = &execution.current_item {
+                content = content.push(text(format!("Current: {}", item)).size(11));
+            }
+            if let Some(strategy) = execution.current_strategy {
+                content = content.push(text(format!("Strategy: {}", strategy)).size(11));
+            }
+            if let Some(summary) = &execution.summary {
+                content = content.push(text(summary).size(11));
+            }
         }
 
         scrollable(content)
@@ -550,6 +622,17 @@ impl std::fmt::Display for SyncEndpointKind {
         match self {
             Self::S3 => write!(f, "S3"),
             Self::Local => write!(f, "Local"),
+        }
+    }
+}
+
+impl std::fmt::Display for SyncExecutionStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Upload => write!(f, "upload"),
+            Self::Download => write!(f, "download"),
+            Self::ServerSideCopy => write!(f, "server-side copy"),
+            Self::ClientRelay => write!(f, "client relay"),
         }
     }
 }

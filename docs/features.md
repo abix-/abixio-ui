@@ -69,11 +69,11 @@ MinIO.
 | Gaps | Move and rename | Yes | 7/10 | Server-side copy + delete. Move and Rename buttons in detail panel. |
 | Gaps | Search and find | Partial | 6/10 | Filter box for local listing plus recursive Find. No time/size/metadata filters yet. |
 | Gaps | Bucket delete | Yes | 7/10 | Implemented as recursive delete with typed-name confirmation. |
-| Gaps | Presigned sharing | Partial | 7/10 | Share button with expiry picker. No upload URLs. |
+| Gaps | Presigned sharing | Yes | 7/10 | Share button with expiry picker. No upload URLs. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
 | Gaps | Versioning and recovery | Partial | 7/10 | Enable/suspend per bucket, version list, restore, delete version. No undo or rewind. |
 | Gaps | Bulk object operations | Partial | 7/10 | Multi-select bulk delete and recursive prefix delete with S3 DeleteObjects batch API. No time/size filtering yet. |
-| Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
+| Gaps | Object query and inline content inspection | Partial | 5/10 | First 4KB text preview in detail panel. No SQL query or binary viewer. |
 | Gaps | Tags | Partial | 8/10 | Object and bucket tags in detail panels (view, add, remove). No recursive tag set. |
 | Gaps | Policy and anonymous access | Partial | 5/10 | View + delete policy. No inline editor. |
 | Gaps | CLI or automation surface | No | 1/10 | This is still a desktop app, not a scriptable CLI. |
@@ -91,10 +91,10 @@ MinIO.
 - Versioning: undo/rewind-by-time (version browse, restore, and delete exist).
 - Bulk object operations: time/size filters.
 - SQL queries on object content.
-- Inline policy/lifecycle editor (view/delete exists).
+- Inline policy editor (view/delete exists, no create/edit).
+- Inline lifecycle rule editor (view/delete exists, no create/edit).
 - CLI and scriptable automation surface.
 - Retention and legal-hold controls.
-- Lifecycle, ILM, and tiering controls.
 - Encryption setup controls.
 - Replication, quota, event, and watch workflows.
 
@@ -123,20 +123,24 @@ Migrated to `aws-sdk-s3` to eliminate all API blockers.
 | GetObjectTagging | yes | `get_object_tagging` | yes | wired to detail panel |
 | PutObjectTagging | yes | `put_object_tagging` | yes | add tag from detail panel |
 | DeleteObjectTagging | yes | `delete_object_tagging` | yes | remove tag from detail panel |
-| GetBucketLifecycle | yes | `get_bucket_lifecycle` | no | available, not yet wired |
-| PutBucketLifecycle | yes | `put_bucket_lifecycle` | no | available, not yet wired |
-| DeleteBucketLifecycle | yes | `delete_bucket_lifecycle` | no | available, not yet wired |
-| Presign GET | yes | presigning config | no | available, not yet wired |
-| Presign PUT | yes | presigning config | no | available, not yet wired |
+| GetBucketLifecycle | yes | `get_bucket_lifecycle` | yes | wired to bucket detail panel |
+| PutBucketLifecycle | yes | `put_bucket_lifecycle` | no | client method exists, no UI editor yet |
+| DeleteBucketLifecycle | yes | `delete_bucket_lifecycle` | yes | wired to bucket detail panel |
+| Presign GET | yes | presigning config | yes | share button with expiry picker in detail panel |
+| Presign PUT | yes | presigning config | no | not yet implemented |
 | ListObjectVersions | yes | `list_object_versions` | yes | wired to detail panel versions list |
-| GetBucketPolicy | yes | `get_bucket_policy` | no | available, not yet wired |
-| PutBucketPolicy | yes | `put_bucket_policy` | no | available, not yet wired |
-| GetBucketVersioning | yes | `get_bucket_versioning` | no | available, not yet wired |
-| PutObjectRetention | yes | `put_object_retention` | no | available, not yet wired |
-| PutBucketEncryption | yes | `put_bucket_encryption` | no | available, not yet wired |
+| GetBucketPolicy | yes | `get_bucket_policy` | yes | wired to bucket detail panel |
+| PutBucketPolicy | yes | `put_bucket_policy` | no | client method exists, no UI editor yet |
+| DeleteBucketPolicy | yes | `delete_bucket_policy` | yes | wired to bucket detail panel |
+| GetBucketVersioning | yes | `get_bucket_versioning` | yes | wired to bucket detail panel |
+| PutBucketVersioning | yes | `put_bucket_versioning` | yes | enable/suspend buttons in bucket detail |
+| PutObjectRetention | yes | `put_object_retention` | no | not yet implemented |
+| PutBucketEncryption | yes | `put_bucket_encryption` | no | not yet implemented |
 
 No API blockers remain. Every S3 operation mc uses is available in aws-sdk-s3.
-Features listed as "not yet wired" can be added without library changes.
+Most operations are wired to the UI. Remaining unwired operations
+(`PutBucketLifecycle`, `PutBucketPolicy`, `Presign PUT`, `PutObjectRetention`,
+`PutBucketEncryption`) can be added without library changes.
 
 ## Intentional Scope Differences
 
@@ -151,8 +155,9 @@ Features listed as "not yet wired" can be added without library changes.
 
 - Rough parity summary: `abixio-ui` is strongest in browse, object CRUD (copy,
   move, rename, bulk delete), recursive import and export, saved connections,
-  and AbixIO-specific admin. It is still weak in scripting parity and advanced
-  S3 management features (versioning, tags, policies, lifecycle).
+  versioning, tags, and AbixIO-specific admin. It is still weak in scripting
+  parity and advanced S3 management features (inline policy/lifecycle editors,
+  retention, encryption).
 - The Settings view shows network counters, but request and byte metrics are
   not currently wired to real network activity.
 - Leaving credential fields blank while editing a saved connection keeps the

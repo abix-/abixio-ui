@@ -30,11 +30,10 @@ cargo build --release
 
 ## Not yet implemented
 
-- Presigned sharing links (server auth ready, UI not wired)
-- Bucket tags UI (server endpoints exist)
 - Multipart upload for large files
-- Bucket policies
-- Inline content viewer
+- Inline policy/lifecycle rule editor (view and delete exist)
+- Presigned upload URLs (download URLs implemented)
+- Full inline content viewer (first 4KB text preview exists)
 
 ## Documentation
 

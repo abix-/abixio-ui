@@ -228,6 +228,86 @@ Source: `src/views/testing.rs::run_e2e_tests()`
 | inspect encoded key | URL-encoded keys work |
 | admin tests skipped (not abixio) | gracefully skips for non-AbixIO servers |
 
+### Batch delete and recursive listing tests
+
+| Test | What it verifies |
+|---|---|
+| batch delete 3 objects | DeleteObjects API (1000/req batch) |
+| batch deleted object gone | verify object removed after batch delete |
+| recursive list finds nested | list_objects_recursive returns deep objects |
+| recursive list finds shallow | list_objects_recursive returns shallow objects |
+| sync list relative paths | list_objects_recursive_for_sync strips prefix |
+| sync list has sizes | sync objects have size metadata |
+
+### Direct S3 API tests
+
+| Test | What it verifies |
+|---|---|
+| copy_object direct | copy_object API (not via transfer step) |
+| copy_object content matches | verify copied content identical |
+| download_object_to_file bytes | download to disk, verify byte count |
+| download_object_to_file content | verify downloaded file content |
+| upload_file | upload_file (small, below multipart threshold) |
+| upload_file content | verify uploaded content matches |
+| multipart upload | upload_file (9MB, above 8MB multipart threshold) |
+| multipart upload size | verify multipart upload size via HEAD |
+
+### Version operation tests
+
+| Test | What it verifies |
+|---|---|
+| get_object_version content | read specific version by ID, verify body |
+| delete_object_version | delete specific version by ID |
+| deleted version gone | verify version removed from listing |
+
+### Presigned URL tests
+
+| Test | What it verifies |
+|---|---|
+| presign url has endpoint | presigned URL contains object key |
+| presign url returns data | HTTP GET on presigned URL returns correct body |
+
+### Bucket policy tests
+
+| Test | What it verifies |
+|---|---|
+| put_bucket_policy | set bucket policy JSON |
+| get_bucket_policy has content | read policy back, verify non-empty |
+| delete_bucket_policy | remove bucket policy |
+| policy deleted | verify policy returns None after delete |
+
+### Bucket tag tests
+
+| Test | What it verifies |
+|---|---|
+| put_bucket_tags | set 2 bucket-level tags |
+| get_bucket_tags count | verify 2 tags returned |
+| get_bucket_tags project | verify tag value matches |
+| delete_bucket_tags | remove all bucket tags |
+
+### Admin heal tests
+
+| Test | What it verifies |
+|---|---|
+| admin heal_object | POST heal for specific object, verify result |
+
+### Sync execution tests
+
+| Test | What it verifies |
+|---|---|
+| enumerate_s3_for_sync paths | enumerate S3 prefix, verify relative paths |
+| enumerate_local_for_sync paths | enumerate local dir, verify relative paths |
+| sync plan has creates | build_sync_plan produces create actions |
+| sync execute all uploads | execute_sync_run_item Upload strategy |
+| sync uploaded root.txt | verify uploaded content on server |
+| sync uploaded nested.txt | verify nested upload content |
+| sync download execute | execute_sync_run_item Download strategy |
+| sync downloaded content | verify downloaded file content |
+| sync server-side copy | execute_sync_run_item ServerSideCopy strategy |
+| sync ss-copy content | verify server-side copy content |
+| sync client relay | execute_sync_run_item ClientRelay strategy |
+| sync relay content | verify relay content |
+
 ### Cleanup
 
 | Test | What it verifies |
@@ -250,6 +330,67 @@ healing, and object-inspection APIs.
 6. Confirm the modal opens and the request is not sent until confirmation
 7. Confirm a successful heal updates the inline result text and refreshes both
    shard inspection and the Healing view data
+
+## Automated integration tests
+
+The integration test harness launches real abixio server instances and runs the
+full e2e test suite against them headlessly. Each test spawns its own server
+on a random port with its own temp volumes and tears everything down on
+completion (including on panic).
+
+Source: `tests/integration.rs`
+
+### Running
+
+```bash
+# all integration tests (sequential, one server at a time)
+cargo test --test integration -- --ignored --test-threads=1
+
+# single test
+cargo test --test integration full_e2e_default_config -- --ignored
+
+# override binary path
+ABIXIO_BIN=/path/to/abixio cargo test --test integration -- --ignored
+```
+
+Tests are `#[ignore]` so they do not run in normal `cargo test`. The abixio
+binary is discovered from `ABIXIO_BIN` env var, then
+`C:\code\endless\rust\target\debug\abixio.exe`, then
+`C:\code\abixio\abixio.exe`.
+
+### Test configurations
+
+| Test | Volumes | What it validates |
+|---|---|---|
+| full_e2e_default_config | 4 | default config, server picks erasure layout |
+| e2e_two_volumes | 2 | minimal multi-volume setup |
+| e2e_six_volumes | 6 | odd non-power-of-two volume count |
+| e2e_eight_volumes | 8 | high volume count |
+| e2e_single_volume | 1 | single disk, no erasure possible |
+
+Each test runs the same `run_e2e_tests()` suite used by the in-app Testing tab.
+All S3 API, transfer, admin, tagging, versioning, batch, multipart, presigned,
+policy, bucket tag, heal, and sync execution tests are exercised against a real
+server.
+
+### Server lifecycle
+
+1. `AbixioServerBuilder` creates temp dirs under `%TEMP%\abixio-test-{port}\d1..dN`
+2. Spawns `abixio.exe --listen 0.0.0.0:{port} --volumes ... --no-auth`
+3. Polls `/_admin/status` via raw TCP until 200 (max 15s)
+4. Runs the full e2e suite
+5. `Drop` impl kills the child process and removes temp dirs
+
+### Customization
+
+```rust
+let server = AbixioServer::builder()
+    .volume_count(6)
+    .scan_interval("1m")
+    .heal_interval("1h")
+    .mrf_workers(4)
+    .start();
+```
 
 ## Test with non-AbixIO S3
 

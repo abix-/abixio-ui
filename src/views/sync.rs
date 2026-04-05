@@ -218,9 +218,33 @@ impl App {
                 ]
                 .spacing(6),
                 row![
+                    text("Transfer Workers").size(11).width(130),
+                    text_input("4", &sync.tuning.transfer_workers_text)
+                        .on_input(Message::SyncTransferWorkersChanged),
+                ]
+                .spacing(6),
+                row![
                     text("Planner Limit").size(11).width(130),
                     text_input("250000", &sync.tuning.max_planner_items_text)
                         .on_input(Message::SyncMaxPlannerItemsChanged),
+                ]
+                .spacing(6),
+                row![
+                    text("Bandwidth Limit").size(11).width(130),
+                    text_input("e.g. 10M/s", &sync.tuning.bwlimit_text)
+                        .on_input(Message::SyncBwlimitChanged),
+                ]
+                .spacing(6),
+                row![
+                    text("Multipart Cutoff").size(11).width(130),
+                    text_input("8M", &sync.tuning.multipart_cutoff_text)
+                        .on_input(Message::SyncMultipartCutoffChanged),
+                ]
+                .spacing(6),
+                row![
+                    text("Multipart Chunk").size(11).width(130),
+                    text_input("8M", &sync.tuning.multipart_chunk_size_text)
+                        .on_input(Message::SyncMultipartChunkSizeChanged),
                 ]
                 .spacing(6),
                 checkbox(sync.tuning.fast_list_enabled)
@@ -314,19 +338,19 @@ impl App {
                 .on_input(Message::SyncExcludePatternsChanged),
             );
             advanced = advanced.push(
-                text_input("newer than", &sync.filters.newer_than_text)
+                text_input("newer than (e.g. 7d, 2w)", &sync.filters.newer_than_text)
                     .on_input(Message::SyncNewerThanChanged),
             );
             advanced = advanced.push(
-                text_input("older than", &sync.filters.older_than_text)
+                text_input("older than (e.g. 30d, 1y)", &sync.filters.older_than_text)
                     .on_input(Message::SyncOlderThanChanged),
             );
             advanced = advanced.push(
-                text_input("min size bytes", &sync.filters.min_size_text)
+                text_input("min size (e.g. 10M)", &sync.filters.min_size_text)
                     .on_input(Message::SyncMinSizeChanged),
             );
             advanced = advanced.push(
-                text_input("max size bytes", &sync.filters.max_size_text)
+                text_input("max size (e.g. 1G)", &sync.filters.max_size_text)
                     .on_input(Message::SyncMaxSizeChanged),
             );
 
@@ -473,7 +497,7 @@ impl App {
             content = content.push(iced::widget::rule::horizontal(1));
             content = content.push(text("Execution").size(12));
             content = content.push(text(format!(
-                "Copied: {}  Deleted: {}  Transfer failures: {}  Delete failures: {}  Bytes: {} / {}",
+                "Copied: {}  Deleted: {}  Failures: {} / {}  Bytes: {} / {}",
                 execution.completed_transfers,
                 execution.completed_deletes,
                 execution.failed_transfers,
@@ -481,6 +505,23 @@ impl App {
                 format_bytes(execution.bytes_done),
                 format_bytes(execution.total_bytes)
             )));
+            {
+                let throughput = sync
+                    .telemetry
+                    .bytes_per_sec
+                    .map(|bps| format!("{}/s", format_bytes(bps as u64)))
+                    .unwrap_or_else(|| "-".to_string());
+                let max_workers = sync
+                    .tuning
+                    .transfer_workers_text
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap_or(4);
+                content = content.push(text(format!(
+                    "Throughput: {}  Active: {} / {}",
+                    throughput, sync.telemetry.active_transfers, max_workers
+                )));
+            }
             if execution.has_client_relay {
                 content = content.push(
                     text("Execution includes client-relayed S3 copies. Data will traverse this client.")

@@ -41,12 +41,21 @@ What is present today:
 - delete confirmation and delete-count/delete-byte guardrails
 - `delete-before`, `delete-during`, and `delete-after`
 
-What is not present yet:
-- bandwidth and multipart tunables
-- transfer worker-pool concurrency
-- richer execution telemetry
+What was added in Phase 4:
+- size filter suffixes (B, K, M, G, T) matching rclone syntax
+- newer-than / older-than time filters with relative durations (1d, 2w, 1M, 1y) and RFC3339
+- recursive `**` glob support in include/exclude patterns
+- concurrent transfer worker pool (configurable, default 4)
+- execution throughput telemetry (bytes/sec, active worker count)
+- bandwidth limit, multipart cutoff, and multipart chunk size fields (parse only)
 
-This means the sync subsystem is **partially shipped**: planning, non-destructive copy execution, and guarded sync execution all exist, but the high-end performance/tuning work is still pending.
+What is not present yet:
+- actual bandwidth enforcement
+- actual multipart cutoff wiring (AWS SDK handles it internally)
+- fast-list / top-up listing optimizations
+- `{a,b}` brace expansion in patterns
+
+This means the sync subsystem is **feature-complete for core workflows**: planning, copy execution, guarded sync execution, concurrent transfers, rclone-compatible filters, and performance telemetry are all shipped.
 
 ## Product Model
 
@@ -221,14 +230,18 @@ Status:
 
 ### Phase 4: Performance And Advanced Filters
 
-Deliver:
+Status:
 
-- richer include/exclude behavior
-- newer-than / older-than semantics
-- size filters
-- fast-list and top-up optimizations
-- more detailed performance instrumentation
-- tunable memory / verification tradeoffs
+- shipped
+
+Delivered:
+
+- size filter suffixes (B, K, M, G, T) matching rclone binary units
+- newer-than / older-than time filters (relative durations and RFC3339)
+- recursive `**` glob in include/exclude patterns
+- concurrent transfer worker pool (default 4, configurable)
+- execution throughput telemetry (bytes/sec, active workers)
+- bandwidth limit, multipart cutoff, and chunk size UI fields (parse only)
 
 ### Phase 5: Long-Tail Features
 
@@ -250,9 +263,9 @@ Possible additions:
 
 ## Summary
 
-The sync subsystem is being built as a first-class feature with a real planning
-engine, not a larger copy modal. The current repo now has a working preview
-planner for `Diff`, `Copy`, and policy-backed `Sync`, plus non-destructive
-`Copy` execution and guarded delete-capable `Sync` execution from that plan.
-The next implementation milestone is Phase 4 performance work: richer tuning,
-fast-list/top-up optimizations, and better execution telemetry.
+The sync subsystem is a first-class feature with a real planning engine, not a
+larger copy modal. The repo has a working preview planner for `Diff`, `Copy`,
+and policy-backed `Sync`, plus non-destructive `Copy` execution, guarded
+delete-capable `Sync` execution, concurrent transfer workers, rclone-compatible
+filters, and live throughput telemetry. The next milestone is Phase 5 long-tail
+features.

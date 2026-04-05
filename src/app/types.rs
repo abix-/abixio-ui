@@ -208,9 +208,13 @@ pub struct SyncTuning {
     pub compare_mode: SyncCompareMode,
     pub list_workers_text: String,
     pub compare_workers_text: String,
+    pub transfer_workers_text: String,
     pub fast_list_enabled: bool,
     pub prefer_server_modtime: bool,
     pub max_planner_items_text: String,
+    pub bwlimit_text: String,
+    pub multipart_cutoff_text: String,
+    pub multipart_chunk_size_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,7 +321,7 @@ pub struct SyncExecutionState {
     pub run_plan: SyncRunPlan,
     pub next_transfer_index: usize,
     pub next_delete_index: usize,
-    pub active_transfer: bool,
+    pub active_transfers: usize,
     pub active_delete_batches: usize,
     pub completed_transfers: usize,
     pub completed_deletes: usize,
@@ -332,6 +336,7 @@ pub struct SyncExecutionState {
     pub has_client_relay: bool,
     pub delete_phase_skipped: bool,
     pub transfer_failed: bool,
+    pub started_at_instant: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,7 +364,7 @@ pub struct SyncDeleteBatchResult {
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SyncTelemetry {
     pub stage: String,
     pub source_scanned: usize,
@@ -368,6 +373,8 @@ pub struct SyncTelemetry {
     pub filtered: usize,
     pub started_at: Option<String>,
     pub last_update_at: Option<String>,
+    pub bytes_per_sec: Option<f64>,
+    pub active_transfers: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -431,9 +438,13 @@ impl SyncState {
                 compare_mode: SyncCompareMode::SizeAndModTime,
                 list_workers_text: "8".to_string(),
                 compare_workers_text: "8".to_string(),
+                transfer_workers_text: "4".to_string(),
                 fast_list_enabled: false,
                 prefer_server_modtime: true,
                 max_planner_items_text: "250000".to_string(),
+                bwlimit_text: String::new(),
+                multipart_cutoff_text: "8M".to_string(),
+                multipart_chunk_size_text: "8M".to_string(),
             },
             filters: SyncFilterSet {
                 include_patterns_text: String::new(),
@@ -464,6 +475,8 @@ impl SyncState {
                 filtered: 0,
                 started_at: None,
                 last_update_at: None,
+                bytes_per_sec: None,
+                active_transfers: 0,
             },
             error: None,
             show_advanced: false,

@@ -117,9 +117,13 @@ pub enum Message {
     SyncListModeChanged(SyncListMode),
     SyncListWorkersChanged(String),
     SyncCompareWorkersChanged(String),
+    SyncTransferWorkersChanged(String),
     SyncFastListToggled(bool),
     SyncPreferServerModtimeToggled(bool),
     SyncMaxPlannerItemsChanged(String),
+    SyncBwlimitChanged(String),
+    SyncMultipartCutoffChanged(String),
+    SyncMultipartChunkSizeChanged(String),
     SyncOverwriteChanged(bool),
     SyncDeleteExtrasChanged(bool),
     SyncDestinationNewerPolicyChanged(SyncDestinationNewerPolicy),
@@ -768,12 +772,22 @@ impl App {
             Message::SyncCompareWorkersChanged(value) => {
                 self.handle_sync_compare_workers_changed(value)
             }
+            Message::SyncTransferWorkersChanged(value) => {
+                self.handle_sync_transfer_workers_changed(value)
+            }
             Message::SyncFastListToggled(enabled) => self.handle_sync_fast_list_toggled(enabled),
             Message::SyncPreferServerModtimeToggled(enabled) => {
                 self.handle_sync_prefer_server_modtime_toggled(enabled)
             }
             Message::SyncMaxPlannerItemsChanged(value) => {
                 self.handle_sync_max_planner_items_changed(value)
+            }
+            Message::SyncBwlimitChanged(value) => self.handle_sync_bwlimit_changed(value),
+            Message::SyncMultipartCutoffChanged(value) => {
+                self.handle_sync_multipart_cutoff_changed(value)
+            }
+            Message::SyncMultipartChunkSizeChanged(value) => {
+                self.handle_sync_multipart_chunk_size_changed(value)
             }
             Message::SyncOverwriteChanged(enabled) => self.handle_sync_overwrite_changed(enabled),
             Message::SyncDeleteExtrasChanged(enabled) => {

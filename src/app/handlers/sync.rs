@@ -229,6 +229,16 @@ impl App {
         Task::none()
     }
 
+    pub(crate) fn handle_sync_transfer_workers_changed(
+        &mut self,
+        value: String,
+    ) -> Task<Message> {
+        if let Some(sync) = self.sync.as_mut() {
+            sync.tuning.transfer_workers_text = value;
+        }
+        Task::none()
+    }
+
     pub(crate) fn handle_sync_fast_list_toggled(&mut self, enabled: bool) -> Task<Message> {
         if let Some(sync) = self.sync.as_mut() {
             sync.tuning.fast_list_enabled = enabled;
@@ -252,6 +262,33 @@ impl App {
         if let Some(sync) = self.sync.as_mut() {
             sync.tuning.max_planner_items_text = value;
             clear_sync_plan(sync);
+        }
+        Task::none()
+    }
+
+    pub(crate) fn handle_sync_bwlimit_changed(&mut self, value: String) -> Task<Message> {
+        if let Some(sync) = self.sync.as_mut() {
+            sync.tuning.bwlimit_text = value;
+        }
+        Task::none()
+    }
+
+    pub(crate) fn handle_sync_multipart_cutoff_changed(
+        &mut self,
+        value: String,
+    ) -> Task<Message> {
+        if let Some(sync) = self.sync.as_mut() {
+            sync.tuning.multipart_cutoff_text = value;
+        }
+        Task::none()
+    }
+
+    pub(crate) fn handle_sync_multipart_chunk_size_changed(
+        &mut self,
+        value: String,
+    ) -> Task<Message> {
+        if let Some(sync) = self.sync.as_mut() {
+            sync.tuning.multipart_chunk_size_text = value;
         }
         Task::none()
     }
@@ -677,20 +714,26 @@ impl App {
             return Task::none();
         };
 
-        execution.active_transfer = false;
+        execution.active_transfers = execution.active_transfers.saturating_sub(1);
         match result {
             Ok(item) => {
                 execution.completed_transfers += 1;
                 execution.bytes_done += item.bytes;
-                execution.next_transfer_index += 1;
                 execution.current_item = Some(item.relative_path);
                 execution.current_strategy = Some(item.strategy);
+                if let Some(started) = execution.started_at_instant {
+                    let elapsed = started.elapsed().as_secs_f64();
+                    if elapsed > 0.0 {
+                        sync.telemetry.bytes_per_sec =
+                            Some(execution.bytes_done as f64 / elapsed);
+                    }
+                }
+                sync.telemetry.active_transfers = execution.active_transfers;
                 sync.telemetry.last_update_at = Some(now_rfc3339());
             }
             Err(error) => {
                 execution.failed_transfers += 1;
                 execution.transfer_failed = true;
-                execution.next_transfer_index += 1;
                 self.error = Some(format!("Sync transfer failed: {}", error));
                 sync.telemetry.last_update_at = Some(now_rfc3339());
                 if !sync.delete_guardrails.ignore_errors
@@ -776,6 +819,8 @@ impl App {
 
             let delete_workers =
                 parse_delete_workers(&sync.delete_guardrails.delete_workers_text).unwrap_or(4);
+            let transfer_workers =
+                parse_transfer_workers(&sync.tuning.transfer_workers_text).unwrap_or(4);
 
             loop {
                 match execution.phase {
@@ -789,7 +834,7 @@ impl App {
                         break;
                     }
                     SyncExecutionPhase::Copying => {
-                        if execution.active_transfer
+                        if execution.active_transfers > 0
                             || execution.next_transfer_index < execution.run_plan.transfers.len()
                         {
                             break;
@@ -815,7 +860,7 @@ impl App {
                         continue;
                     }
                     SyncExecutionPhase::DeletingDuring => {
-                        let transfers_done = !execution.active_transfer
+                        let transfers_done = execution.active_transfers == 0
                             && execution.next_transfer_index >= execution.run_plan.transfers.len();
                         let deletes_done = execution.active_delete_batches == 0
                             && execution.next_delete_index >= execution.run_plan.deletes.len();
@@ -863,21 +908,25 @@ impl App {
                     } else {
                         "Syncing".to_string()
                     };
-                    if !execution.active_transfer
+                    while execution.active_transfers < transfer_workers
                         && execution.next_transfer_index < execution.run_plan.transfers.len()
-                        && let Some(spec) = next_transfer_spec(execution)
                     {
-                        execution.active_transfer = true;
+                        let Some(spec) = next_transfer_spec(execution) else {
+                            break;
+                        };
+                        execution.active_transfers += 1;
                         pending_specs.push(spec);
                     }
                 }
                 SyncExecutionPhase::DeletingDuring => {
                     sync.telemetry.stage = "Syncing with deletes".to_string();
-                    if !execution.active_transfer
+                    while execution.active_transfers < transfer_workers
                         && execution.next_transfer_index < execution.run_plan.transfers.len()
-                        && let Some(spec) = next_transfer_spec(execution)
                     {
-                        execution.active_transfer = true;
+                        let Some(spec) = next_transfer_spec(execution) else {
+                            break;
+                        };
+                        execution.active_transfers += 1;
                         pending_specs.push(spec);
                     }
                     while execution.active_delete_batches < delete_workers {
@@ -1007,6 +1056,17 @@ fn parse_planner_limit(text: &str) -> Result<usize, String> {
         .map_err(|_| "Planner limit must be a positive integer.".to_string())?;
     if value == 0 {
         return Err("Planner limit must be greater than zero.".to_string());
+    }
+    Ok(value)
+}
+
+fn parse_transfer_workers(text: &str) -> Result<usize, String> {
+    let value = text
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| "Transfer workers must be a positive integer.".to_string())?;
+    if value == 0 {
+        return Err("Transfer workers must be greater than zero.".to_string());
     }
     Ok(value)
 }
@@ -1141,7 +1201,7 @@ fn start_copy_execution(sync: &mut SyncState) {
         run_plan,
         next_transfer_index: 0,
         next_delete_index: 0,
-        active_transfer: false,
+        active_transfers: 0,
         active_delete_batches: 0,
         completed_transfers: 0,
         completed_deletes: 0,
@@ -1154,6 +1214,7 @@ fn start_copy_execution(sync: &mut SyncState) {
         summary: None,
         delete_phase_skipped: false,
         transfer_failed: false,
+        started_at_instant: Some(std::time::Instant::now()),
     });
     sync.telemetry.stage = "Copying".to_string();
     sync.telemetry.last_update_at = Some(now_rfc3339());
@@ -1179,7 +1240,7 @@ fn start_sync_execution(sync: &mut SyncState) {
         run_plan,
         next_transfer_index: 0,
         next_delete_index: 0,
-        active_transfer: false,
+        active_transfers: 0,
         active_delete_batches: 0,
         completed_transfers: 0,
         completed_deletes: 0,
@@ -1192,6 +1253,7 @@ fn start_sync_execution(sync: &mut SyncState) {
         summary: None,
         delete_phase_skipped: false,
         transfer_failed: false,
+        started_at_instant: Some(std::time::Instant::now()),
     });
     sync.telemetry.stage = "Syncing".to_string();
     sync.telemetry.last_update_at = Some(now_rfc3339());
@@ -1357,12 +1419,13 @@ impl PendingSyncTask {
     }
 }
 
-fn next_transfer_spec(execution: &SyncExecutionState) -> Option<PendingSyncTask> {
+fn next_transfer_spec(execution: &mut SyncExecutionState) -> Option<PendingSyncTask> {
     let item = execution
         .run_plan
         .transfers
         .get(execution.next_transfer_index)?
         .clone();
+    execution.next_transfer_index += 1;
     Some(PendingSyncTask::Transfer(item))
 }
 

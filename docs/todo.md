@@ -27,12 +27,14 @@ Current status:
 - The app now has a real preview planner for `Diff`, `Copy`, and policy-backed `Sync`
 - `Copy` execution from plan is now shipped
 - `Sync` execution with guarded deletes is now shipped
+- Phase 4 performance and filters are now shipped
 
 Implementation phases:
-- Phase 1: harden diff planning and preview
-- Phase 2: copy execution from plan
-- Phase 3: sync execution with guarded deletes
-- Phase 4: performance tuning, fast-list/top-up, richer filters, telemetry
+- Phase 1: harden diff planning and preview -- shipped
+- Phase 2: copy execution from plan -- shipped
+- Phase 3: sync execution with guarded deletes -- shipped
+- Phase 4: concurrent transfers, rclone-style filters, throughput telemetry -- shipped
+- Phase 5: long-tail features (watch mode, rename tracking, prometheus, bidirectional)
 
 See `docs/sync.md` for the full design and rollout plan.
 

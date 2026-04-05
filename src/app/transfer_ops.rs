@@ -356,6 +356,10 @@ fn relay_spool_path(source_key: &str) -> PathBuf {
 /// Wildcard match supporting `*` (any sequence) and `?` (any single char).
 /// If the pattern contains no wildcards, falls back to case-insensitive
 /// substring match. Matching is always case-insensitive.
+///
+/// Supports `*` (matches any chars except `/`), `**` (matches any chars
+/// including `/`), and `?` (matches one non-`/` char). This matches
+/// rclone glob semantics.
 pub fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pat_lower = pattern.to_ascii_lowercase();
     let text_lower = text.to_ascii_lowercase();
@@ -364,14 +368,71 @@ pub fn wildcard_match(pattern: &str, text: &str) -> bool {
         return text_lower.contains(&pat_lower);
     }
 
-    let pat: Vec<char> = pat_lower.chars().collect();
-    let txt: Vec<char> = text_lower.chars().collect();
+    // split pattern on "**" to get segments, then match each segment
+    // allowing any chars (including /) between segments matched by **
+    let segments: Vec<&str> = pat_lower.split("**").collect();
+    if segments.len() == 1 {
+        // no ** in pattern: * matches anything including / (legacy behavior,
+        // keeps *.txt matching paths like dir/file.txt)
+        return wildcard_match_segment(&pat_lower, &text_lower, true);
+    }
+    // match segments separated by ** (which matches anything including /)
+    let mut remaining = text_lower.as_str();
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            continue;
+        }
+        // trim leading/trailing / from segment when adjacent to **
+        let seg = segment.trim_matches('/');
+        if seg.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            // first segment must match at the start
+            let seg_len = find_segment_match(seg, remaining, false);
+            let Some(len) = seg_len else {
+                return false;
+            };
+            remaining = &remaining[len..];
+            remaining = remaining.trim_start_matches('/');
+        } else {
+            // find segment anywhere in remaining (** consumed arbitrary content)
+            let mut found = false;
+            for start in 0..=remaining.len() {
+                let slice = &remaining[start..];
+                if let Some(len) = find_segment_match(seg, slice, false) {
+                    remaining = &slice[len..];
+                    remaining = remaining.trim_start_matches('/');
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return false;
+            }
+        }
+    }
+    // if last segment is not empty, remaining must be empty (or just slashes)
+    if !segments.last().unwrap_or(&"").is_empty() {
+        return remaining.is_empty() || remaining.chars().all(|c| c == '/');
+    }
+    true
+}
+
+/// Match a simple glob segment (with `*` and `?` but no `**`) against text.
+/// When `allow_slash` is false, `*` and `?` do not match `/`.
+fn wildcard_match_segment(pattern: &str, text: &str, allow_slash: bool) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
     let (plen, tlen) = (pat.len(), txt.len());
     let (mut pi, mut ti) = (0, 0);
     let (mut star_pi, mut star_ti) = (usize::MAX, 0);
 
     while ti < tlen {
-        if pi < plen && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+        if pi < plen && pat[pi] == '?' && (allow_slash || txt[ti] != '/') {
+            pi += 1;
+            ti += 1;
+        } else if pi < plen && pat[pi] != '*' && pat[pi] != '?' && pat[pi] == txt[ti] {
             pi += 1;
             ti += 1;
         } else if pi < plen && pat[pi] == '*' {
@@ -379,8 +440,13 @@ pub fn wildcard_match(pattern: &str, text: &str) -> bool {
             star_ti = ti;
             pi += 1;
         } else if star_pi != usize::MAX {
-            pi = star_pi + 1;
+            // backtrack: advance the star match by one char
             star_ti += 1;
+            if !allow_slash && star_ti <= tlen && star_ti > 0 && txt[star_ti - 1] == '/' {
+                // single * cannot cross /
+                return false;
+            }
+            pi = star_pi + 1;
             ti = star_ti;
         } else {
             return false;
@@ -391,6 +457,26 @@ pub fn wildcard_match(pattern: &str, text: &str) -> bool {
         pi += 1;
     }
     pi == plen
+}
+
+/// Try to match `pattern` (simple glob) at the start of `text`.
+/// Returns the number of chars consumed if successful.
+fn find_segment_match(pattern: &str, text: &str, allow_slash: bool) -> Option<usize> {
+    // try matching the pattern against progressively longer prefixes
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    // find minimum possible match length
+    for end in 0..=txt.len() {
+        let candidate: String = txt[..end].iter().collect();
+        if wildcard_match_segment(pattern, &candidate, allow_slash) {
+            return Some(end);
+        }
+        // if we hit a non-matching char beyond what pattern could match, stop early
+        if end > pat.len() * 2 + txt.len() {
+            break;
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -432,6 +518,28 @@ mod tests {
     fn wildcard_match_empty() {
         assert!(wildcard_match("", "anything"));
         assert!(wildcard_match("*", "anything"));
+    }
+
+    #[test]
+    fn wildcard_match_doublestar() {
+        // ** matches any path depth
+        assert!(wildcard_match("dir/**", "dir/file.txt"));
+        assert!(wildcard_match("dir/**", "dir/sub/file.txt"));
+        assert!(wildcard_match("dir/**", "dir/a/b/c.txt"));
+        // ** at start
+        assert!(wildcard_match("**/file.txt", "file.txt"));
+        assert!(wildcard_match("**/file.txt", "a/file.txt"));
+        assert!(wildcard_match("**/file.txt", "a/b/file.txt"));
+        // ** in middle
+        assert!(wildcard_match("a/**/z.txt", "a/z.txt"));
+        assert!(wildcard_match("a/**/z.txt", "a/b/z.txt"));
+        assert!(wildcard_match("a/**/z.txt", "a/b/c/z.txt"));
+        // combined with single *
+        assert!(wildcard_match("a/**/*.txt", "a/b/c/file.txt"));
+        assert!(wildcard_match("**/*.log", "logs/app.log"));
+        assert!(wildcard_match("**/*.log", "a/b/c/app.log"));
+        // should not match wrong extension
+        assert!(!wildcard_match("**/*.txt", "a/b/file.md"));
     }
 
     #[test]

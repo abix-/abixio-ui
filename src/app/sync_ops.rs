@@ -23,7 +23,76 @@ pub fn parse_patterns(text: &str) -> Vec<String> {
 }
 
 pub fn parse_size_filter(text: &str) -> Option<u64> {
-    text.trim().parse().ok()
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let text_lower = text.to_ascii_lowercase();
+    let (num_part, multiplier) = if text_lower.ends_with('t') {
+        (&text[..text.len() - 1], 1024_u64 * 1024 * 1024 * 1024)
+    } else if text_lower.ends_with('g') {
+        (&text[..text.len() - 1], 1024_u64 * 1024 * 1024)
+    } else if text_lower.ends_with('m') {
+        (&text[..text.len() - 1], 1024_u64 * 1024)
+    } else if text_lower.ends_with('k') {
+        (&text[..text.len() - 1], 1024_u64)
+    } else if text_lower.ends_with('b') {
+        (&text[..text.len() - 1], 1_u64)
+    } else {
+        (text, 1_u64)
+    };
+    let num: u64 = num_part.trim().parse().ok()?;
+    num.checked_mul(multiplier)
+}
+
+/// Parse a relative duration (e.g. `1d`, `2w`, `1M`, `1y`, `2d12h`, `30m`, `90s`)
+/// or an absolute RFC3339 timestamp into an `OffsetDateTime`.
+/// Relative durations are resolved against `now`.
+pub fn parse_age_filter(text: &str) -> Option<time::OffsetDateTime> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // try RFC3339 first
+    if let Ok(dt) = time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339)
+    {
+        return Some(dt);
+    }
+    // parse relative duration segments: digits followed by a single letter
+    let mut total_secs: i64 = 0;
+    let mut num_buf = String::new();
+    let mut found_any = false;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            num_buf.push(ch);
+        } else {
+            let n: i64 = num_buf.parse().ok()?;
+            num_buf.clear();
+            let secs = match ch {
+                's' => n,
+                'm' => n * 60,
+                'h' => n * 3600,
+                'd' => n * 86400,
+                'w' => n * 7 * 86400,
+                'M' => n * 30 * 86400,
+                'y' => n * 365 * 86400,
+                _ => return None,
+            };
+            total_secs += secs;
+            found_any = true;
+        }
+    }
+    if !found_any || !num_buf.is_empty() {
+        return None;
+    }
+    let now = time::OffsetDateTime::now_utc();
+    Some(now - time::Duration::seconds(total_secs))
+}
+
+fn parse_object_modified(modified: &Option<String>) -> Option<time::OffsetDateTime> {
+    modified.as_ref().and_then(|text| {
+        time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()
+    })
 }
 
 pub fn apply_sync_filters(object: &SyncObject, filters: &SyncFilterSet) -> bool {
@@ -53,6 +122,26 @@ pub fn apply_sync_filters(object: &SyncObject, filters: &SyncFilterSet) -> bool 
         .any(|pattern| wildcard_match(pattern, &object.relative_path))
     {
         return false;
+    }
+    // newer-than: object must be newer than (modified after) the cutoff
+    if let Some(cutoff) = parse_age_filter(&filters.newer_than_text) {
+        if let Some(modified) = parse_object_modified(&object.modified) {
+            if modified < cutoff {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    // older-than: object must be older than (modified before) the cutoff
+    if let Some(cutoff) = parse_age_filter(&filters.older_than_text) {
+        if let Some(modified) = parse_object_modified(&object.modified) {
+            if modified > cutoff {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
     true
 }
@@ -675,5 +764,132 @@ mod tests {
             run_plan.deletes[0].strategy,
             SyncExecutionStrategy::DeleteRemote
         );
+    }
+
+    #[test]
+    fn parse_size_filter_bare_number() {
+        assert_eq!(parse_size_filter("500"), Some(500));
+        assert_eq!(parse_size_filter("  100  "), Some(100));
+    }
+
+    #[test]
+    fn parse_size_filter_suffixes() {
+        assert_eq!(parse_size_filter("1B"), Some(1));
+        assert_eq!(parse_size_filter("1K"), Some(1024));
+        assert_eq!(parse_size_filter("1k"), Some(1024));
+        assert_eq!(parse_size_filter("10M"), Some(10 * 1024 * 1024));
+        assert_eq!(parse_size_filter("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_size_filter("1T"), Some(1024_u64 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn parse_size_filter_empty_and_invalid() {
+        assert_eq!(parse_size_filter(""), None);
+        assert_eq!(parse_size_filter("abc"), None);
+        assert_eq!(parse_size_filter("M"), None);
+    }
+
+    #[test]
+    fn parse_age_filter_relative_durations() {
+        let result = parse_age_filter("1d").unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let diff = now - result;
+        // should be ~86400 seconds (1 day), allow 5s tolerance
+        assert!((diff.whole_seconds() - 86400).abs() < 5);
+
+        let result = parse_age_filter("2w").unwrap();
+        let diff = now - result;
+        assert!((diff.whole_seconds() - 14 * 86400).abs() < 5);
+
+        let result = parse_age_filter("1M").unwrap();
+        let diff = now - result;
+        assert!((diff.whole_seconds() - 30 * 86400).abs() < 5);
+
+        let result = parse_age_filter("1y").unwrap();
+        let diff = now - result;
+        assert!((diff.whole_seconds() - 365 * 86400).abs() < 5);
+    }
+
+    #[test]
+    fn parse_age_filter_compound_duration() {
+        let result = parse_age_filter("2d12h").unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let diff = now - result;
+        let expected = 2 * 86400 + 12 * 3600;
+        assert!((diff.whole_seconds() - expected).abs() < 5);
+    }
+
+    #[test]
+    fn parse_age_filter_rfc3339() {
+        let result = parse_age_filter("2025-06-01T00:00:00Z").unwrap();
+        assert_eq!(result.year(), 2025);
+        assert_eq!(result.month(), time::Month::June);
+    }
+
+    #[test]
+    fn parse_age_filter_empty_and_invalid() {
+        assert!(parse_age_filter("").is_none());
+        assert!(parse_age_filter("abc").is_none());
+        assert!(parse_age_filter("123").is_none()); // no suffix
+    }
+
+    #[test]
+    fn newer_than_filter_excludes_old_objects() {
+        let recent = SyncObject {
+            relative_path: "new.txt".to_string(),
+            size: 10,
+            modified: Some(time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        let old = SyncObject {
+            relative_path: "old.txt".to_string(),
+            size: 10,
+            modified: Some("2020-01-01T00:00:00Z".to_string()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "1d".to_string(),
+            older_than_text: String::new(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(apply_sync_filters(&recent, &filters));
+        assert!(!apply_sync_filters(&old, &filters));
+    }
+
+    #[test]
+    fn older_than_filter_excludes_recent_objects() {
+        let recent = SyncObject {
+            relative_path: "new.txt".to_string(),
+            size: 10,
+            modified: Some(time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        let old = SyncObject {
+            relative_path: "old.txt".to_string(),
+            size: 10,
+            modified: Some("2020-01-01T00:00:00Z".to_string()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: String::new(),
+            older_than_text: "1d".to_string(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(!apply_sync_filters(&recent, &filters));
+        assert!(apply_sync_filters(&old, &filters));
     }
 }

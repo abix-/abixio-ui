@@ -171,8 +171,16 @@ Which S3 operations the client calls and what's missing for planned features.
 | PutObject | `put_object()` | 8/10 | No multipart for large files |
 | HeadObject | `head_object()` | 9/10 | |
 | DeleteObject | `delete_object()` | 10/10 | |
-| DeleteObjects | `delete_objects()` | 9/10 | Not yet wired to recursive prefix delete UI |
+| DeleteObjects | `delete_objects()` | 9/10 | Wired to bulk + recursive prefix delete UI |
 | CopyObject | `copy_object()` | 10/10 | Same-bucket and cross-bucket |
+| Get/Put/DeleteObjectTagging | `get/put/delete_object_tags()` | 9/10 | Detail panel UI |
+| Get/Put/DeleteBucketTagging | `get/put/delete_bucket_tags()` | 9/10 | Bucket detail UI |
+| GetBucketVersioning, PutBucketVersioning | `get/put_bucket_versioning()` | 9/10 | Toggle in bucket detail |
+| ListObjectVersions | `list_object_versions()` | 9/10 | Version list in object detail |
+| Get/DeleteObjectVersion | `get/delete_object_version()` | 9/10 | Restore + delete |
+| PresignGetObject | `presign_get_object()` | 9/10 | Share modal with expiry picker |
+| Get/Put/DeleteBucketPolicy | `get/put/delete_bucket_policy()` | 8/10 | View + delete in bucket detail |
+| GetBucketLifecycle, DeleteBucketLifecycle | `get/delete_bucket_lifecycle()` | 8/10 | View + delete |
 
 ### Not yet implemented (needed for planned features)
 
@@ -181,13 +189,14 @@ Which S3 operations the client calls and what's missing for planned features.
 | ~~GetObjectTagging, PutObjectTagging, DeleteObjectTagging~~ | ~~Object tags feature~~ | Done |
 | ~~ListObjectVersions~~ | ~~Version browser~~ | Done |
 | ~~GetBucketVersioning, PutBucketVersioning~~ | ~~Versioning toggle~~ | Done |
-| GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy | Policy management | 1.x |
-| GetBucketEncryption, PutBucketEncryption | Encryption config | 1.x |
-| GetBucketTagging, PutBucketTagging, DeleteBucketTagging | Bucket tags | 1.x |
-| CreateMultipartUpload, UploadPart, CompleteMultipartUpload, AbortMultipartUpload | Large file upload | 1.x |
-| ListMultipartUploads | Stale upload cleanup | 1.x |
-| HeadBucket | Fast bucket existence check | 1.x |
-| GetBucketLocation | Show region in bucket detail | 1.x |
+| ~~GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy~~ | ~~Policy management~~ | Done |
+| GetBucketEncryption, PutBucketEncryption | Encryption config | 2.x |
+| ~~GetBucketTagging, PutBucketTagging, DeleteBucketTagging~~ | ~~Bucket tags~~ | Done |
+| ~~GetBucketLifecycleConfiguration, DeleteBucketLifecycle~~ | ~~Lifecycle view~~ | Done |
+| ~~PresignGetObject~~ | ~~Presigned sharing~~ | Done |
+| CreateMultipartUpload, UploadPart, CompleteMultipartUpload, AbortMultipartUpload | Large file upload (UI) | 2.x |
+| HeadBucket | Fast bucket existence check | 2.x |
+| GetBucketLocation | Show region in bucket detail | 2.x |
 
 ### Out of scope
 

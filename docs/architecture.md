@@ -30,7 +30,7 @@ src/
   keychain.rs         # OS keychain wrapper (Windows/macOS/Linux)
   s3/
     mod.rs
-    client.rs         # thin wrapper around rust-s3 Bucket API
+    client.rs         # thin wrapper around aws-sdk-s3
   abixio/
     mod.rs
     client.rs         # admin API client (reqwest + Sig V4 signing)
@@ -129,18 +129,13 @@ Features provided by aws-sdk-s3:
 - Batch delete via `DeleteObjects` API (up to 1000 keys per request)
 - Full S3 API surface (versioning, tagging, policies, lifecycle, presigning)
 
-Operations:
-- `list_buckets()`. Lists all buckets.
-- `list_objects(bucket, prefix, delimiter)`. Lists objects with prefix and delimiter support. Handles pagination automatically.
-- `list_objects_recursive(bucket, prefix)`. Flat listing for find/search. Handles pagination automatically.
-- `create_bucket(bucket)`. Creates a new bucket.
-- `delete_bucket(bucket)`. Deletes a bucket.
-- `put_object(bucket, key, data, content_type)`. Uploads an object.
-- `get_object(bucket, key)`. Downloads an object.
-- `head_object(bucket, key)`. Gets object metadata (ETag, size, content type, headers).
-- `delete_object(bucket, key)`. Deletes a single object.
-- `delete_objects(bucket, keys)`. Batch delete up to 1000 keys per call using the S3 DeleteObjects API. Returns list of failed keys.
-- `copy_object(src_bucket, src_key, dst_bucket, dst_key)`. Server-side copy using the S3 CopyObject API. Works for both same-bucket and cross-bucket copies -- data never leaves the server.
+Operations (see `s3/client.rs` for full API):
+- Object CRUD: `list_buckets`, `list_objects`, `create_bucket`, `delete_bucket`, `put_object`, `get_object`, `head_object`, `delete_object`, `delete_objects` (batch), `copy_object`
+- Tagging: `get_object_tags`, `put_object_tags`, `delete_object_tags`, `get_bucket_tags`, `put_bucket_tags`, `delete_bucket_tags`
+- Versioning: `get_bucket_versioning`, `put_bucket_versioning`, `list_object_versions`, `get_object_version`, `delete_object_version`
+- Presigning: `presign_get_object`
+- Policy: `get_bucket_policy`, `put_bucket_policy`, `delete_bucket_policy`
+- Lifecycle: `get_bucket_lifecycle`, `delete_bucket_lifecycle`
 
 ### Copy and move strategy
 
@@ -236,16 +231,28 @@ Three-panel layout:
 
 ### Detail panel
 
-When an object is selected, the right panel fires a HEAD request, then
-displays:
+When an object is selected, the right panel fires HEAD + tag + version +
+preview requests in parallel, then displays:
 
 1. **Filename** (large) + full path (small)
 2. **Overview**: size, content type, last modified, ETag
 3. **Storage**: bucket, key
-4. **HTTP Headers**: selected response headers plus object metadata entries
-5. **Actions**: Download, Copy, Move, Rename, Delete
-6. **AbixIO** (when applicable): erasure summary, shard distribution,
-   per-shard status/checksum, Refresh Inspect, Heal Object
+4. **HTTP Headers**: response headers plus `x-amz-meta-*` entries
+5. **Tags**: key-value tag list with add/remove (max 10)
+6. **Versions**: version list with ID, date, size, restore, delete
+7. **Preview**: first 4KB of object content as text
+8. **Actions**: Download, Share, Copy, Move, Rename, Delete
+9. **AbixIO** (when applicable): shard inspection, manual heal
+
+When a bucket is selected:
+1. **Overview**: bucket name, prefix, folder/object counts
+2. **Versioning**: status + enable/suspend buttons
+3. **Bucket Tags**: tag list with add/remove
+4. **Policy**: stored JSON display + delete
+5. **Lifecycle**: lifecycle rules display + delete
+6. **Actions**: Refresh, Delete Bucket
+
+See [s3-features.md](s3-features.md) for full details on each feature.
 
 ## Testing tab
 

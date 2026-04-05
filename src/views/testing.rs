@@ -129,11 +129,18 @@ impl TestRunner {
     }
 }
 
-pub async fn run_e2e_tests(
+pub fn run_e2e_tests(
+    client: Arc<S3Client>,
+    admin: Option<Arc<AdminClient>>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<TestResult>> + Send>> {
+    Box::pin(run_e2e_tests_inner(client, admin))
+}
+
+async fn run_e2e_tests_inner(
     client: Arc<S3Client>,
     admin: Option<Arc<AdminClient>>,
 ) -> Vec<TestResult> {
-    let mut t = TestRunner::new();
+    let mut results = Vec::new();
     let bucket = format!(
         "_e2e-test-{}",
         std::time::SystemTime::now()
@@ -142,7 +149,23 @@ pub async fn run_e2e_tests(
             .as_secs()
     );
 
-    // --- S3 API ---
+    results.extend(test_s3_core(client.clone(), bucket.clone()).await);
+    results.extend(test_transfers(client.clone(), bucket.clone()).await);
+    results.extend(test_admin(client.clone(), admin.clone(), bucket.clone()).await);
+    results.extend(test_tagging(client.clone(), bucket.clone()).await);
+    results.extend(test_versioning_basic(client.clone(), bucket.clone()).await);
+    results.extend(test_extended_s3(client.clone(), bucket.clone()).await);
+    results.extend(test_extended_s3_b(client.clone(), bucket.clone()).await);
+    results.extend(test_presigned_and_policy(client.clone(), bucket.clone()).await);
+    results.extend(test_bucket_tags_and_heal(client.clone(), admin.clone(), bucket.clone()).await);
+    results.extend(test_sync(client.clone(), bucket.clone()).await);
+    results.extend(test_cleanup(client.clone(), bucket.clone()).await);
+
+    results
+}
+
+async fn test_s3_core(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
 
     // create bucket
     let r = client.create_bucket(&bucket).await;
@@ -291,6 +314,12 @@ pub async fn run_e2e_tests(
     // get after delete -> error
     let r = client.get_object(&bucket, "hello.txt").await;
     t.check("get after delete fails", r.is_err(), "");
+
+    t.results
+}
+
+async fn test_transfers(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
 
     // --- Transfer workflows ---
 
@@ -495,6 +524,19 @@ pub async fn run_e2e_tests(
         Err(e) => t.check("prepare export items", false, &e),
     }
 
+    let _ = tokio::fs::remove_dir_all(import_root).await;
+    let _ = tokio::fs::remove_dir_all(export_root).await;
+
+    t.results
+}
+
+async fn test_admin(
+    client: Arc<S3Client>,
+    admin: Option<Arc<AdminClient>>,
+    bucket: String,
+) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
     // --- Admin API (abixio only) ---
 
     if let Some(ref admin) = admin {
@@ -612,6 +654,12 @@ pub async fn run_e2e_tests(
         t.check("admin tests skipped (not abixio)", true, "");
     }
 
+    t.results
+}
+
+async fn test_tagging(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
     // --- Object Tagging ---
 
     // get tags on fresh object (should be empty)
@@ -656,6 +704,12 @@ pub async fn run_e2e_tests(
         Ok(tags) => t.check("tags deleted", tags.is_empty(), &format!("{:?}", tags)),
         Err(e) => t.check("get tags after delete", false, e),
     }
+
+    t.results
+}
+
+async fn test_versioning_basic(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
 
     // --- Versioning ---
 
@@ -712,6 +766,642 @@ pub async fn run_e2e_tests(
         Err(e) => t.check("get versioning suspended", false, e),
     }
 
+    t.results
+}
+
+async fn test_extended_s3(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
+    // --- Batch Delete (DeleteObjects API) ---
+
+    let _ = client
+        .put_object(&bucket, "batch/a.txt", b"a".to_vec(), "text/plain")
+        .await;
+    let _ = client
+        .put_object(&bucket, "batch/b.txt", b"b".to_vec(), "text/plain")
+        .await;
+    let _ = client
+        .put_object(&bucket, "batch/c.txt", b"c".to_vec(), "text/plain")
+        .await;
+
+    let r = client
+        .delete_objects(
+            &bucket,
+            &["batch/a.txt".to_string(), "batch/b.txt".to_string(), "batch/c.txt".to_string()],
+        )
+        .await;
+    match &r {
+        Ok(failed) => t.check("batch delete 3 objects", failed.is_empty(), &format!("failed: {:?}", failed)),
+        Err(e) => t.check("batch delete", false, e),
+    }
+
+    let r = client.get_object(&bucket, "batch/a.txt").await;
+    t.check("batch deleted object gone", r.is_err(), "");
+
+    // --- Recursive Listing ---
+
+    let _ = client
+        .put_object(&bucket, "deep/a/b/c.txt", b"deep".to_vec(), "text/plain")
+        .await;
+    let _ = client
+        .put_object(&bucket, "deep/x.txt", b"shallow".to_vec(), "text/plain")
+        .await;
+
+    let r = client.list_objects_recursive(&bucket, "deep/").await;
+    match &r {
+        Ok(result) => {
+            let keys: Vec<_> = result.objects.iter().map(|o| o.key.as_str()).collect();
+            t.check(
+                "recursive list finds nested",
+                keys.contains(&"deep/a/b/c.txt"),
+                &format!("{:?}", keys),
+            );
+            t.check(
+                "recursive list finds shallow",
+                keys.contains(&"deep/x.txt"),
+                &format!("{:?}", keys),
+            );
+        }
+        Err(e) => t.check("recursive list", false, e),
+    }
+
+    // --- Recursive Listing for Sync ---
+
+    let r = client
+        .list_objects_recursive_for_sync(&bucket, "deep/")
+        .await;
+    match &r {
+        Ok(objects) => {
+            let paths: Vec<_> = objects.iter().map(|o| o.relative_path.as_str()).collect();
+            t.check(
+                "sync list relative paths",
+                paths.contains(&"a/b/c.txt") && paths.contains(&"x.txt"),
+                &format!("{:?}", paths),
+            );
+            t.check(
+                "sync list has sizes",
+                objects.iter().all(|o| o.size > 0),
+                "",
+            );
+        }
+        Err(e) => t.check("sync recursive list", false, e),
+    }
+
+    // --- Server-Side Copy (direct API) ---
+
+    let _ = client
+        .put_object(&bucket, "copy-direct-src.txt", b"direct copy data".to_vec(), "text/plain")
+        .await;
+    let r = client
+        .copy_object(&bucket, "copy-direct-src.txt", &bucket, "copy-direct-dst.txt")
+        .await;
+    t.check("copy_object direct", r.is_ok(), &r.err().unwrap_or_default());
+    match client.get_object(&bucket, "copy-direct-dst.txt").await {
+        Ok(data) => t.check(
+            "copy_object content matches",
+            data == b"direct copy data",
+            &String::from_utf8_lossy(&data),
+        ),
+        Err(e) => t.check("copy_object verify", false, &e),
+    }
+
+    // --- Download to File ---
+
+    let download_path = std::env::temp_dir().join(format!(
+        "abixio-ui-download-e2e-{}.txt",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let r = client
+        .download_object_to_file(&bucket, "copy-direct-src.txt", &download_path)
+        .await;
+    match &r {
+        Ok(bytes) => {
+            t.check("download_object_to_file bytes", *bytes == 16, &format!("{}", bytes));
+            match tokio::fs::read(&download_path).await {
+                Ok(data) => t.check(
+                    "download_object_to_file content",
+                    data == b"direct copy data",
+                    &String::from_utf8_lossy(&data),
+                ),
+                Err(e) => t.check("download_object_to_file read", false, &e.to_string()),
+            }
+        }
+        Err(e) => t.check("download_object_to_file", false, e),
+    }
+    let _ = tokio::fs::remove_file(&download_path).await;
+
+    t.results
+}
+
+async fn test_extended_s3_b(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
+    // --- Upload File (multipart path for large, simple for small) ---
+
+    let upload_path = std::env::temp_dir().join(format!(
+        "abixio-ui-upload-e2e-{}.txt",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let _ = tokio::fs::write(&upload_path, b"uploaded via file").await;
+    let r = client
+        .upload_file(&bucket, "file-upload.txt", &upload_path, "text/plain")
+        .await;
+    t.check("upload_file", r.is_ok(), &r.err().unwrap_or_default());
+    match client.get_object(&bucket, "file-upload.txt").await {
+        Ok(data) => t.check(
+            "upload_file content",
+            data == b"uploaded via file",
+            &String::from_utf8_lossy(&data),
+        ),
+        Err(e) => t.check("upload_file verify", false, &e),
+    }
+    let _ = tokio::fs::remove_file(&upload_path).await;
+
+    // --- Multipart Upload (file > 8MB) ---
+
+    let multipart_path = std::env::temp_dir().join(format!(
+        "abixio-ui-multipart-e2e-{}.bin",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let large_data = vec![0xABu8; 9 * 1024 * 1024]; // 9MB, above 8MB multipart threshold
+    let _ = tokio::fs::write(&multipart_path, &large_data).await;
+    let r = client
+        .upload_file(&bucket, "multipart.bin", &multipart_path, "application/octet-stream")
+        .await;
+    t.check("multipart upload", r.is_ok(), &r.err().unwrap_or_default());
+    match client.head_object(&bucket, "multipart.bin").await {
+        Ok(detail) => t.check(
+            "multipart upload size",
+            detail.size == 9 * 1024 * 1024,
+            &format!("{}", detail.size),
+        ),
+        Err(e) => t.check("multipart upload verify", false, &e),
+    }
+    let _ = tokio::fs::remove_file(&multipart_path).await;
+
+    // --- Get Object Version ---
+
+    // re-enable versioning for version tests
+    let _ = client.put_bucket_versioning(&bucket, "Enabled").await;
+    let _ = client
+        .put_object(&bucket, "ver-test.txt", b"ver1".to_vec(), "text/plain")
+        .await;
+    let _ = client
+        .put_object(&bucket, "ver-test.txt", b"ver2".to_vec(), "text/plain")
+        .await;
+
+    let r = client.list_object_versions(&bucket, "ver-test.txt").await;
+    match &r {
+        Ok(versions) => {
+            let obj_versions: Vec<_> = versions
+                .iter()
+                .filter(|v| v.key == "ver-test.txt" && !v.is_delete_marker)
+                .collect();
+            if obj_versions.len() >= 2 {
+                // get the older version (last in list)
+                let old_version = &obj_versions[obj_versions.len() - 1];
+                let r = client
+                    .get_object_version(&bucket, "ver-test.txt", &old_version.version_id)
+                    .await;
+                match &r {
+                    Ok(data) => t.check(
+                        "get_object_version content",
+                        data == b"ver1",
+                        &String::from_utf8_lossy(data),
+                    ),
+                    Err(e) => t.check("get_object_version", false, e),
+                }
+
+                // delete specific version
+                let r = client
+                    .delete_object_version(&bucket, "ver-test.txt", &old_version.version_id)
+                    .await;
+                t.check(
+                    "delete_object_version",
+                    r.is_ok(),
+                    &r.err().unwrap_or_default(),
+                );
+
+                // verify version is gone
+                let r = client.list_object_versions(&bucket, "ver-test.txt").await;
+                match &r {
+                    Ok(versions) => {
+                        let remaining: Vec<_> = versions
+                            .iter()
+                            .filter(|v| {
+                                v.key == "ver-test.txt"
+                                    && !v.is_delete_marker
+                                    && v.version_id == old_version.version_id
+                            })
+                            .collect();
+                        t.check("deleted version gone", remaining.is_empty(), "");
+                    }
+                    Err(e) => t.check("list versions after delete", false, e),
+                }
+            } else {
+                t.check(
+                    "get_object_version",
+                    false,
+                    &format!("need 2+ versions, got {}", obj_versions.len()),
+                );
+            }
+        }
+        Err(e) => t.check("list versions for get test", false, e),
+    }
+    let _ = client.put_bucket_versioning(&bucket, "Suspended").await;
+
+    t.results
+}
+
+async fn test_presigned_and_policy(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
+    // --- Presigned GET URL ---
+
+    let _ = client
+        .put_object(&bucket, "presign-test.txt", b"presigned data".to_vec(), "text/plain")
+        .await;
+    let r = client.presign_get_object(&bucket, "presign-test.txt", 3600).await;
+    match &r {
+        Ok(url) => {
+            t.check("presign url has endpoint", url.contains("presign-test.txt"), url);
+            // fetch the presigned URL to verify it works
+            let http = reqwest::Client::new();
+            match http.get(url).send().await {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    let body = resp.bytes().await.unwrap_or_default();
+                    t.check(
+                        "presign url returns data",
+                        status == 200 && body.as_ref() == b"presigned data",
+                        &format!("status={} body={}", status, String::from_utf8_lossy(&body)),
+                    );
+                }
+                Err(e) => t.check("presign url fetch", false, &e.to_string()),
+            }
+        }
+        Err(e) => t.check("presign_get_object", false, e),
+    }
+
+    // --- Bucket Policy ---
+
+    let policy_json = format!(
+        r#"{{"Version":"2012-10-17","Statement":[{{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::{}/*"}}]}}"#,
+        bucket
+    );
+    let r = client.put_bucket_policy(&bucket, &policy_json).await;
+    t.check("put_bucket_policy", r.is_ok(), &r.err().unwrap_or_default());
+
+    let r = client.get_bucket_policy(&bucket).await;
+    match &r {
+        Ok(Some(policy)) => t.check(
+            "get_bucket_policy has content",
+            !policy.is_empty(),
+            &format!("len={}", policy.len()),
+        ),
+        Ok(None) => t.check("get_bucket_policy", false, "returned None"),
+        Err(e) => t.check("get_bucket_policy", false, e),
+    }
+
+    let r = client.delete_bucket_policy(&bucket).await;
+    t.check("delete_bucket_policy", r.is_ok(), &r.err().unwrap_or_default());
+
+    let r = client.get_bucket_policy(&bucket).await;
+    t.check(
+        "policy deleted",
+        matches!(r, Ok(None)),
+        &format!("{:?}", r),
+    );
+
+    t.results
+}
+
+async fn test_bucket_tags_and_heal(
+    client: Arc<S3Client>,
+    admin: Option<Arc<AdminClient>>,
+    bucket: String,
+) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
+    // --- Bucket Tags ---
+
+    let mut bucket_tags = std::collections::HashMap::new();
+    bucket_tags.insert("project".to_string(), "e2e".to_string());
+    bucket_tags.insert("team".to_string(), "test".to_string());
+    let r = client.put_bucket_tags(&bucket, bucket_tags).await;
+    t.check("put_bucket_tags", r.is_ok(), &r.err().unwrap_or_default());
+
+    let r = client.get_bucket_tags(&bucket).await;
+    match &r {
+        Ok(tags) => {
+            t.check("get_bucket_tags count", tags.len() == 2, &format!("{}", tags.len()));
+            t.check(
+                "get_bucket_tags project",
+                tags.get("project").map(|v| v.as_str()) == Some("e2e"),
+                &format!("{:?}", tags.get("project")),
+            );
+        }
+        Err(e) => t.check("get_bucket_tags", false, e),
+    }
+
+    let r = client.delete_bucket_tags(&bucket).await;
+    t.check("delete_bucket_tags", r.is_ok(), &r.err().unwrap_or_default());
+
+    // --- Admin: Heal Object ---
+
+    if let Some(ref admin) = admin {
+        let _ = client
+            .put_object(&bucket, "heal-test.txt", b"heal me".to_vec(), "text/plain")
+            .await;
+        let r = admin.heal_object(&bucket, "heal-test.txt").await;
+        match &r {
+            Ok(resp) => t.check(
+                "admin heal_object",
+                !resp.result.is_empty(),
+                &format!("result={}", resp.result),
+            ),
+            Err(e) => t.check("admin heal_object", false, e),
+        }
+    }
+
+    t.results
+}
+
+async fn test_sync(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
+    // --- Sync: Enumerate S3 for Sync ---
+
+    let _ = client
+        .put_object(&bucket, "sync-src/a.txt", b"sync a".to_vec(), "text/plain")
+        .await;
+    let _ = client
+        .put_object(&bucket, "sync-src/b.txt", b"sync b".to_vec(), "text/plain")
+        .await;
+
+    let r = crate::app::sync_ops::enumerate_s3_for_sync(
+        client.clone(),
+        &bucket,
+        "sync-src/",
+        &Default::default(),
+    )
+    .await;
+    match &r {
+        Ok(objects) => {
+            let paths: Vec<_> = objects.iter().map(|o| o.relative_path.as_str()).collect();
+            t.check(
+                "enumerate_s3_for_sync paths",
+                paths.contains(&"a.txt") && paths.contains(&"b.txt"),
+                &format!("{:?}", paths),
+            );
+        }
+        Err(e) => t.check("enumerate_s3_for_sync", false, e),
+    }
+
+    // --- Sync: Enumerate Local for Sync ---
+
+    let sync_local_root = std::env::temp_dir().join(format!(
+        "abixio-ui-sync-enum-e2e-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let _ = tokio::fs::create_dir_all(sync_local_root.join("sub")).await;
+    let _ = tokio::fs::write(sync_local_root.join("root.txt"), b"root data").await;
+    let _ = tokio::fs::write(sync_local_root.join("sub").join("nested.txt"), b"nested data").await;
+
+    let r = crate::app::sync_ops::enumerate_local_for_sync(
+        sync_local_root.clone(),
+        &Default::default(),
+    );
+    match &r {
+        Ok(objects) => {
+            let paths: Vec<_> = objects.iter().map(|o| o.relative_path.as_str()).collect();
+            t.check(
+                "enumerate_local_for_sync paths",
+                paths.contains(&"root.txt") && paths.contains(&"sub/nested.txt"),
+                &format!("{:?}", paths),
+            );
+        }
+        Err(e) => t.check("enumerate_local_for_sync", false, e),
+    }
+
+    // --- Sync: Build Plan and Execute (local -> S3 copy) ---
+
+    let r_source = crate::app::sync_ops::enumerate_local_for_sync(
+        sync_local_root.clone(),
+        &Default::default(),
+    );
+    let r_dest = client
+        .list_objects_recursive_for_sync(&bucket, "sync-dest/")
+        .await;
+    match (r_source, r_dest) {
+        (Ok(source), Ok(destination)) => {
+            let plan = crate::app::sync_ops::build_sync_plan(
+                source,
+                destination,
+                crate::app::SyncMode::Copy,
+                crate::app::SyncPreset::Converge.policy(),
+                crate::app::SyncCompareMode::SizeOnly,
+            );
+            t.check(
+                "sync plan has creates",
+                plan.summary.creates > 0,
+                &format!("creates={}", plan.summary.creates),
+            );
+
+            // execute the plan items via execute_sync_run_item
+            let mut run_items = Vec::new();
+            for item in &plan.items {
+                if item.action == crate::app::SyncPlanAction::Create
+                    || item.action == crate::app::SyncPlanAction::Update
+                {
+                    let bytes = item.source.as_ref().map(|s| s.size).unwrap_or(0);
+                    run_items.push(crate::app::SyncRunItem {
+                        action: item.action.clone(),
+                        source: crate::app::TransferEndpoint::Local {
+                            path: sync_local_root.join(&item.relative_path),
+                        },
+                        destination: crate::app::TransferEndpoint::S3 {
+                            connection_id: CURRENT_CONNECTION_ID.to_string(),
+                            bucket: bucket.clone(),
+                            key: format!("sync-dest/{}", item.relative_path),
+                        },
+                        strategy: crate::app::SyncExecutionStrategy::Upload,
+                        relative_path: item.relative_path.clone(),
+                        bytes,
+                    });
+                }
+            }
+            let mut all_ok = true;
+            for item in &run_items {
+                let r = crate::app::transfer_ops::execute_sync_run_item(
+                    None,
+                    Some(client.clone()),
+                    item,
+                )
+                .await;
+                if r.is_err() {
+                    t.check(
+                        &format!("sync execute {}", item.relative_path),
+                        false,
+                        &r.err().unwrap_or_default(),
+                    );
+                    all_ok = false;
+                }
+            }
+            if all_ok {
+                t.check("sync execute all uploads", true, "");
+            }
+
+            // verify uploaded objects
+            match client.get_object(&bucket, "sync-dest/root.txt").await {
+                Ok(data) => t.check(
+                    "sync uploaded root.txt",
+                    data == b"root data",
+                    &String::from_utf8_lossy(&data),
+                ),
+                Err(e) => t.check("sync uploaded root.txt", false, &e),
+            }
+            match client.get_object(&bucket, "sync-dest/sub/nested.txt").await {
+                Ok(data) => t.check(
+                    "sync uploaded nested.txt",
+                    data == b"nested data",
+                    &String::from_utf8_lossy(&data),
+                ),
+                Err(e) => t.check("sync uploaded nested.txt", false, &e),
+            }
+        }
+        (Err(e), _) => t.check("sync plan source enum", false, &e),
+        (_, Err(e)) => t.check("sync plan dest enum", false, &e),
+    }
+
+    // --- Sync: S3 -> Local Download via execute_sync_run_item ---
+
+    let sync_download_root = std::env::temp_dir().join(format!(
+        "abixio-ui-sync-dl-e2e-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    ));
+    let download_item = crate::app::SyncRunItem {
+        action: crate::app::SyncPlanAction::Create,
+        source: crate::app::TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "sync-dest/root.txt".to_string(),
+        },
+        destination: crate::app::TransferEndpoint::Local {
+            path: sync_download_root.join("root.txt"),
+        },
+        strategy: crate::app::SyncExecutionStrategy::Download,
+        relative_path: "root.txt".to_string(),
+        bytes: 9,
+    };
+    let r = crate::app::transfer_ops::execute_sync_run_item(
+        Some(client.clone()),
+        None,
+        &download_item,
+    )
+    .await;
+    t.check("sync download execute", r.is_ok(), &r.err().unwrap_or_default());
+    match tokio::fs::read(sync_download_root.join("root.txt")).await {
+        Ok(data) => t.check(
+            "sync downloaded content",
+            data == b"root data",
+            &String::from_utf8_lossy(&data),
+        ),
+        Err(e) => t.check("sync downloaded content", false, &e.to_string()),
+    }
+
+    // --- Sync: S3 -> S3 Server-Side Copy via execute_sync_run_item ---
+
+    let ss_copy_item = crate::app::SyncRunItem {
+        action: crate::app::SyncPlanAction::Create,
+        source: crate::app::TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "sync-dest/root.txt".to_string(),
+        },
+        destination: crate::app::TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "sync-ss-copy/root.txt".to_string(),
+        },
+        strategy: crate::app::SyncExecutionStrategy::ServerSideCopy,
+        relative_path: "root.txt".to_string(),
+        bytes: 9,
+    };
+    let r = crate::app::transfer_ops::execute_sync_run_item(
+        Some(client.clone()),
+        Some(client.clone()),
+        &ss_copy_item,
+    )
+    .await;
+    t.check("sync server-side copy", r.is_ok(), &r.err().unwrap_or_default());
+    match client.get_object(&bucket, "sync-ss-copy/root.txt").await {
+        Ok(data) => t.check(
+            "sync ss-copy content",
+            data == b"root data",
+            &String::from_utf8_lossy(&data),
+        ),
+        Err(e) => t.check("sync ss-copy verify", false, &e),
+    }
+
+    // --- Sync: Client Relay via execute_sync_run_item ---
+
+    let relay_item = crate::app::SyncRunItem {
+        action: crate::app::SyncPlanAction::Create,
+        source: crate::app::TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "sync-dest/root.txt".to_string(),
+        },
+        destination: crate::app::TransferEndpoint::S3 {
+            connection_id: CURRENT_CONNECTION_ID.to_string(),
+            bucket: bucket.clone(),
+            key: "sync-relay/root.txt".to_string(),
+        },
+        strategy: crate::app::SyncExecutionStrategy::ClientRelay,
+        relative_path: "root.txt".to_string(),
+        bytes: 9,
+    };
+    let r = crate::app::transfer_ops::execute_sync_run_item(
+        Some(client.clone()),
+        Some(client.clone()),
+        &relay_item,
+    )
+    .await;
+    t.check("sync client relay", r.is_ok(), &r.err().unwrap_or_default());
+    match client.get_object(&bucket, "sync-relay/root.txt").await {
+        Ok(data) => t.check(
+            "sync relay content",
+            data == b"root data",
+            &String::from_utf8_lossy(&data),
+        ),
+        Err(e) => t.check("sync relay verify", false, &e),
+    }
+
+    let _ = tokio::fs::remove_dir_all(&sync_local_root).await;
+    let _ = tokio::fs::remove_dir_all(&sync_download_root).await;
+
+    t.results
+}
+
+async fn test_cleanup(client: Arc<S3Client>, bucket: String) -> Vec<TestResult> {
+    let mut t = TestRunner::new();
+
     // --- Cleanup ---
     // delete all test objects (including versions), then the bucket
     // first delete versions if any
@@ -727,8 +1417,6 @@ pub async fn run_e2e_tests(
             let _ = client.delete_object(&bucket, &obj.key).await;
         }
     }
-    let _ = tokio::fs::remove_dir_all(import_root).await;
-    let _ = tokio::fs::remove_dir_all(export_root).await;
     let r = client.delete_bucket(&bucket).await;
     t.check(
         "delete non-empty bucket",

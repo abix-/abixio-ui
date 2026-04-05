@@ -192,7 +192,7 @@ pub enum SyncEndpoint {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SyncFilterSet {
     pub include_patterns_text: String,
     pub exclude_patterns_text: String,

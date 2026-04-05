@@ -1507,3 +1507,119 @@ async fn prune_empty_sync_dirs(path: &Path) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_transfer_workers_valid() {
+        assert_eq!(parse_transfer_workers("4").unwrap(), 4);
+        assert_eq!(parse_transfer_workers("  16  ").unwrap(), 16);
+        assert_eq!(parse_transfer_workers("1").unwrap(), 1);
+    }
+
+    #[test]
+    fn parse_transfer_workers_zero_rejected() {
+        assert!(parse_transfer_workers("0").is_err());
+    }
+
+    #[test]
+    fn parse_transfer_workers_invalid() {
+        assert!(parse_transfer_workers("").is_err());
+        assert!(parse_transfer_workers("abc").is_err());
+        assert!(parse_transfer_workers("-1").is_err());
+    }
+
+    #[test]
+    fn parse_delete_workers_valid() {
+        assert_eq!(parse_delete_workers("4").unwrap(), 4);
+        assert_eq!(parse_delete_workers("  8  ").unwrap(), 8);
+    }
+
+    #[test]
+    fn parse_delete_workers_zero_rejected() {
+        assert!(parse_delete_workers("0").is_err());
+    }
+
+    #[test]
+    fn parse_delete_workers_invalid() {
+        assert!(parse_delete_workers("").is_err());
+        assert!(parse_delete_workers("abc").is_err());
+    }
+
+    #[test]
+    fn delete_confirm_reason_below_thresholds() {
+        assert!(delete_confirm_reason(10, 1024, 100, 100).is_none());
+    }
+
+    #[test]
+    fn delete_confirm_reason_count_threshold() {
+        let reason = delete_confirm_reason(
+            DELETE_CONFIRM_COUNT_THRESHOLD + 1,
+            0,
+            100,
+            100,
+        );
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn delete_confirm_reason_bytes_threshold() {
+        let reason = delete_confirm_reason(
+            1,
+            DELETE_CONFIRM_BYTES_THRESHOLD + 1,
+            100,
+            100,
+        );
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn delete_confirm_reason_high_ratio() {
+        // deletes > 25% of destination scanned
+        let reason = delete_confirm_reason(30, 0, 100, 100);
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn delete_confirm_reason_empty_source() {
+        // source scanned is 0 but deletes are planned
+        let reason = delete_confirm_reason(5, 0, 100, 0);
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn same_sync_endpoint_detects_identical_s3() {
+        let mut sync = SyncState::new("conn-a".to_string());
+        sync.source_kind = SyncEndpointKind::S3;
+        sync.destination_kind = SyncEndpointKind::S3;
+        sync.source_connection_id = "conn-a".to_string();
+        sync.destination_connection_id = "conn-a".to_string();
+        sync.source_bucket = "bucket".to_string();
+        sync.destination_bucket = "bucket".to_string();
+        sync.source_prefix = "prefix/".to_string();
+        sync.destination_prefix = "prefix/".to_string();
+        assert!(same_sync_endpoint(&sync));
+    }
+
+    #[test]
+    fn same_sync_endpoint_different_buckets() {
+        let mut sync = SyncState::new("conn-a".to_string());
+        sync.source_kind = SyncEndpointKind::S3;
+        sync.destination_kind = SyncEndpointKind::S3;
+        sync.source_connection_id = "conn-a".to_string();
+        sync.destination_connection_id = "conn-a".to_string();
+        sync.source_bucket = "bucket-a".to_string();
+        sync.destination_bucket = "bucket-b".to_string();
+        assert!(!same_sync_endpoint(&sync));
+    }
+
+    #[test]
+    fn same_sync_endpoint_cross_kind() {
+        let mut sync = SyncState::new("conn-a".to_string());
+        sync.source_kind = SyncEndpointKind::S3;
+        sync.destination_kind = SyncEndpointKind::Local;
+        assert!(!same_sync_endpoint(&sync));
+    }
+}

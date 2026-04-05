@@ -396,15 +396,24 @@ pub fn wildcard_match(pattern: &str, text: &str) -> bool {
             remaining = &remaining[len..];
             remaining = remaining.trim_start_matches('/');
         } else {
-            // find segment anywhere in remaining (** consumed arbitrary content)
+            // find segment at a path boundary in remaining (** consumed full components)
             let mut found = false;
-            for start in 0..=remaining.len() {
-                let slice = &remaining[start..];
+            let mut search_pos = 0;
+            loop {
+                if search_pos > remaining.len() {
+                    break;
+                }
+                let slice = &remaining[search_pos..];
                 if let Some(len) = find_segment_match(seg, slice, false) {
                     remaining = &slice[len..];
                     remaining = remaining.trim_start_matches('/');
                     found = true;
                     break;
+                }
+                // advance to next path boundary (after next /)
+                match remaining[search_pos..].find('/') {
+                    Some(slash) => search_pos += slash + 1,
+                    None => break,
                 }
             }
             if !found {
@@ -540,6 +549,30 @@ mod tests {
         assert!(wildcard_match("**/*.log", "a/b/c/app.log"));
         // should not match wrong extension
         assert!(!wildcard_match("**/*.txt", "a/b/file.md"));
+    }
+
+    #[test]
+    fn wildcard_match_doublestar_edge_cases() {
+        // ** alone matches everything
+        assert!(wildcard_match("**", "a/b/c.txt"));
+        assert!(wildcard_match("**", "file.txt"));
+        // **/ at start with specific file
+        assert!(wildcard_match("**/README.md", "README.md"));
+        assert!(wildcard_match("**/README.md", "docs/README.md"));
+        assert!(!wildcard_match("**/README.md", "docs/readme.txt"));
+        // trailing **
+        assert!(wildcard_match("src/**", "src/main.rs"));
+        assert!(wildcard_match("src/**", "src/app/mod.rs"));
+        // ** with ? wildcard
+        assert!(wildcard_match("**/??.txt", "a/b/ab.txt"));
+        assert!(!wildcard_match("**/??.txt", "a/b/abc.txt"));
+    }
+
+    #[test]
+    fn wildcard_single_star_still_crosses_slash_without_doublestar() {
+        // backward compat: when no ** in pattern, * crosses /
+        assert!(wildcard_match("*.txt", "dir/file.txt"));
+        assert!(wildcard_match("src/*.rs", "src/deep/mod.rs"));
     }
 
     #[test]

@@ -892,4 +892,257 @@ mod tests {
         assert!(!apply_sync_filters(&recent, &filters));
         assert!(apply_sync_filters(&old, &filters));
     }
+
+    #[test]
+    fn parse_age_filter_seconds_and_minutes() {
+        let now = time::OffsetDateTime::now_utc();
+
+        let result = parse_age_filter("30s").unwrap();
+        let diff = now - result;
+        assert!((diff.whole_seconds() - 30).abs() < 5);
+
+        let result = parse_age_filter("30m").unwrap();
+        let diff = now - result;
+        assert!((diff.whole_seconds() - 1800).abs() < 5);
+    }
+
+    #[test]
+    fn parse_size_filter_with_b_suffix_and_spaces() {
+        assert_eq!(parse_size_filter("100B"), Some(100));
+        assert_eq!(parse_size_filter(" 50K "), Some(50 * 1024));
+    }
+
+    #[test]
+    fn min_and_max_size_filters_with_suffixes() {
+        let small = SyncObject {
+            relative_path: "small.txt".to_string(),
+            size: 500,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        let medium = SyncObject {
+            relative_path: "medium.bin".to_string(),
+            size: 5 * 1024 * 1024,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        let large = SyncObject {
+            relative_path: "large.bin".to_string(),
+            size: 2 * 1024 * 1024 * 1024,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: String::new(),
+            older_than_text: String::new(),
+            min_size_text: "1K".to_string(),
+            max_size_text: "1G".to_string(),
+        };
+        assert!(!apply_sync_filters(&small, &filters));
+        assert!(apply_sync_filters(&medium, &filters));
+        assert!(!apply_sync_filters(&large, &filters));
+    }
+
+    #[test]
+    fn doublestar_glob_in_include_exclude_filters() {
+        let deep = SyncObject {
+            relative_path: "a/b/c/file.log".to_string(),
+            size: 100,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        let shallow = SyncObject {
+            relative_path: "file.log".to_string(),
+            size: 100,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        let txt = SyncObject {
+            relative_path: "a/b/readme.txt".to_string(),
+            size: 100,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        // include only **/*.log
+        let filters = SyncFilterSet {
+            include_patterns_text: "**/*.log".to_string(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: String::new(),
+            older_than_text: String::new(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(apply_sync_filters(&deep, &filters));
+        assert!(apply_sync_filters(&shallow, &filters));
+        assert!(!apply_sync_filters(&txt, &filters));
+
+        // exclude a/**/file.log
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: "a/**/file.log".to_string(),
+            newer_than_text: String::new(),
+            older_than_text: String::new(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(!apply_sync_filters(&deep, &filters));
+        assert!(apply_sync_filters(&shallow, &filters));
+        assert!(apply_sync_filters(&txt, &filters));
+    }
+
+    #[test]
+    fn time_filter_rejects_objects_without_modified() {
+        let no_time = SyncObject {
+            relative_path: "unknown.bin".to_string(),
+            size: 100,
+            modified: None,
+            etag: None,
+            is_dir_marker: false,
+        };
+        let newer_filter = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "1d".to_string(),
+            older_than_text: String::new(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(!apply_sync_filters(&no_time, &newer_filter));
+
+        let older_filter = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: String::new(),
+            older_than_text: "1d".to_string(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(!apply_sync_filters(&no_time, &older_filter));
+    }
+
+    #[test]
+    fn time_filter_with_rfc3339_absolute_date() {
+        let obj = SyncObject {
+            relative_path: "data.csv".to_string(),
+            size: 100,
+            modified: Some("2025-06-15T12:00:00Z".to_string()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        // newer-than 2025-01-01: object is from june 2025, should pass
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2025-01-01T00:00:00Z".to_string(),
+            older_than_text: String::new(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(apply_sync_filters(&obj, &filters));
+
+        // newer-than 2026-01-01: object is from june 2025, should fail
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2026-01-01T00:00:00Z".to_string(),
+            older_than_text: String::new(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(!apply_sync_filters(&obj, &filters));
+    }
+
+    #[test]
+    fn combined_time_window_filter() {
+        let obj = SyncObject {
+            relative_path: "report.pdf".to_string(),
+            size: 100,
+            modified: Some("2025-06-15T12:00:00Z".to_string()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        // window: newer than 2025-01-01 AND older than 2026-01-01 -> passes
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2025-01-01T00:00:00Z".to_string(),
+            older_than_text: "2026-01-01T00:00:00Z".to_string(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(apply_sync_filters(&obj, &filters));
+
+        // window: newer than 2025-07-01 AND older than 2026-01-01 -> fails (too old)
+        let filters = SyncFilterSet {
+            include_patterns_text: String::new(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2025-07-01T00:00:00Z".to_string(),
+            older_than_text: "2026-01-01T00:00:00Z".to_string(),
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+        };
+        assert!(!apply_sync_filters(&obj, &filters));
+    }
+
+    #[test]
+    fn combined_size_time_and_pattern_filters() {
+        let obj = SyncObject {
+            relative_path: "logs/2025/app.log".to_string(),
+            size: 50 * 1024,
+            modified: Some("2025-06-15T12:00:00Z".to_string()),
+            etag: None,
+            is_dir_marker: false,
+        };
+        // all pass: include *.log, min 1K, max 1M, newer than 2025-01-01
+        let filters = SyncFilterSet {
+            include_patterns_text: "**/*.log".to_string(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2025-01-01T00:00:00Z".to_string(),
+            older_than_text: String::new(),
+            min_size_text: "1K".to_string(),
+            max_size_text: "1M".to_string(),
+        };
+        assert!(apply_sync_filters(&obj, &filters));
+
+        // size too small (min 100K)
+        let filters = SyncFilterSet {
+            include_patterns_text: "**/*.log".to_string(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2025-01-01T00:00:00Z".to_string(),
+            older_than_text: String::new(),
+            min_size_text: "100K".to_string(),
+            max_size_text: "1M".to_string(),
+        };
+        assert!(!apply_sync_filters(&obj, &filters));
+
+        // pattern mismatch (include only *.txt)
+        let filters = SyncFilterSet {
+            include_patterns_text: "**/*.txt".to_string(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2025-01-01T00:00:00Z".to_string(),
+            older_than_text: String::new(),
+            min_size_text: "1K".to_string(),
+            max_size_text: "1M".to_string(),
+        };
+        assert!(!apply_sync_filters(&obj, &filters));
+
+        // time mismatch (newer than 2026)
+        let filters = SyncFilterSet {
+            include_patterns_text: "**/*.log".to_string(),
+            exclude_patterns_text: String::new(),
+            newer_than_text: "2026-01-01T00:00:00Z".to_string(),
+            older_than_text: String::new(),
+            min_size_text: "1K".to_string(),
+            max_size_text: "1M".to_string(),
+        };
+        assert!(!apply_sync_filters(&obj, &filters));
+    }
 }

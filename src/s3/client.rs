@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use aws_credential_types::Credentials;
@@ -11,9 +13,18 @@ use aws_sdk_s3::types::{
 };
 use aws_sdk_s3::Client;
 
+/// Shared atomic counters for S3 network activity.
+#[derive(Default)]
+pub struct S3Stats {
+    pub requests: AtomicU64,
+    pub bytes_in: AtomicU64,
+    pub bytes_out: AtomicU64,
+}
+
 #[derive(Clone)]
 pub struct S3Client {
     client: Client,
+    stats: Arc<S3Stats>,
 }
 
 impl S3Client {
@@ -50,12 +61,30 @@ impl S3Client {
 
         Ok(Self {
             client: Client::from_conf(builder.build()),
+            stats: Arc::new(S3Stats::default()),
         })
     }
 
     /// Create an anonymous client (no auth) for the given endpoint.
     pub fn anonymous(endpoint: &str) -> Result<Self, String> {
         Self::new(endpoint, None, "us-east-1")
+    }
+
+    /// Shared stats counters. Readable from any thread while S3 calls run.
+    pub fn stats(&self) -> &Arc<S3Stats> {
+        &self.stats
+    }
+
+    fn record_request(&self) {
+        self.stats.requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_bytes_in(&self, n: u64) {
+        self.stats.bytes_in.fetch_add(n, Ordering::Relaxed);
+    }
+
+    fn record_bytes_out(&self, n: u64) {
+        self.stats.bytes_out.fetch_add(n, Ordering::Relaxed);
     }
 
     pub async fn list_buckets(&self) -> Result<Vec<BucketInfo>, String> {
@@ -65,6 +94,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         Ok(resp
             .buckets()
@@ -102,6 +132,7 @@ impl S3Client {
             }
 
             let resp = req.send().await.map_err(|e| e.to_string())?;
+            self.record_request();
 
             for obj in resp.contents() {
                 objects.push(ObjectInfo {
@@ -147,6 +178,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -157,6 +189,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -167,6 +200,7 @@ impl S3Client {
         data: Vec<u8>,
         content_type: &str,
     ) -> Result<String, String> {
+        let len = data.len() as u64;
         self.client
             .put_object()
             .bucket(bucket)
@@ -176,6 +210,8 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
+        self.record_bytes_out(len);
         Ok(String::new())
     }
 
@@ -188,6 +224,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let bytes = resp
             .body
@@ -196,7 +233,9 @@ impl S3Client {
             .map_err(|e| e.to_string())?
             .into_bytes();
 
-        Ok(bytes.to_vec())
+        let data = bytes.to_vec();
+        self.record_bytes_in(data.len() as u64);
+        Ok(data)
     }
 
     pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectDetail, String> {
@@ -208,6 +247,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let mut headers = Vec::new();
         if let Some(v) = resp.content_type() {
@@ -274,6 +314,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -298,6 +339,7 @@ impl S3Client {
             }
 
             let resp = req.send().await.map_err(|e| e.to_string())?;
+            self.record_request();
 
             for obj in resp.contents() {
                 objects.push(ObjectInfo {
@@ -338,6 +380,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -372,6 +415,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let mut failed = Vec::new();
         for err in resp.errors() {
@@ -396,6 +440,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let mut tags = HashMap::new();
         for tag in resp.tag_set() {
@@ -431,6 +476,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -446,6 +492,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -459,6 +506,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         Ok(resp
             .status()
@@ -484,6 +532,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -500,6 +549,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let mut versions = Vec::new();
         for v in resp.versions() {
@@ -550,6 +600,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let bytes = resp
             .body
@@ -558,7 +609,9 @@ impl S3Client {
             .map_err(|e| e.to_string())?
             .into_bytes();
 
-        Ok(bytes.to_vec())
+        let data = bytes.to_vec();
+        self.record_bytes_in(data.len() as u64);
+        Ok(data)
     }
 
     pub async fn delete_object_version(
@@ -575,6 +628,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -599,6 +653,7 @@ impl S3Client {
             .presigned(presigning_config)
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         Ok(presigned.uri().to_string())
     }
@@ -613,6 +668,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         Ok(resp.policy().unwrap_or("").to_string())
     }
@@ -629,6 +685,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -639,6 +696,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -652,6 +710,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         // serialize rules back to a displayable string
         let rules = resp.rules();
@@ -686,6 +745,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -702,6 +762,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
 
         let mut tags = HashMap::new();
         for tag in resp.tag_set() {
@@ -732,6 +793,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 
@@ -742,6 +804,7 @@ impl S3Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        self.record_request();
         Ok(())
     }
 }

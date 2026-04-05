@@ -3,14 +3,13 @@
 //! These tests verify that:
 //! 1. When idle, no frames are recorded (0 CPU)
 //! 2. When active, frames are recorded correctly
-//! 3. Network stats only increment on actual requests
-//! 4. The 5-minute sliding window prunes old samples
+//! 3. Network stats only increment on actual S3 client calls
+//! 4. Frame timing is reasonable
 
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
-
-// we test the perf module directly
-// (it's pub in main.rs)
 
 #[test]
 fn idle_records_zero_frames() {
@@ -34,21 +33,24 @@ fn active_records_frames() {
 #[test]
 fn network_starts_at_zero() {
     let stats = abixio_ui::perf::PerfStats::new();
-    assert_eq!(stats.total_requests, 0);
-    assert_eq!(stats.total_bytes_in, 0);
-    assert_eq!(stats.total_bytes_out, 0);
-    assert_eq!(stats.requests_5m(), 0);
+    assert_eq!(stats.total_requests(), 0);
+    assert_eq!(stats.total_bytes_in(), 0);
+    assert_eq!(stats.total_bytes_out(), 0);
 }
 
 #[test]
-fn network_records_requests() {
+fn network_reads_from_s3_stats() {
     let mut stats = abixio_ui::perf::PerfStats::new();
-    stats.record_request(100, 5000);
-    stats.record_request(200, 3000);
-    assert_eq!(stats.total_requests, 2);
-    assert_eq!(stats.total_bytes_out, 300);
-    assert_eq!(stats.total_bytes_in, 8000);
-    assert_eq!(stats.requests_5m(), 2);
+    let s3_stats = Arc::new(abixio_ui::s3::client::S3Stats::default());
+    stats.set_s3_stats(s3_stats.clone());
+
+    s3_stats.requests.fetch_add(3, Ordering::Relaxed);
+    s3_stats.bytes_out.fetch_add(100, Ordering::Relaxed);
+    s3_stats.bytes_in.fetch_add(5000, Ordering::Relaxed);
+
+    assert_eq!(stats.total_requests(), 3);
+    assert_eq!(stats.total_bytes_out(), 100);
+    assert_eq!(stats.total_bytes_in(), 5000);
 }
 
 #[test]

@@ -357,6 +357,9 @@ impl App {
             section
         };
 
+        let mut perf = crate::perf::PerfStats::new();
+        perf.set_s3_stats(client.stats().clone());
+
         let app = Self {
             client: client.clone(),
             endpoint: start_endpoint.clone(),
@@ -375,7 +378,7 @@ impl App {
             loading_objects: false,
             loading_detail: false,
             error: None,
-            perf: crate::perf::PerfStats::new(),
+            perf,
             settings,
             active_connection: None,
             editing_connection: None,

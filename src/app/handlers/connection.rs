@@ -32,6 +32,7 @@ impl App {
             &conn.region,
         ) {
             Ok(client) => {
+                self.perf.set_s3_stats(client.stats().clone());
                 self.client = Arc::new(client);
                 self.endpoint = conn.endpoint.clone();
                 self.active_connection = Some(name);

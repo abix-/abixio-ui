@@ -3,6 +3,18 @@ use iced::{Element, Length};
 
 use crate::app::{App, AppTheme, Message};
 
+fn format_bytes(n: u64) -> String {
+    if n < 1024 {
+        format!("{} B", n)
+    } else if n < 1024 * 1024 {
+        format!("{:.1} KB", n as f64 / 1024.0)
+    } else if n < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", n as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
 impl App {
     pub fn settings_view(&self) -> Element<'_, Message> {
         let p = &self.perf;
@@ -70,17 +82,20 @@ impl App {
             .spacing(8),
             text("Network").size(11),
             row![
-                text("Requests (5m)").size(10),
-                text(format!("{}", p.requests_5m())).size(10)
+                text("Requests (total)").size(10),
+                text(format!("{}", p.total_requests())).size(10)
             ]
             .spacing(8),
             row![
-                text("Requests (total)").size(10),
-                text(format!("{}", p.total_requests)).size(10)
+                text("Bytes sent").size(10),
+                text(format_bytes(p.total_bytes_out())).size(10)
             ]
             .spacing(8),
-            text("Disk I/O").size(11),
-            row![text("Writes").size(10), text("0 (no caching)").size(10)].spacing(8),
+            row![
+                text("Bytes received").size(10),
+                text(format_bytes(p.total_bytes_in())).size(10)
+            ]
+            .spacing(8),
             iced::widget::rule::horizontal(1),
             text("About").size(13),
             text(format!("abixio-ui v{}", env!("CARGO_PKG_VERSION"))).size(11),

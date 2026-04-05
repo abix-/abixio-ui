@@ -157,7 +157,6 @@ fn perf_stats_after_recording_then_idle() {
     // simulate 100 frames of activity
     for _ in 0..100 {
         stats.record_frame();
-        stats.record_request(50, 1000);
     }
 
     // now idle

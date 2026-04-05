@@ -158,8 +158,8 @@ Most operations are wired to the UI. Remaining unwired operations
   versioning, tags, and AbixIO-specific admin. It is still weak in scripting
   parity and advanced S3 management features (inline policy/lifecycle editors,
   retention, encryption).
-- The Settings view shows network counters, but request and byte metrics are
-  not currently wired to real network activity.
+- The Settings view shows live network counters (requests, bytes sent,
+  bytes received) from the S3 client's atomic counters.
 - Leaving credential fields blank while editing a saved connection keeps the
   existing keychain entries. There is no clean in-place "make this saved
   connection anonymous" flow yet.

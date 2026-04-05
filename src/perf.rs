@@ -1,5 +1,9 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+
+use crate::s3::client::S3Stats;
 
 const HISTORY_SECS: u64 = 300; // 5 minutes
 
@@ -51,22 +55,8 @@ impl TimeSeries {
         sum / self.samples.len() as f64
     }
 
-    fn max(&self) -> f64 {
-        self.samples.iter().map(|s| s.value).fold(0.0_f64, f64::max)
-    }
-
     fn count(&self) -> usize {
         self.samples.len()
-    }
-
-    fn recent_values(&self, max_points: usize) -> Vec<f64> {
-        let len = self.samples.len();
-        let skip = if len > max_points {
-            len - max_points
-        } else {
-            0
-        };
-        self.samples.iter().skip(skip).map(|s| s.value).collect()
     }
 }
 
@@ -80,16 +70,11 @@ pub struct PerfStats {
     fps_update: Instant,
     fps_accumulator: u32,
 
-    // network
-    network_requests: TimeSeries, // 1.0 per request
-    network_bytes_out: TimeSeries,
-    network_bytes_in: TimeSeries,
-    pub total_requests: u64,
-    pub total_bytes_out: u64,
-    pub total_bytes_in: u64,
-
     // repaints
     repaints: TimeSeries,
+
+    // network (read from shared S3 client counters)
+    s3_stats: Option<Arc<S3Stats>>,
 }
 
 impl PerfStats {
@@ -102,17 +87,17 @@ impl PerfStats {
             frame_count: 0,
             fps_update: now,
             fps_accumulator: 0,
-            network_requests: TimeSeries::new(),
-            network_bytes_out: TimeSeries::new(),
-            network_bytes_in: TimeSeries::new(),
-            total_requests: 0,
-            total_bytes_out: 0,
-            total_bytes_in: 0,
             repaints: TimeSeries::new(),
+            s3_stats: None,
         }
     }
 
-    /// Call once per frame from logic().
+    /// Link to the S3 client's shared atomic counters.
+    pub fn set_s3_stats(&mut self, stats: Arc<S3Stats>) {
+        self.s3_stats = Some(stats);
+    }
+
+    /// Call once per frame from update().
     pub fn record_frame(&mut self) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame);
@@ -131,16 +116,6 @@ impl PerfStats {
         }
     }
 
-    /// Call when a network request completes.
-    pub fn record_request(&mut self, bytes_out: u64, bytes_in: u64) {
-        self.network_requests.push(1.0);
-        self.network_bytes_out.push(bytes_out as f64);
-        self.network_bytes_in.push(bytes_in as f64);
-        self.total_requests += 1;
-        self.total_bytes_out += bytes_out;
-        self.total_bytes_in += bytes_in;
-    }
-
     // -- accessors --
 
     pub fn current_fps(&self) -> f64 {
@@ -155,14 +130,6 @@ impl PerfStats {
         self.frame_times_ms.last()
     }
 
-    pub fn avg_frame_ms(&self) -> f64 {
-        self.frame_times_ms.avg()
-    }
-
-    pub fn max_frame_ms(&self) -> f64 {
-        self.frame_times_ms.max()
-    }
-
     pub fn total_frames(&self) -> u64 {
         self.frame_count
     }
@@ -171,19 +138,26 @@ impl PerfStats {
         self.repaints.count()
     }
 
-    pub fn requests_5m(&self) -> usize {
-        self.network_requests.count()
+    // -- network (live from S3 client atomics) --
+
+    pub fn total_requests(&self) -> u64 {
+        self.s3_stats
+            .as_ref()
+            .map(|s| s.requests.load(Ordering::Relaxed))
+            .unwrap_or(0)
     }
 
-    pub fn bytes_in_5m(&self) -> f64 {
-        self.network_bytes_in.samples.iter().map(|s| s.value).sum()
+    pub fn total_bytes_in(&self) -> u64 {
+        self.s3_stats
+            .as_ref()
+            .map(|s| s.bytes_in.load(Ordering::Relaxed))
+            .unwrap_or(0)
     }
 
-    pub fn bytes_out_5m(&self) -> f64 {
-        self.network_bytes_out.samples.iter().map(|s| s.value).sum()
-    }
-
-    pub fn fps_history(&self, points: usize) -> Vec<f64> {
-        self.fps.recent_values(points)
+    pub fn total_bytes_out(&self) -> u64 {
+        self.s3_stats
+            .as_ref()
+            .map(|s| s.bytes_out.load(Ordering::Relaxed))
+            .unwrap_or(0)
     }
 }

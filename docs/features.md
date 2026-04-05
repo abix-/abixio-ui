@@ -24,7 +24,7 @@ MinIO.
 | Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
 | Bulk delete and batch object workflows | Multi-select bulk delete, recursive prefix delete, S3 DeleteObjects batch API (1000 keys/call) | Recursive `mc rm`, batch-oriented workflows | 7/10 | Partial | Multi-select bulk delete and recursive prefix delete with confirmation modals. Uses S3 DeleteObjects API. No time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
-| Tags | Not implemented | `mc tag` | 0/10 | None | No bucket-tag or object-tag UI. |
+| Tags | Object tags in detail panel (view, add, remove) | `mc tag` | 7/10 | Partial | Object tags supported via S3 tagging API. No bucket tags UI yet. No recursive tag set. |
 | Bucket policy and anonymous access | Not implemented | `mc anonymous` | 0/10 | None | No bucket policy or public-access management UI. |
 | CLI, scripting, and automation | GUI only, plus in-app smoke tests and auto-run test mode | Full CLI, JSON and quiet modes, shell automation | 1/10 | None | `abixio-ui` is still a desktop app, not an operations CLI. |
 | Retention and legal hold | Not implemented | `mc retention`, `mc legalhold` | 0/10 | None | Governance and compliance controls are absent. |
@@ -72,9 +72,9 @@ MinIO.
 | Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
 | Gaps | Versioning and recovery | No | 0/10 | No version browser, restore, or undo flow. |
-| Gaps | Bulk object operations | Partial | 6/10 | Multi-select bulk delete with S3 DeleteObjects batch API. No recursive prefix delete UI or time/size filtering yet. |
+| Gaps | Bulk object operations | Partial | 7/10 | Multi-select bulk delete and recursive prefix delete with S3 DeleteObjects batch API. No time/size filtering yet. |
 | Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
-| Gaps | Tags | No | 0/10 | No bucket-tag or object-tag UI. |
+| Gaps | Tags | Partial | 7/10 | Object tags in detail panel (view, add, remove). No bucket tags UI yet. |
 | Gaps | Policy and anonymous access | No | 0/10 | No bucket policy or public access controls. |
 | Gaps | CLI or automation surface | No | 1/10 | This is still a desktop app, not a scriptable CLI. |
 | Gaps | Retention and legal hold | No | 0/10 | No governance UI yet. |
@@ -89,9 +89,9 @@ MinIO.
 - Presigned sharing links.
 - Recursive sync, mirror, and diff workflows.
 - Versioning, undo, and recovery tooling.
-- Bulk object operations: recursive prefix delete UI, time/size filters.
+- Bulk object operations: time/size filters.
 - SQL and object query tools, plus inline object-content inspection.
-- Bucket and object tags.
+- Bucket tags (object tags are implemented).
 - Bucket policy and anonymous-access management.
 - CLI and scriptable automation surface.
 - Retention and legal-hold controls.
@@ -121,9 +121,9 @@ Migrated to `aws-sdk-s3` to eliminate all API blockers.
 | DeleteObject | yes | `delete_object` | yes | |
 | DeleteObjects (batch) | yes (1000/req) | `delete_objects` | yes | 1000 keys/call, returns failed keys |
 | CopyObject | yes | `copy_object` | yes | same-bucket and cross-bucket server-side copy |
-| GetObjectTagging | yes | `get_object_tagging` | no | available, not yet wired |
-| PutObjectTagging | yes | `put_object_tagging` | no | available, not yet wired |
-| DeleteObjectTagging | yes | `delete_object_tagging` | no | available, not yet wired |
+| GetObjectTagging | yes | `get_object_tagging` | yes | wired to detail panel |
+| PutObjectTagging | yes | `put_object_tagging` | yes | add tag from detail panel |
+| DeleteObjectTagging | yes | `delete_object_tagging` | yes | remove tag from detail panel |
 | GetBucketLifecycle | yes | `get_bucket_lifecycle` | no | available, not yet wired |
 | PutBucketLifecycle | yes | `put_bucket_lifecycle` | no | available, not yet wired |
 | DeleteBucketLifecycle | yes | `delete_bucket_lifecycle` | no | available, not yet wired |

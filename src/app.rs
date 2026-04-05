@@ -141,6 +141,14 @@ pub enum Message {
     ConfirmPrefixDelete,
     PrefixDeleteBatchFinished(Result<usize, String>),
 
+    // tags
+    TagsLoaded(Result<std::collections::HashMap<String, String>, String>),
+    TagKeyChanged(String),
+    TagValueChanged(String),
+    AddTag,
+    RemoveTag(String),
+    TagsSaved(Result<(), String>),
+
     // testing
     RunTests,
     TestsComplete(Vec<TestResult>),
@@ -338,6 +346,12 @@ pub struct App {
     pub find_results: Option<Result<ListObjectsResult, String>>,
     pub finding: bool,
 
+    // tags
+    pub object_tags: Option<Result<std::collections::HashMap<String, String>, String>>,
+    pub loading_tags: bool,
+    pub editing_tag_key: String,
+    pub editing_tag_value: String,
+
     // multi-select / bulk delete
     pub selected_keys: HashSet<String>,
     pub bulk_delete: Option<BulkDeleteState>,
@@ -438,6 +452,10 @@ impl App {
             object_filter: String::new(),
             find_results: None,
             finding: false,
+            object_tags: None,
+            loading_tags: false,
+            editing_tag_key: String::new(),
+            editing_tag_value: String::new(),
             selected_keys: HashSet::new(),
             bulk_delete: None,
             prefix_delete: None,
@@ -535,15 +553,21 @@ impl App {
                     key: key.clone(),
                 };
                 self.loading_detail = true;
+                self.loading_tags = true;
+                self.object_tags = None;
                 if self.is_abixio && self.admin_client.is_some() {
                     self.loading_object_inspect = true;
                     self.object_inspect_target = Some((bucket.clone(), key.clone()));
                     Task::batch(vec![
                         self.cmd_fetch_detail(&bucket, &key),
                         self.cmd_fetch_object_inspect(&bucket, &key),
+                        self.cmd_fetch_tags(&bucket, &key),
                     ])
                 } else {
-                    self.cmd_fetch_detail(&bucket, &key)
+                    Task::batch(vec![
+                        self.cmd_fetch_detail(&bucket, &key),
+                        self.cmd_fetch_tags(&bucket, &key),
+                    ])
                 }
             }
             Message::ClearSelection => {
@@ -1719,6 +1743,98 @@ impl App {
                 }
             }
 
+            // -- tags --
+            Message::TagsLoaded(r) => {
+                self.loading_tags = false;
+                self.object_tags = Some(r);
+                Task::none()
+            }
+            Message::TagKeyChanged(s) => {
+                self.editing_tag_key = s;
+                Task::none()
+            }
+            Message::TagValueChanged(s) => {
+                self.editing_tag_value = s;
+                Task::none()
+            }
+            Message::AddTag => {
+                let key = self.editing_tag_key.trim().to_string();
+                let value = self.editing_tag_value.trim().to_string();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                // build the new tag set
+                let mut tags = match &self.object_tags {
+                    Some(Ok(t)) => t.clone(),
+                    _ => std::collections::HashMap::new(),
+                };
+                if tags.len() >= 10 && !tags.contains_key(&key) {
+                    self.error = Some("max 10 tags per object".to_string());
+                    return Task::none();
+                }
+                tags.insert(key, value);
+                self.editing_tag_key.clear();
+                self.editing_tag_value.clear();
+                self.loading_tags = true;
+                if let Selection::Object { bucket, key } = &self.selection {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    let key = key.clone();
+                    Task::perform(
+                        async move {
+                            client.put_object_tags(&bucket, &key, tags).await
+                        },
+                        Message::TagsSaved,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::RemoveTag(tag_key) => {
+                let mut tags = match &self.object_tags {
+                    Some(Ok(t)) => t.clone(),
+                    _ => std::collections::HashMap::new(),
+                };
+                tags.remove(&tag_key);
+                self.loading_tags = true;
+                if let Selection::Object { bucket, key } = &self.selection {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    let key = key.clone();
+                    if tags.is_empty() {
+                        Task::perform(
+                            async move {
+                                client.delete_object_tags(&bucket, &key).await
+                            },
+                            Message::TagsSaved,
+                        )
+                    } else {
+                        Task::perform(
+                            async move {
+                                client.put_object_tags(&bucket, &key, tags).await
+                            },
+                            Message::TagsSaved,
+                        )
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            Message::TagsSaved(Ok(())) => {
+                // reload tags
+                if let Selection::Object { bucket, key } = &self.selection {
+                    self.cmd_fetch_tags(bucket, key)
+                } else {
+                    self.loading_tags = false;
+                    Task::none()
+                }
+            }
+            Message::TagsSaved(Err(e)) => {
+                self.loading_tags = false;
+                self.error = Some(format!("tag save failed: {}", e));
+                Task::none()
+            }
+
             // -- testing --
             Message::RunTests => self.begin_tests(),
             Message::TestsComplete(results) => {
@@ -1894,6 +2010,16 @@ impl App {
         )
     }
 
+    fn cmd_fetch_tags(&self, bucket: &str, key: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        Task::perform(
+            async move { client.get_object_tags(&bucket, &key).await },
+            Message::TagsLoaded,
+        )
+    }
+
     fn cmd_fetch_object_inspect(&self, bucket: &str, key: &str) -> Task<Message> {
         let admin = self.admin_client.clone();
         let bucket = bucket.to_string();
@@ -1983,6 +2109,10 @@ impl App {
         self.healing_object = false;
         self.healing_target = None;
         self.heal_result = None;
+        self.object_tags = None;
+        self.loading_tags = false;
+        self.editing_tag_key.clear();
+        self.editing_tag_value.clear();
     }
 
     fn begin_tests(&mut self) -> Task<Message> {

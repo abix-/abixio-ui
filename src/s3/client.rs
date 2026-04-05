@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use aws_credential_types::Credentials;
@@ -5,7 +6,7 @@ use aws_credential_types::credential_fn::provide_credentials_fn;
 use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_s3::config::{AppName, BehaviorVersion, Builder, Region, timeout::TimeoutConfig};
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+use aws_sdk_s3::types::{Delete, ObjectIdentifier, Tag, Tagging};
 use aws_sdk_s3::Client;
 
 #[derive(Clone)]
@@ -378,6 +379,72 @@ impl S3Client {
         }
 
         Ok(failed)
+    }
+
+    pub async fn get_object_tags(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<HashMap<String, String>, String> {
+        let resp = self
+            .client
+            .get_object_tagging()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut tags = HashMap::new();
+        for tag in resp.tag_set() {
+            tags.insert(
+                tag.key().to_string(),
+                tag.value().to_string(),
+            );
+        }
+        Ok(tags)
+    }
+
+    pub async fn put_object_tags(
+        &self,
+        bucket: &str,
+        key: &str,
+        tags: HashMap<String, String>,
+    ) -> Result<(), String> {
+        let tag_set: Vec<Tag> = tags
+            .into_iter()
+            .map(|(k, v)| Tag::builder().key(k).value(v).build().expect("tag fields set"))
+            .collect();
+
+        let tagging = Tagging::builder()
+            .set_tag_set(Some(tag_set))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        self.client
+            .put_object_tagging()
+            .bucket(bucket)
+            .key(key)
+            .tagging(tagging)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_object_tags(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<(), String> {
+        self.client
+            .delete_object_tagging()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 

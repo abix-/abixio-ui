@@ -612,6 +612,55 @@ pub async fn run_e2e_tests(
         t.check("admin tests skipped (not abixio)", true, "");
     }
 
+    // --- Object Tagging ---
+
+    // get tags on fresh object (should be empty)
+    let r = client.get_object_tags(&bucket, "hello.txt").await;
+    match &r {
+        Ok(tags) => t.check("get tags empty", tags.is_empty(), &format!("{:?}", tags)),
+        Err(e) => t.check("get tags empty", false, e),
+    }
+
+    // set tags
+    let mut tags = std::collections::HashMap::new();
+    tags.insert("env".to_string(), "test".to_string());
+    tags.insert("owner".to_string(), "e2e".to_string());
+    let r = client.put_object_tags(&bucket, "hello.txt", tags).await;
+    t.check("put tags", r.is_ok(), &r.err().unwrap_or_default());
+
+    // get tags back
+    let r = client.get_object_tags(&bucket, "hello.txt").await;
+    match &r {
+        Ok(tags) => {
+            t.check("get tags count", tags.len() == 2, &format!("{}", tags.len()));
+            t.check(
+                "get tags env",
+                tags.get("env").map(|v| v.as_str()) == Some("test"),
+                &format!("{:?}", tags.get("env")),
+            );
+        }
+        Err(e) => t.check("get tags after put", false, e),
+    }
+
+    // delete tags
+    let r = client.delete_object_tags(&bucket, "hello.txt").await;
+    t.check(
+        "delete tags",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+
+    // verify tags are gone
+    let r = client.get_object_tags(&bucket, "hello.txt").await;
+    match &r {
+        Ok(tags) => t.check(
+            "tags deleted",
+            tags.is_empty(),
+            &format!("{:?}", tags),
+        ),
+        Err(e) => t.check("get tags after delete", false, e),
+    }
+
     // --- Cleanup ---
     // delete all test objects, then the bucket
     if let Ok(list) = client.list_objects(&bucket, "", "").await {

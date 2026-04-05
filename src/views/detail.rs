@@ -60,6 +60,55 @@ impl App {
                         col = col.push(meta_row(name, value));
                     }
 
+                    col = col.push(section("Tags"));
+                    if self.loading_tags {
+                        col = col.push(text("Loading...").size(11));
+                    } else if let Some(Ok(tags)) = &self.object_tags {
+                        if tags.is_empty() {
+                            col = col.push(text("No tags").size(10));
+                        } else {
+                            let mut sorted_keys: Vec<&String> = tags.keys().collect();
+                            sorted_keys.sort();
+                            for tag_key in sorted_keys {
+                                let tag_value = &tags[tag_key];
+                                let k = tag_key.clone();
+                                col = col.push(
+                                    row![
+                                        text(tag_key).size(10).width(Length::FillPortion(2)),
+                                        text(tag_value).size(10).width(Length::FillPortion(2)),
+                                        button(text("x").size(9))
+                                            .on_press(Message::RemoveTag(k))
+                                            .style(button::text),
+                                    ]
+                                    .spacing(4),
+                                );
+                            }
+                        }
+                        if tags.len() < 10 {
+                            col = col.push(
+                                row![
+                                    iced::widget::text_input("key", &self.editing_tag_key)
+                                        .on_input(Message::TagKeyChanged)
+                                        .size(10)
+                                        .width(Length::FillPortion(2)),
+                                    iced::widget::text_input("value", &self.editing_tag_value)
+                                        .on_input(Message::TagValueChanged)
+                                        .size(10)
+                                        .width(Length::FillPortion(2)),
+                                    if self.editing_tag_key.trim().is_empty() {
+                                        button(text("Add").size(9))
+                                    } else {
+                                        button(text("Add").size(9))
+                                            .on_press(Message::AddTag)
+                                    },
+                                ]
+                                .spacing(4),
+                            );
+                        }
+                    } else if let Some(Err(e)) = &self.object_tags {
+                        col = col.push(text(format!("Tags error: {}", e)).size(10));
+                    }
+
                     col = col.push(section("Actions"));
                     col = col.push(
                         row![

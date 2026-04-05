@@ -161,3 +161,76 @@ impl PerfStats {
             .unwrap_or(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_starts_at_zero() {
+        let stats = PerfStats::new();
+        assert_eq!(stats.total_frames(), 0);
+        assert_eq!(stats.current_fps(), 0.0);
+        assert_eq!(stats.avg_fps(), 0.0);
+        assert_eq!(stats.current_frame_ms(), 0.0);
+        assert_eq!(stats.repaints_5m(), 0);
+    }
+
+    #[test]
+    fn network_zero_without_s3_stats() {
+        let stats = PerfStats::new();
+        assert_eq!(stats.total_requests(), 0);
+        assert_eq!(stats.total_bytes_in(), 0);
+        assert_eq!(stats.total_bytes_out(), 0);
+    }
+
+    #[test]
+    fn network_reads_from_s3_stats() {
+        let mut stats = PerfStats::new();
+        let s3 = Arc::new(S3Stats::default());
+        stats.set_s3_stats(s3.clone());
+
+        s3.requests.fetch_add(10, Ordering::Relaxed);
+        s3.bytes_in.fetch_add(5000, Ordering::Relaxed);
+        s3.bytes_out.fetch_add(200, Ordering::Relaxed);
+
+        assert_eq!(stats.total_requests(), 10);
+        assert_eq!(stats.total_bytes_in(), 5000);
+        assert_eq!(stats.total_bytes_out(), 200);
+    }
+
+    #[test]
+    fn record_frame_increments() {
+        let mut stats = PerfStats::new();
+        stats.record_frame();
+        stats.record_frame();
+        stats.record_frame();
+        assert_eq!(stats.total_frames(), 3);
+        assert_eq!(stats.repaints_5m(), 3);
+    }
+
+    #[test]
+    fn frame_time_positive_after_record() {
+        let mut stats = PerfStats::new();
+        stats.record_frame();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        stats.record_frame();
+        assert!(stats.current_frame_ms() > 0.0);
+    }
+
+    #[test]
+    fn set_s3_stats_replaces_previous() {
+        let mut stats = PerfStats::new();
+        let s3a = Arc::new(S3Stats::default());
+        let s3b = Arc::new(S3Stats::default());
+
+        stats.set_s3_stats(s3a.clone());
+        s3a.requests.fetch_add(5, Ordering::Relaxed);
+        assert_eq!(stats.total_requests(), 5);
+
+        stats.set_s3_stats(s3b.clone());
+        assert_eq!(stats.total_requests(), 0);
+        s3b.requests.fetch_add(3, Ordering::Relaxed);
+        assert_eq!(stats.total_requests(), 3);
+    }
+}

@@ -52,3 +52,74 @@ pub fn delete_keys(cred_name: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_cred_name() -> String {
+        format!(
+            "__test_abixio_ui_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        )
+    }
+
+    #[test]
+    fn get_nonexistent_returns_none() {
+        let name = test_cred_name();
+        let result = get_keys(&name).unwrap();
+        assert!(result.is_none());
+    }
+
+    // keychain store/get tests require an interactive desktop session.
+    // on CI or headless environments, the keyring crate may silently
+    // fail to persist credentials. these tests are ignored by default
+    // and can be run with `cargo test -- --ignored`.
+
+    #[test]
+    #[ignore]
+    fn store_and_get_round_trip() {
+        let name = test_cred_name();
+        store_keys(&name, "AKID_TEST", "SECRET_TEST_12345678").unwrap();
+        let keys = get_keys(&name).unwrap();
+        assert_eq!(keys, Some(("AKID_TEST".to_string(), "SECRET_TEST_12345678".to_string())));
+        delete_keys(&name).unwrap();
+    }
+
+    #[test]
+    fn delete_nonexistent_is_ok() {
+        let name = test_cred_name();
+        let result = delete_keys(&name);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[ignore]
+    fn delete_removes_keys() {
+        let name = test_cred_name();
+        store_keys(&name, "AKID_DEL", "SECRET_DEL_12345678").unwrap();
+        delete_keys(&name).unwrap();
+        let keys = get_keys(&name).unwrap();
+        assert!(keys.is_none());
+    }
+
+    #[test]
+    #[ignore]
+    fn overwrite_existing_keys() {
+        let name = test_cred_name();
+        store_keys(&name, "OLD_AK", "OLD_SECRET_12345678").unwrap();
+        store_keys(&name, "NEW_AK", "NEW_SECRET_12345678").unwrap();
+        let keys = get_keys(&name).unwrap();
+        assert_eq!(keys, Some(("NEW_AK".to_string(), "NEW_SECRET_12345678".to_string())));
+        delete_keys(&name).unwrap();
+    }
+
+    #[test]
+    fn label_format() {
+        assert_eq!(access_key_label("myconn"), "myconn.access-key");
+        assert_eq!(secret_key_label("myconn"), "myconn.secret-key");
+    }
+}

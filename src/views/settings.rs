@@ -106,3 +106,63 @@ impl App {
         .into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::format_bytes;
+
+    #[test]
+    fn format_bytes_zero() {
+        assert_eq!(format_bytes(0), "0 B");
+    }
+
+    #[test]
+    fn format_bytes_small() {
+        assert_eq!(format_bytes(512), "512 B");
+    }
+
+    #[test]
+    fn format_bytes_one_byte() {
+        assert_eq!(format_bytes(1), "1 B");
+    }
+
+    #[test]
+    fn format_bytes_just_under_1kb() {
+        assert_eq!(format_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_bytes_exactly_1kb() {
+        assert_eq!(format_bytes(1024), "1.0 KB");
+    }
+
+    #[test]
+    fn format_bytes_1_5kb() {
+        assert_eq!(format_bytes(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn format_bytes_just_under_1mb() {
+        assert_eq!(format_bytes(1024 * 1024 - 1), "1024.0 KB");
+    }
+
+    #[test]
+    fn format_bytes_exactly_1mb() {
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn format_bytes_2mb() {
+        assert_eq!(format_bytes(2 * 1024 * 1024), "2.0 MB");
+    }
+
+    #[test]
+    fn format_bytes_exactly_1gb() {
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GB");
+    }
+
+    #[test]
+    fn format_bytes_3gb() {
+        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.00 GB");
+    }
+}

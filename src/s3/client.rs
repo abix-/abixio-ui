@@ -850,3 +850,143 @@ pub struct ListObjectsResult {
     pub common_prefixes: Vec<String>,
     pub is_truncated: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- S3Stats --
+
+    #[test]
+    fn s3_stats_default_is_zero() {
+        let stats = S3Stats::default();
+        assert_eq!(stats.requests.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.bytes_in.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.bytes_out.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn s3_stats_increments() {
+        let stats = S3Stats::default();
+        stats.requests.fetch_add(5, Ordering::Relaxed);
+        stats.bytes_in.fetch_add(1000, Ordering::Relaxed);
+        stats.bytes_out.fetch_add(200, Ordering::Relaxed);
+        assert_eq!(stats.requests.load(Ordering::Relaxed), 5);
+        assert_eq!(stats.bytes_in.load(Ordering::Relaxed), 1000);
+        assert_eq!(stats.bytes_out.load(Ordering::Relaxed), 200);
+    }
+
+    #[test]
+    fn s3_stats_shared_via_arc() {
+        let stats = Arc::new(S3Stats::default());
+        let clone = stats.clone();
+        clone.requests.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(stats.requests.load(Ordering::Relaxed), 1);
+    }
+
+    // -- S3Client constructors --
+
+    #[test]
+    fn new_client_with_creds() {
+        let client = S3Client::new(
+            "http://localhost:10000",
+            Some(("AKID", "secret12")),
+            "us-east-1",
+        );
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn new_client_anonymous() {
+        let client = S3Client::anonymous("http://localhost:10000");
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn new_client_strips_trailing_slash() {
+        let client = S3Client::new("http://localhost:10000/", None, "us-east-1").unwrap();
+        // can't inspect endpoint directly, but construction should succeed
+        assert_eq!(client.stats().requests.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn new_client_https() {
+        let client = S3Client::new(
+            "https://s3.us-west-2.amazonaws.com",
+            Some(("AKID", "secret12")),
+            "us-west-2",
+        );
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn stats_shared_between_clones() {
+        let client = S3Client::anonymous("http://localhost:10000").unwrap();
+        let clone = client.clone();
+        client.record_request();
+        assert_eq!(clone.stats().requests.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn stats_track_bytes() {
+        let client = S3Client::anonymous("http://localhost:10000").unwrap();
+        client.record_bytes_out(500);
+        client.record_bytes_in(3000);
+        assert_eq!(client.stats().bytes_out.load(Ordering::Relaxed), 500);
+        assert_eq!(client.stats().bytes_in.load(Ordering::Relaxed), 3000);
+    }
+
+    // -- data types --
+
+    #[test]
+    fn object_info_clone() {
+        let info = ObjectInfo {
+            key: "test.txt".to_string(),
+            size: 100,
+            last_modified: "2025-01-01".to_string(),
+            etag: "abc".to_string(),
+        };
+        let clone = info.clone();
+        assert_eq!(info, clone);
+    }
+
+    #[test]
+    fn version_info_delete_marker() {
+        let v = VersionInfo {
+            key: "test.txt".to_string(),
+            version_id: "v1".to_string(),
+            is_latest: false,
+            is_delete_marker: true,
+            size: 0,
+            last_modified: "2025-01-01".to_string(),
+            etag: String::new(),
+        };
+        assert!(v.is_delete_marker);
+        assert!(!v.is_latest);
+    }
+
+    #[test]
+    fn object_detail_headers() {
+        let detail = ObjectDetail {
+            key: "test.txt".to_string(),
+            size: 42,
+            content_type: "text/plain".to_string(),
+            last_modified: String::new(),
+            etag: "abc".to_string(),
+            headers: vec![("content-type".to_string(), "text/plain".to_string())],
+        };
+        assert_eq!(detail.headers.len(), 1);
+        assert_eq!(detail.headers[0].0, "content-type");
+    }
+
+    #[test]
+    fn list_objects_result_empty() {
+        let result = ListObjectsResult {
+            objects: Vec::new(),
+            common_prefixes: Vec::new(),
+            is_truncated: false,
+        };
+        assert!(result.objects.is_empty());
+        assert!(!result.is_truncated);
+    }
+}

@@ -252,7 +252,7 @@ When a bucket is selected:
 5. **Lifecycle**: lifecycle rules display + delete
 6. **Actions**: Refresh, Delete Bucket
 
-See [s3-features.md](s3-features.md) for full details on each feature.
+See [s3.md](s3.md) for full details on each operation and UI feature.
 
 ## Testing tab
 

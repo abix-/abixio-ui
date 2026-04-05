@@ -40,10 +40,9 @@ cargo build --release
 
 | Doc | Subject |
 |---|---|
-| [s3-features.md](docs/s3-features.md) | How each S3 feature works in the UI |
+| [s3.md](docs/s3.md) | S3 SDK config, every operation, UI features, response handling |
 | [features.md](docs/features.md) | MinIO client parity tracking |
 | [architecture.md](docs/architecture.md) | App architecture, layout, async model |
-| [s3-client-audit.md](docs/s3-client-audit.md) | SDK configuration and response handling audit |
 | [credentials.md](docs/credentials.md) | OS keychain credential storage |
 | [testing.md](docs/testing.md) | Smoke test system |
 

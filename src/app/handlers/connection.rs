@@ -63,10 +63,7 @@ impl App {
 
                 Task::batch(vec![
                     self.cmd_fetch_buckets(),
-                    Task::perform(
-                        async move { admin.probe().await },
-                        Message::AbixioDetected,
-                    ),
+                    Task::perform(async move { admin.probe().await }, Message::AbixioDetected),
                 ])
             }
             Err(e) => {
@@ -89,8 +86,7 @@ impl App {
         }
         if !config::is_valid_name(&name) {
             self.error = Some(
-                "name must start with a letter, only alphanumeric/dash/underscore"
-                    .to_string(),
+                "name must start with a letter, only alphanumeric/dash/underscore".to_string(),
             );
             return Task::none();
         }
@@ -100,8 +96,7 @@ impl App {
         }
         // if one key is provided, both must be
         if access_key.is_empty() != secret_key.is_empty() {
-            self.error =
-                Some("provide both access key and secret key, or neither".to_string());
+            self.error = Some("provide both access key and secret key, or neither".to_string());
             return Task::none();
         }
         if !config::is_valid_access_key(&access_key) {
@@ -123,9 +118,7 @@ impl App {
             },
         };
 
-        if let Err(e) =
-            config::add_connection(&mut self.settings, conn, &access_key, &secret_key)
-        {
+        if let Err(e) = config::add_connection(&mut self.settings, conn, &access_key, &secret_key) {
             self.error = Some(format!("save failed: {}", e));
         } else {
             self.new_conn_name.clear();

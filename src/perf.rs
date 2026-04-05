@@ -77,6 +77,12 @@ pub struct PerfStats {
     s3_stats: Option<Arc<S3Stats>>,
 }
 
+impl Default for PerfStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerfStats {
     pub fn new() -> Self {
         let now = Instant::now();

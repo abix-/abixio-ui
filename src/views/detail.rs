@@ -201,8 +201,7 @@ impl App {
                                     if self.editing_tag_key.trim().is_empty() {
                                         button(text("Add").size(9))
                                     } else {
-                                        button(text("Add").size(9))
-                                            .on_press(Message::AddTag)
+                                        button(text("Add").size(9)).on_press(Message::AddTag)
                                     },
                                 ]
                                 .spacing(4),
@@ -216,10 +215,8 @@ impl App {
                     if self.loading_versions {
                         col = col.push(text("Loading...").size(11));
                     } else if let Some(Ok(versions)) = &self.object_versions {
-                        let obj_versions: Vec<_> = versions
-                            .iter()
-                            .filter(|v| v.key == *key)
-                            .collect();
+                        let obj_versions: Vec<_> =
+                            versions.iter().filter(|v| v.key == *key).collect();
                         if obj_versions.is_empty() {
                             col = col.push(text("No versions").size(10));
                         } else {
@@ -237,10 +234,9 @@ impl App {
                                 } else {
                                     format!("{} {}B", vid_short, v.size)
                                 };
-                                let mut ver_row = row![
-                                    text(label).size(10).width(Length::FillPortion(3)),
-                                ]
-                                .spacing(4);
+                                let mut ver_row =
+                                    row![text(label).size(10).width(Length::FillPortion(3)),]
+                                        .spacing(4);
                                 if !v.is_delete_marker && !v.is_latest {
                                     let vid_restore = vid.clone();
                                     ver_row = ver_row.push(
@@ -263,18 +259,19 @@ impl App {
                     }
 
                     // preview (first 4KB of text objects)
-                    if let Some(Ok(preview)) = &self.object_preview {
-                        if !preview.is_empty() {
-                            col = col.push(section("Preview"));
-                            col = col.push(
-                                text(if preview.len() > 500 {
-                                    format!("{}...", &preview[..500])
-                                } else {
-                                    preview.clone()
-                                })
-                                .size(9),
-                            );
-                        }
+                    // preview (first 4KB of text objects)
+                    if let Some(Ok(preview)) = &self.object_preview
+                        && !preview.is_empty()
+                    {
+                        col = col.push(section("Preview"));
+                        col = col.push(
+                            text(if preview.len() > 500 {
+                                format!("{}...", &preview[..500])
+                            } else {
+                                preview.clone()
+                            })
+                            .size(9),
+                        );
                     }
 
                     col = col.push(section("Actions"));
@@ -391,12 +388,14 @@ impl App {
             let is_selected = self.share_expiry_secs.to_string() == *secs;
             let secs_str = secs.to_string();
             body = body.push(
-                button(text(if is_selected {
-                    format!("> {}", label)
-                } else {
-                    label.to_string()
-                })
-                .size(10))
+                button(
+                    text(if is_selected {
+                        format!("> {}", label)
+                    } else {
+                        label.to_string()
+                    })
+                    .size(10),
+                )
                 .on_press(Message::ShareExpiryChanged(secs_str))
                 .style(if is_selected {
                     button::primary
@@ -406,9 +405,7 @@ impl App {
             );
         }
 
-        body = body.push(
-            button(text("Generate URL").size(11)).on_press(Message::GenerateShareUrl),
-        );
+        body = body.push(button(text("Generate URL").size(11)).on_press(Message::GenerateShareUrl));
 
         if let Some(url) = &self.share_url {
             body = body.push(
@@ -418,9 +415,7 @@ impl App {
             );
         }
 
-        body = body.push(
-            button(text("Close").size(11)).on_press(Message::CloseShareModal),
-        );
+        body = body.push(button(text("Close").size(11)).on_press(Message::CloseShareModal));
 
         modal_card(body, 420)
     }
@@ -578,9 +573,7 @@ impl App {
             body = body.push(text(format!("  {}", key)).size(10));
         }
         if state.keys.len() > 10 {
-            body = body.push(
-                text(format!("  and {} more...", state.keys.len() - 10)).size(10),
-            );
+            body = body.push(text(format!("  and {} more...", state.keys.len() - 10)).size(10));
         }
 
         if let Some(summary) = &state.summary {
@@ -626,9 +619,7 @@ impl App {
                 body = body.push(text(format!("  {}", key)).size(10));
             }
             if state.keys.len() > 10 {
-                body = body.push(
-                    text(format!("  and {} more...", state.keys.len() - 10)).size(10),
-                );
+                body = body.push(text(format!("  and {} more...", state.keys.len() - 10)).size(10));
             }
         }
 

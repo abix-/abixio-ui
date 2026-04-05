@@ -149,9 +149,7 @@ pub async fn run_transfer_step(
                         .await?;
                     // for move: delete source after confirmed copy
                     if is_move {
-                        source_client
-                            .delete_object(src_bucket, src_key)
-                            .await?;
+                        source_client.delete_object(src_bucket, src_key).await?;
                     }
                 }
                 TransferEndpoint::Local { path } => {

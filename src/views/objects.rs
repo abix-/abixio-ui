@@ -51,11 +51,7 @@ impl App {
             find_btn = find_btn.on_press(Message::Find);
         }
 
-        let mut actions = row![
-            filter_input,
-            find_btn,
-        ]
-        .spacing(4);
+        let mut actions = row![filter_input, find_btn,].spacing(4);
 
         // selection controls
         let sel_count = self.selected_keys.len();
@@ -64,15 +60,11 @@ impl App {
                 button(text(format!("Delete {} selected", sel_count)).size(11))
                     .on_press(Message::OpenBulkDeleteModal),
             );
-            actions = actions.push(
-                button(text("Clear sel").size(11))
-                    .on_press(Message::ClearObjectSelection),
-            );
+            actions = actions
+                .push(button(text("Clear sel").size(11)).on_press(Message::ClearObjectSelection));
         } else {
-            actions = actions.push(
-                button(text("Select All").size(11))
-                    .on_press(Message::SelectAllObjects),
-            );
+            actions = actions
+                .push(button(text("Select All").size(11)).on_press(Message::SelectAllObjects));
         }
 
         actions = actions

@@ -303,9 +303,7 @@ impl App {
                     .key
                     .strip_prefix(&self.current_prefix)
                     .unwrap_or(&obj.key);
-                if filter.is_empty()
-                    || display.to_ascii_lowercase().contains(&filter)
-                {
+                if filter.is_empty() || display.to_ascii_lowercase().contains(&filter) {
                     self.selected_keys.insert(obj.key.clone());
                 }
             }

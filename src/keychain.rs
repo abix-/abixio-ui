@@ -85,7 +85,10 @@ mod tests {
         let name = test_cred_name();
         store_keys(&name, "AKID_TEST", "SECRET_TEST_12345678").unwrap();
         let keys = get_keys(&name).unwrap();
-        assert_eq!(keys, Some(("AKID_TEST".to_string(), "SECRET_TEST_12345678".to_string())));
+        assert_eq!(
+            keys,
+            Some(("AKID_TEST".to_string(), "SECRET_TEST_12345678".to_string()))
+        );
         delete_keys(&name).unwrap();
     }
 
@@ -113,7 +116,10 @@ mod tests {
         store_keys(&name, "OLD_AK", "OLD_SECRET_12345678").unwrap();
         store_keys(&name, "NEW_AK", "NEW_SECRET_12345678").unwrap();
         let keys = get_keys(&name).unwrap();
-        assert_eq!(keys, Some(("NEW_AK".to_string(), "NEW_SECRET_12345678".to_string())));
+        assert_eq!(
+            keys,
+            Some(("NEW_AK".to_string(), "NEW_SECRET_12345678".to_string()))
+        );
         delete_keys(&name).unwrap();
     }
 

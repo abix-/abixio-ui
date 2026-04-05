@@ -1,7 +1,7 @@
 //! Guard test: ensures no request_repaint() calls exist in the UI render path.
 //!
-//! The ONLY place request_repaint() should be called is inside async_op.rs,
-//! where the background task wakes the UI after completing a network request.
+//! No request_repaint() calls should exist in the UI render path.
+//! Background tasks handle waking the UI after completing network requests.
 //!
 //! If this test fails, someone added a repaint call in the UI path, which
 //! would cause continuous rendering and burn CPU while idle.

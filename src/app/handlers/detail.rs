@@ -89,10 +89,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_bucket_policy_deleted(
-        &mut self,
-        r: Result<(), String>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_bucket_policy_deleted(&mut self, r: Result<(), String>) -> Task<Message> {
         if let Err(e) = r {
             self.error = Some(format!("delete policy failed: {}", e));
         }
@@ -202,10 +199,7 @@ impl App {
 
     // -- object preview --
 
-    pub(crate) fn handle_preview_loaded(
-        &mut self,
-        r: Result<String, String>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_preview_loaded(&mut self, r: Result<String, String>) -> Task<Message> {
         self.object_preview = Some(r);
         Task::none()
     }
@@ -329,10 +323,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_version_restored(
-        &mut self,
-        r: Result<String, String>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_version_restored(&mut self, r: Result<String, String>) -> Task<Message> {
         match r {
             Ok(_) => {
                 if let Selection::Object { bucket, key } = &self.selection {
@@ -397,9 +388,7 @@ impl App {
             let bucket = bucket.clone();
             let key = key.clone();
             Task::perform(
-                async move {
-                    client.put_object_tags(&bucket, &key, tags).await
-                },
+                async move { client.put_object_tags(&bucket, &key, tags).await },
                 Message::TagsSaved,
             )
         } else {
@@ -420,16 +409,12 @@ impl App {
             let key = key.clone();
             if tags.is_empty() {
                 Task::perform(
-                    async move {
-                        client.delete_object_tags(&bucket, &key).await
-                    },
+                    async move { client.delete_object_tags(&bucket, &key).await },
                     Message::TagsSaved,
                 )
             } else {
                 Task::perform(
-                    async move {
-                        client.put_object_tags(&bucket, &key, tags).await
-                    },
+                    async move { client.put_object_tags(&bucket, &key, tags).await },
                     Message::TagsSaved,
                 )
             }

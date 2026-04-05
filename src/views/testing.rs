@@ -632,7 +632,11 @@ pub async fn run_e2e_tests(
     let r = client.get_object_tags(&bucket, "hello.txt").await;
     match &r {
         Ok(tags) => {
-            t.check("get tags count", tags.len() == 2, &format!("{}", tags.len()));
+            t.check(
+                "get tags count",
+                tags.len() == 2,
+                &format!("{}", tags.len()),
+            );
             t.check(
                 "get tags env",
                 tags.get("env").map(|v| v.as_str()) == Some("test"),
@@ -644,20 +648,12 @@ pub async fn run_e2e_tests(
 
     // delete tags
     let r = client.delete_object_tags(&bucket, "hello.txt").await;
-    t.check(
-        "delete tags",
-        r.is_ok(),
-        &r.err().unwrap_or_default(),
-    );
+    t.check("delete tags", r.is_ok(), &r.err().unwrap_or_default());
 
     // verify tags are gone
     let r = client.get_object_tags(&bucket, "hello.txt").await;
     match &r {
-        Ok(tags) => t.check(
-            "tags deleted",
-            tags.is_empty(),
-            &format!("{:?}", tags),
-        ),
+        Ok(tags) => t.check("tags deleted", tags.is_empty(), &format!("{:?}", tags)),
         Err(e) => t.check("get tags after delete", false, e),
     }
 
@@ -665,11 +661,7 @@ pub async fn run_e2e_tests(
 
     // enable versioning
     let r = client.put_bucket_versioning(&bucket, "Enabled").await;
-    t.check(
-        "enable versioning",
-        r.is_ok(),
-        &r.err().unwrap_or_default(),
-    );
+    t.check("enable versioning", r.is_ok(), &r.err().unwrap_or_default());
 
     // check versioning status
     let r = client.get_bucket_versioning(&bucket).await;

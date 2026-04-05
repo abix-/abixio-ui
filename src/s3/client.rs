@@ -7,13 +7,13 @@ use std::time::Duration;
 use aws_credential_types::Credentials;
 use aws_credential_types::credential_fn::provide_credentials_fn;
 use aws_credential_types::provider::error::CredentialsError;
+use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{AppName, BehaviorVersion, Builder, Region, timeout::TimeoutConfig};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
-    BucketVersioningStatus, CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier,
-    Tag, Tagging, VersioningConfiguration,
+    BucketVersioningStatus, CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier, Tag,
+    Tagging, VersioningConfiguration,
 };
-use aws_sdk_s3::Client;
 
 const MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024; // 8MB
 const MULTIPART_PART_SIZE: usize = 8 * 1024 * 1024; // 8MB
@@ -54,9 +54,9 @@ impl S3Client {
             .app_name(AppName::new("abixio-ui").expect("valid app name"));
 
         builder = match creds {
-            Some((access_key, secret_key)) => builder.credentials_provider(
-                Credentials::new(access_key, secret_key, None, None, "static"),
-            ),
+            Some((access_key, secret_key)) => builder.credentials_provider(Credentials::new(
+                access_key, secret_key, None, None, "static",
+            )),
             None => builder
                 .credentials_provider(provide_credentials_fn(|| async {
                     Err(CredentialsError::not_loaded("anonymous"))
@@ -123,11 +123,7 @@ impl S3Client {
         let mut continuation_token: Option<String> = None;
 
         loop {
-            let mut req = self
-                .client
-                .list_objects_v2()
-                .bucket(bucket)
-                .prefix(prefix);
+            let mut req = self.client.list_objects_v2().bucket(bucket).prefix(prefix);
 
             if !delimiter.is_empty() {
                 req = req.delimiter(delimiter);
@@ -230,9 +226,7 @@ impl S3Client {
         path: &Path,
         content_type: &str,
     ) -> Result<String, String> {
-        let meta = tokio::fs::metadata(path)
-            .await
-            .map_err(|e| e.to_string())?;
+        let meta = tokio::fs::metadata(path).await.map_err(|e| e.to_string())?;
         let size = meta.len();
 
         if size <= MULTIPART_THRESHOLD {
@@ -241,10 +235,13 @@ impl S3Client {
         }
 
         // multipart upload
-        let upload_id = self.create_multipart_upload(bucket, key, content_type).await?;
+        let upload_id = self
+            .create_multipart_upload(bucket, key, content_type)
+            .await?;
         match self.upload_parts(bucket, key, &upload_id, path, size).await {
             Ok(parts) => {
-                self.complete_multipart_upload(bucket, key, &upload_id, parts).await?;
+                self.complete_multipart_upload(bucket, key, &upload_id, parts)
+                    .await?;
                 Ok(String::new())
             }
             Err(e) => {
@@ -492,11 +489,7 @@ impl S3Client {
         let mut continuation_token: Option<String> = None;
 
         loop {
-            let mut req = self
-                .client
-                .list_objects_v2()
-                .bucket(bucket)
-                .prefix(prefix);
+            let mut req = self.client.list_objects_v2().bucket(bucket).prefix(prefix);
 
             if let Some(token) = &continuation_token {
                 req = req.continuation_token(token);
@@ -608,10 +601,7 @@ impl S3Client {
 
         let mut tags = HashMap::new();
         for tag in resp.tag_set() {
-            tags.insert(
-                tag.key().to_string(),
-                tag.value().to_string(),
-            );
+            tags.insert(tag.key().to_string(), tag.value().to_string());
         }
         Ok(tags)
     }
@@ -624,7 +614,13 @@ impl S3Client {
     ) -> Result<(), String> {
         let tag_set: Vec<Tag> = tags
             .into_iter()
-            .map(|(k, v)| Tag::builder().key(k).value(v).build().expect("tag fields set"))
+            .map(|(k, v)| {
+                Tag::builder()
+                    .key(k)
+                    .value(v)
+                    .build()
+                    .expect("tag fields set")
+            })
             .collect();
 
         let tagging = Tagging::builder()
@@ -644,11 +640,7 @@ impl S3Client {
         Ok(())
     }
 
-    pub async fn delete_object_tags(
-        &self,
-        bucket: &str,
-        key: &str,
-    ) -> Result<(), String> {
+    pub async fn delete_object_tags(&self, bucket: &str, key: &str) -> Result<(), String> {
         self.client
             .delete_object_tagging()
             .bucket(bucket)
@@ -678,11 +670,7 @@ impl S3Client {
             .unwrap_or_default())
     }
 
-    pub async fn put_bucket_versioning(
-        &self,
-        bucket: &str,
-        status: &str,
-    ) -> Result<(), String> {
+    pub async fn put_bucket_versioning(&self, bucket: &str, status: &str) -> Result<(), String> {
         let vs = match status {
             "Enabled" => BucketVersioningStatus::Enabled,
             "Suspended" => BucketVersioningStatus::Suspended,
@@ -723,10 +711,7 @@ impl S3Client {
                 is_latest: v.is_latest().unwrap_or(false),
                 is_delete_marker: false,
                 size: v.size().unwrap_or(0) as u64,
-                last_modified: v
-                    .last_modified()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default(),
+                last_modified: v.last_modified().map(|t| t.to_string()).unwrap_or_default(),
                 etag: v.e_tag().unwrap_or_default().to_string(),
             });
         }
@@ -837,11 +822,7 @@ impl S3Client {
         Ok(resp.policy().unwrap_or("").to_string())
     }
 
-    pub async fn put_bucket_policy(
-        &self,
-        bucket: &str,
-        policy_json: &str,
-    ) -> Result<(), String> {
+    pub async fn put_bucket_policy(&self, bucket: &str, policy_json: &str) -> Result<(), String> {
         self.client
             .put_bucket_policy()
             .bucket(bucket)
@@ -885,15 +866,15 @@ impl S3Client {
                 rule.id().unwrap_or(""),
                 rule.status()
             ));
-            if let Some(exp) = rule.expiration() {
-                if let Some(days) = exp.days() {
-                    result.push_str(&format!("  Expiration: {} days\n", days));
-                }
+            if let Some(exp) = rule.expiration()
+                && let Some(days) = exp.days()
+            {
+                result.push_str(&format!("  Expiration: {} days\n", days));
             }
-            if let Some(filter) = rule.filter() {
-                if let Some(prefix) = filter.prefix() {
-                    result.push_str(&format!("  Prefix: {}\n", prefix));
-                }
+            if let Some(filter) = rule.filter()
+                && let Some(prefix) = filter.prefix()
+            {
+                result.push_str(&format!("  Prefix: {}\n", prefix));
             }
         }
         if result.is_empty() {
@@ -915,10 +896,7 @@ impl S3Client {
 
     // -- bucket tags --
 
-    pub async fn get_bucket_tags(
-        &self,
-        bucket: &str,
-    ) -> Result<HashMap<String, String>, String> {
+    pub async fn get_bucket_tags(&self, bucket: &str) -> Result<HashMap<String, String>, String> {
         let resp = self
             .client
             .get_bucket_tagging()

@@ -1,6 +1,6 @@
-pub mod types;
-pub mod transfer_ops;
 mod handlers;
+pub mod transfer_ops;
+pub mod types;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -15,16 +15,18 @@ use crate::abixio::types::{
     DisksResponse, HealResponse, HealStatusResponse, ObjectInspectResponse, StatusResponse,
 };
 use crate::config::{self, Settings};
-use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client, VersionInfo};
+use crate::s3::client::{
+    BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client, VersionInfo,
+};
 use crate::views::testing::TestResult;
 
+pub use transfer_ops::{
+    prepare_export_items, prepare_import_items, run_transfer_step, wildcard_match,
+};
 pub use types::{
     BucketDeleteState, BucketDeleteStepResult, BulkDeleteState, CURRENT_CONNECTION_ID,
     OverwritePolicy, PrefixDeleteState, StartupOptions, TransferEndpoint, TransferItem,
     TransferMode, TransferState, TransferStepResult,
-};
-pub use transfer_ops::{
-    prepare_export_items, prepare_import_items, run_transfer_step, wildcard_match,
 };
 
 // -- messages --
@@ -482,7 +484,10 @@ impl App {
 
         match message {
             // -- navigation --
-            Message::SelectSection(s) => { self.section = s; Task::none() }
+            Message::SelectSection(s) => {
+                self.section = s;
+                Task::none()
+            }
             Message::SelectBucket(name) => self.handle_select_bucket(name),
             Message::NavigatePrefix(prefix) => self.handle_navigate_prefix(prefix),
             Message::SelectObject(key) => self.handle_select_object(key),
@@ -494,7 +499,9 @@ impl App {
             Message::DetailLoaded(r) => self.handle_detail_loaded(r),
             Message::UploadDone(r) => self.handle_upload_done(r),
             Message::DeleteDone(r) => self.handle_delete_done(r),
-            Message::CreateBucketDone { bucket, result } => self.handle_create_bucket_done(bucket, result),
+            Message::CreateBucketDone { bucket, result } => {
+                self.handle_create_bucket_done(bucket, result)
+            }
             Message::DownloadDone(r) => self.handle_download_done(r),
 
             // -- browse actions --
@@ -522,10 +529,18 @@ impl App {
             Message::OpenImportFolder => self.handle_open_import_folder(),
             Message::OpenExportPrefix => self.handle_open_export_prefix(),
             Message::CloseTransferModal => self.handle_close_transfer_modal(),
-            Message::TransferDestinationConnectionChanged(id) => self.handle_transfer_destination_connection_changed(id),
-            Message::TransferDestinationBucketChanged(b) => self.handle_transfer_destination_bucket_changed(b),
-            Message::TransferDestinationKeyChanged(k) => self.handle_transfer_destination_key_changed(k),
-            Message::TransferDestinationBucketsLoaded(r) => self.handle_transfer_destination_buckets_loaded(r),
+            Message::TransferDestinationConnectionChanged(id) => {
+                self.handle_transfer_destination_connection_changed(id)
+            }
+            Message::TransferDestinationBucketChanged(b) => {
+                self.handle_transfer_destination_bucket_changed(b)
+            }
+            Message::TransferDestinationKeyChanged(k) => {
+                self.handle_transfer_destination_key_changed(k)
+            }
+            Message::TransferDestinationBucketsLoaded(r) => {
+                self.handle_transfer_destination_buckets_loaded(r)
+            }
             Message::StartTransfer => self.handle_start_transfer(),
             Message::TransferPrepared(r) => self.handle_transfer_prepared(r),
             Message::TransferStepFinished(r) => self.handle_transfer_step_finished(r),
@@ -546,8 +561,12 @@ impl App {
             Message::PrefixDeleteBatchFinished(r) => self.handle_prefix_delete_batch_finished(r),
             Message::OpenDeleteBucketModal => self.handle_open_delete_bucket_modal(),
             Message::CloseDeleteBucketModal => self.handle_close_delete_bucket_modal(),
-            Message::BucketDeletePreviewLoaded { bucket, result } => self.handle_bucket_delete_preview_loaded(bucket, result),
-            Message::BucketDeleteConfirmNameChanged(v) => self.handle_bucket_delete_confirm_name_changed(v),
+            Message::BucketDeletePreviewLoaded { bucket, result } => {
+                self.handle_bucket_delete_preview_loaded(bucket, result)
+            }
+            Message::BucketDeleteConfirmNameChanged(v) => {
+                self.handle_bucket_delete_confirm_name_changed(v)
+            }
             Message::ConfirmDeleteBucket => self.handle_confirm_delete_bucket(),
             Message::BucketDeleteStepFinished(r) => self.handle_bucket_delete_step_finished(r),
 
@@ -557,7 +576,9 @@ impl App {
             Message::EditConnection(name) => self.handle_edit_connection(name),
             Message::RemoveConnection(name) => self.handle_remove_connection(name),
             Message::TestConnection(name) => self.handle_test_connection(name),
-            Message::TestConnectionResult(name, result) => self.handle_test_connection_result(name, result),
+            Message::TestConnectionResult(name, result) => {
+                self.handle_test_connection_result(name, result)
+            }
             Message::NewConnNameChanged(v) => self.handle_new_conn_name_changed(v),
             Message::NewConnEndpointChanged(v) => self.handle_new_conn_endpoint_changed(v),
             Message::NewConnRegionChanged(v) => self.handle_new_conn_region_changed(v),
@@ -568,14 +589,22 @@ impl App {
             Message::AbixioDetected(status) => self.handle_abixio_detected(status),
             Message::DisksLoaded(r) => self.handle_disks_loaded(r),
             Message::HealStatusLoaded(r) => self.handle_heal_status_loaded(r),
-            Message::ObjectInspectLoaded { bucket, key, result } => self.handle_object_inspect_loaded(bucket, key, result),
+            Message::ObjectInspectLoaded {
+                bucket,
+                key,
+                result,
+            } => self.handle_object_inspect_loaded(bucket, key, result),
             Message::RefreshDisks => self.handle_refresh_disks(),
             Message::RefreshHealStatus => self.handle_refresh_heal_status(),
             Message::RefreshObjectInspect => self.handle_refresh_object_inspect(),
             Message::OpenHealConfirm => self.handle_open_heal_confirm(),
             Message::CancelHealConfirm => self.handle_cancel_heal_confirm(),
             Message::ConfirmHealObject => self.handle_confirm_heal_object(),
-            Message::HealObjectFinished { bucket, key, result } => self.handle_heal_object_finished(bucket, key, result),
+            Message::HealObjectFinished {
+                bucket,
+                key,
+                result,
+            } => self.handle_heal_object_finished(bucket, key, result),
 
             // -- detail panel --
             Message::OpenShareModal => self.handle_open_share_modal(),
@@ -613,8 +642,14 @@ impl App {
             Message::TagsSaved(r) => self.handle_tags_saved(r),
 
             // -- settings --
-            Message::SetTheme(t) => { self.theme = t; Task::none() }
-            Message::DismissError => { self.error = None; Task::none() }
+            Message::SetTheme(t) => {
+                self.theme = t;
+                Task::none()
+            }
+            Message::DismissError => {
+                self.error = None;
+                Task::none()
+            }
 
             // -- testing --
             Message::RunTests => self.handle_run_tests(),
@@ -747,7 +782,10 @@ impl App {
         )
     }
 
-    pub(crate) fn make_client_for_connection(&self, connection_id: &str) -> Result<Arc<S3Client>, String> {
+    pub(crate) fn make_client_for_connection(
+        &self,
+        connection_id: &str,
+    ) -> Result<Arc<S3Client>, String> {
         if connection_id == CURRENT_CONNECTION_ID {
             return Ok(self.client.clone());
         }
@@ -769,7 +807,9 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::types::{BucketDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy, TransferMode, TransferState};
+    use super::types::{
+        BucketDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy, TransferMode, TransferState,
+    };
     use super::{App, Message, Selection, StartupOptions};
     use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
 

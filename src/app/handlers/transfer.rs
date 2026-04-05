@@ -213,10 +213,7 @@ impl App {
         Task::none()
     }
 
-    pub(crate) fn handle_transfer_destination_key_changed(
-        &mut self,
-        key: String,
-    ) -> Task<Message> {
+    pub(crate) fn handle_transfer_destination_key_changed(&mut self, key: String) -> Task<Message> {
         if let Some(transfer) = self.transfer.as_mut() {
             transfer.destination_key = key;
             transfer.summary = None;
@@ -456,8 +453,14 @@ impl App {
         };
         Task::perform(
             async move {
-                run_transfer_step(source_client, destination_client, item, overwrite_policy, is_move)
-                    .await
+                run_transfer_step(
+                    source_client,
+                    destination_client,
+                    item,
+                    overwrite_policy,
+                    is_move,
+                )
+                .await
             },
             Message::TransferStepFinished,
         )

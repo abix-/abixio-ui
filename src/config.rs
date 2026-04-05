@@ -286,7 +286,8 @@ mod tests {
 
     #[test]
     fn connection_extra_fields_ignored() {
-        let json = r#"{"name":"x","endpoint":"http://localhost","region":"us-east-1","extra":true}"#;
+        let json =
+            r#"{"name":"x","endpoint":"http://localhost","region":"us-east-1","extra":true}"#;
         let parsed: Connection = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.name, "x");
     }

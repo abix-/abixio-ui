@@ -7,6 +7,8 @@
 //! MUST run single-threaded (GetProcessTimes measures entire process):
 //!   cargo test --test cpu_idle -- --ignored --test-threads=1
 
+mod support;
+
 use std::thread;
 use std::time::Duration;
 
@@ -70,7 +72,7 @@ fn perf_stats_idle_near_zero_cpu() {
 #[ignore]
 fn tokio_runtime_idle_near_zero_cpu() {
     // force the lazy runtime to initialize
-    let _ = &*abixio_ui::async_op::RUNTIME;
+    let _ = &*support::RUNTIME;
 
     // now measure idle CPU with runtime alive but no work
     let cpu = measure_cpu_ms(|| {
@@ -89,10 +91,10 @@ fn tokio_runtime_idle_near_zero_cpu() {
 #[test]
 #[ignore]
 fn async_op_idle_after_completion_near_zero_cpu() {
-    let _ = &*abixio_ui::async_op::RUNTIME;
+    let _ = &*support::RUNTIME;
 
     // fire a quick async op and let it complete
-    let mut op = abixio_ui::async_op::AsyncOp::<String>::new();
+    let mut op = support::AsyncOp::<String>::new();
     op.request(async {
         tokio::time::sleep(Duration::from_millis(50)).await;
         Ok("done".to_string())
@@ -121,11 +123,11 @@ fn async_op_idle_after_completion_near_zero_cpu() {
 #[test]
 #[ignore]
 fn async_op_multiple_requests_then_idle() {
-    let _ = &*abixio_ui::async_op::RUNTIME;
+    let _ = &*support::RUNTIME;
 
     // fire several async ops in sequence
     for i in 0..5 {
-        let mut op = abixio_ui::async_op::AsyncOp::<String>::new();
+        let mut op = support::AsyncOp::<String>::new();
         op.request(async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
             Ok(format!("done {}", i))
@@ -176,12 +178,12 @@ fn perf_stats_after_recording_then_idle() {
 #[test]
 #[ignore]
 fn async_op_created_but_never_used_idle() {
-    let _ = &*abixio_ui::async_op::RUNTIME;
+    let _ = &*support::RUNTIME;
 
     // create ops but never fire them -- should be zero overhead
-    let _op1 = abixio_ui::async_op::AsyncOp::<String>::new();
-    let _op2 = abixio_ui::async_op::AsyncOp::<Vec<u8>>::new();
-    let _op3 = abixio_ui::async_op::AsyncOp::<()>::new();
+    let _op1 = support::AsyncOp::<String>::new();
+    let _op2 = support::AsyncOp::<Vec<u8>>::new();
+    let _op3 = support::AsyncOp::<()>::new();
 
     let cpu = measure_cpu_ms(|| {
         thread::sleep(Duration::from_secs(IDLE_SECS));
@@ -199,9 +201,9 @@ fn async_op_created_but_never_used_idle() {
 #[test]
 #[ignore]
 fn polling_completed_ops_does_not_spin() {
-    let _ = &*abixio_ui::async_op::RUNTIME;
+    let _ = &*support::RUNTIME;
 
-    let mut op = abixio_ui::async_op::AsyncOp::<String>::new();
+    let mut op = support::AsyncOp::<String>::new();
     op.request(async { Ok("instant".to_string()) });
     thread::sleep(Duration::from_millis(100));
     op.poll();

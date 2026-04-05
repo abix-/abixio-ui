@@ -24,7 +24,7 @@ connect via `/_admin/status`.
 src/
   main.rs             # iced::application() entry point
   app.rs              # App state, Message enum, update(), view()
-  async_op.rs         # AsyncOp helper (used by tests, not the app)
+
   perf.rs             # performance stats (5m sliding window)
   config.rs           # settings.json persistence (connections + regions, no secrets)
   keychain.rs         # OS keychain wrapper (Windows/macOS/Linux)
@@ -97,7 +97,7 @@ Message::BucketsLoaded(Err(e)) => {
 ```
 
 iced manages the tokio runtime internally. We don't create or manage one.
-`async_op.rs` exists only for the CPU idle tests. The app uses `Task::perform`.
+The `tests/support/` helper exists only for the CPU idle tests. The app uses `Task::perform`.
 
 ## Reactive rendering
 

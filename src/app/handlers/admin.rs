@@ -158,8 +158,7 @@ impl App {
         key: String,
         result: Result<HealResponse, String>,
     ) -> Task<Message> {
-        let healing_matches =
-            self.healing_target.as_ref() == Some(&(bucket.clone(), key.clone()));
+        let healing_matches = self.healing_target.as_ref() == Some(&(bucket.clone(), key.clone()));
         if healing_matches {
             self.healing_object = false;
             self.healing_target = None;

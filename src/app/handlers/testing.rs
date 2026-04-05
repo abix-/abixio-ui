@@ -22,10 +22,7 @@ impl App {
             let report = crate::views::testing::TestReport {
                 app_version: env!("CARGO_PKG_VERSION").to_string(),
                 endpoint: self.endpoint.clone(),
-                started_at: self
-                    .test_started_at
-                    .clone()
-                    .unwrap_or_else(|| now_rfc3339()),
+                started_at: self.test_started_at.clone().unwrap_or_else(now_rfc3339),
                 finished_at: now_rfc3339(),
                 total,
                 passed,

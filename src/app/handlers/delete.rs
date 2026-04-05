@@ -49,10 +49,7 @@ impl App {
         match result {
             Ok(count) => {
                 state.deleted += count;
-                state.summary = Some(format!(
-                    "Deleting: {}/{} done",
-                    state.deleted, state.total
-                ));
+                state.summary = Some(format!("Deleting: {}/{} done", state.deleted, state.total));
                 self.cmd_process_next_bulk_delete_step()
             }
             Err(error) => {
@@ -132,10 +129,7 @@ impl App {
         match result {
             Ok(count) => {
                 state.deleted += count;
-                state.summary = Some(format!(
-                    "Deleting: {}/{} done",
-                    state.deleted, state.total
-                ));
+                state.summary = Some(format!("Deleting: {}/{} done", state.deleted, state.total));
                 self.cmd_process_next_prefix_delete_batch()
             }
             Err(error) => {

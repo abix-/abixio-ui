@@ -36,7 +36,7 @@ also fix:
   reflect actual implementation
 - any other "not yet wired" / "no" entries that are now "yes"
 
-## 3. wire or kill perf counters
+## ~~3. wire or kill perf counters~~ (done)
 
 perf.rs (189 lines) feeds fake numbers to the settings view. features.md line
 157 confirms "request and byte metrics are not currently wired to real network

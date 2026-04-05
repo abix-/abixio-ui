@@ -6,7 +6,9 @@ use aws_credential_types::credential_fn::provide_credentials_fn;
 use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_s3::config::{AppName, BehaviorVersion, Builder, Region, timeout::TimeoutConfig};
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{Delete, ObjectIdentifier, Tag, Tagging};
+use aws_sdk_s3::types::{
+    BucketVersioningStatus, Delete, ObjectIdentifier, Tag, Tagging, VersioningConfiguration,
+};
 use aws_sdk_s3::Client;
 
 #[derive(Clone)]
@@ -446,6 +448,146 @@ impl S3Client {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    // -- versioning --
+
+    pub async fn get_bucket_versioning(&self, bucket: &str) -> Result<String, String> {
+        let resp = self
+            .client
+            .get_bucket_versioning()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(resp
+            .status()
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default())
+    }
+
+    pub async fn put_bucket_versioning(
+        &self,
+        bucket: &str,
+        status: &str,
+    ) -> Result<(), String> {
+        let vs = match status {
+            "Enabled" => BucketVersioningStatus::Enabled,
+            "Suspended" => BucketVersioningStatus::Suspended,
+            _ => return Err(format!("invalid versioning status: {}", status)),
+        };
+        let config = VersioningConfiguration::builder().status(vs).build();
+        self.client
+            .put_bucket_versioning()
+            .bucket(bucket)
+            .versioning_configuration(config)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn list_object_versions(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Result<Vec<VersionInfo>, String> {
+        let resp = self
+            .client
+            .list_object_versions()
+            .bucket(bucket)
+            .prefix(prefix)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut versions = Vec::new();
+        for v in resp.versions() {
+            versions.push(VersionInfo {
+                key: v.key().unwrap_or_default().to_string(),
+                version_id: v.version_id().unwrap_or("null").to_string(),
+                is_latest: v.is_latest().unwrap_or(false),
+                is_delete_marker: false,
+                size: v.size().unwrap_or(0) as u64,
+                last_modified: v
+                    .last_modified()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+                etag: v.e_tag().unwrap_or_default().to_string(),
+            });
+        }
+        for dm in resp.delete_markers() {
+            versions.push(VersionInfo {
+                key: dm.key().unwrap_or_default().to_string(),
+                version_id: dm.version_id().unwrap_or("null").to_string(),
+                is_latest: dm.is_latest().unwrap_or(false),
+                is_delete_marker: true,
+                size: 0,
+                last_modified: dm
+                    .last_modified()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+                etag: String::new(),
+            });
+        }
+        // sort: latest first
+        versions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+        Ok(versions)
+    }
+
+    pub async fn get_object_version(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: &str,
+    ) -> Result<Vec<u8>, String> {
+        let resp = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .version_id(version_id)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let bytes = resp
+            .body
+            .collect()
+            .await
+            .map_err(|e| e.to_string())?
+            .into_bytes();
+
+        Ok(bytes.to_vec())
+    }
+
+    pub async fn delete_object_version(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: &str,
+    ) -> Result<(), String> {
+        self.client
+            .delete_object()
+            .bucket(bucket)
+            .key(key)
+            .version_id(version_id)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VersionInfo {
+    pub key: String,
+    pub version_id: String,
+    pub is_latest: bool,
+    pub is_delete_marker: bool,
+    pub size: u64,
+    pub last_modified: String,
+    pub etag: String,
 }
 
 #[derive(Debug, Clone)]

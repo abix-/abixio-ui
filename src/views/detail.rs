@@ -26,6 +26,34 @@ impl App {
                     col = col.push(meta_row("Objects", &objects.objects.len().to_string()));
                 }
 
+                col = col.push(section("Versioning"));
+                match &self.bucket_versioning {
+                    Some(Ok(status)) if status == "Enabled" => {
+                        col = col.push(meta_row("Status", "Enabled"));
+                        col = col.push(
+                            button(text("Suspend Versioning").size(11))
+                                .on_press(Message::SuspendVersioning),
+                        );
+                    }
+                    Some(Ok(status)) if status == "Suspended" => {
+                        col = col.push(meta_row("Status", "Suspended"));
+                        col = col.push(
+                            button(text("Enable Versioning").size(11))
+                                .on_press(Message::EnableVersioning),
+                        );
+                    }
+                    Some(Ok(_)) | None => {
+                        col = col.push(meta_row("Status", "Disabled"));
+                        col = col.push(
+                            button(text("Enable Versioning").size(11))
+                                .on_press(Message::EnableVersioning),
+                        );
+                    }
+                    Some(Err(e)) => {
+                        col = col.push(text(format!("Error: {}", e)).size(10));
+                    }
+                }
+
                 col = col.push(section("Actions"));
                 col = col.push(
                     row![
@@ -107,6 +135,56 @@ impl App {
                         }
                     } else if let Some(Err(e)) = &self.object_tags {
                         col = col.push(text(format!("Tags error: {}", e)).size(10));
+                    }
+
+                    col = col.push(section("Versions"));
+                    if self.loading_versions {
+                        col = col.push(text("Loading...").size(11));
+                    } else if let Some(Ok(versions)) = &self.object_versions {
+                        let obj_versions: Vec<_> = versions
+                            .iter()
+                            .filter(|v| v.key == *key)
+                            .collect();
+                        if obj_versions.is_empty() {
+                            col = col.push(text("No versions").size(10));
+                        } else {
+                            for v in &obj_versions {
+                                let vid = v.version_id.clone();
+                                let vid_short = if vid.len() > 8 {
+                                    format!("{}...", &vid[..8])
+                                } else {
+                                    vid.clone()
+                                };
+                                let label = if v.is_delete_marker {
+                                    format!("{} (delete marker)", vid_short)
+                                } else if v.is_latest {
+                                    format!("{} (latest) {}B", vid_short, v.size)
+                                } else {
+                                    format!("{} {}B", vid_short, v.size)
+                                };
+                                let mut ver_row = row![
+                                    text(label).size(10).width(Length::FillPortion(3)),
+                                ]
+                                .spacing(4);
+                                if !v.is_delete_marker && !v.is_latest {
+                                    let vid_restore = vid.clone();
+                                    ver_row = ver_row.push(
+                                        button(text("Restore").size(9))
+                                            .on_press(Message::RestoreVersion(vid_restore))
+                                            .style(button::text),
+                                    );
+                                }
+                                let vid_del = vid.clone();
+                                ver_row = ver_row.push(
+                                    button(text("x").size(9))
+                                        .on_press(Message::DeleteVersion(vid_del))
+                                        .style(button::text),
+                                );
+                                col = col.push(ver_row);
+                            }
+                        }
+                    } else if let Some(Err(e)) = &self.object_versions {
+                        col = col.push(text(format!("Versions error: {}", e)).size(10));
                     }
 
                     col = col.push(section("Actions"));

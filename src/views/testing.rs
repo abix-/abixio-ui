@@ -661,8 +661,75 @@ pub async fn run_e2e_tests(
         Err(e) => t.check("get tags after delete", false, e),
     }
 
+    // --- Versioning ---
+
+    // enable versioning
+    let r = client.put_bucket_versioning(&bucket, "Enabled").await;
+    t.check(
+        "enable versioning",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+
+    // check versioning status
+    let r = client.get_bucket_versioning(&bucket).await;
+    match &r {
+        Ok(status) => t.check("versioning enabled", status == "Enabled", status),
+        Err(e) => t.check("get versioning", false, e),
+    }
+
+    // put object twice to create 2 versions
+    let r = client
+        .put_object(&bucket, "versioned.txt", b"version1".to_vec(), "text/plain")
+        .await;
+    t.check("put v1", r.is_ok(), &r.err().unwrap_or_default());
+
+    let r = client
+        .put_object(&bucket, "versioned.txt", b"version2".to_vec(), "text/plain")
+        .await;
+    t.check("put v2", r.is_ok(), &r.err().unwrap_or_default());
+
+    // list versions
+    let r = client.list_object_versions(&bucket, "versioned.txt").await;
+    match &r {
+        Ok(versions) => {
+            let obj_versions: Vec<_> = versions
+                .iter()
+                .filter(|v| v.key == "versioned.txt" && !v.is_delete_marker)
+                .collect();
+            t.check(
+                "list versions count",
+                obj_versions.len() >= 2,
+                &format!("{}", obj_versions.len()),
+            );
+        }
+        Err(e) => t.check("list versions", false, e),
+    }
+
+    // suspend versioning
+    let r = client.put_bucket_versioning(&bucket, "Suspended").await;
+    t.check(
+        "suspend versioning",
+        r.is_ok(),
+        &r.err().unwrap_or_default(),
+    );
+
+    let r = client.get_bucket_versioning(&bucket).await;
+    match &r {
+        Ok(status) => t.check("versioning suspended", status == "Suspended", status),
+        Err(e) => t.check("get versioning suspended", false, e),
+    }
+
     // --- Cleanup ---
-    // delete all test objects, then the bucket
+    // delete all test objects (including versions), then the bucket
+    // first delete versions if any
+    if let Ok(versions) = client.list_object_versions(&bucket, "").await {
+        for v in &versions {
+            let _ = client
+                .delete_object_version(&bucket, &v.key, &v.version_id)
+                .await;
+        }
+    }
     if let Ok(list) = client.list_objects(&bucket, "", "").await {
         for obj in &list.objects {
             let _ = client.delete_object(&bucket, &obj.key).await;

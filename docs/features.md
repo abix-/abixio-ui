@@ -21,7 +21,7 @@ MinIO.
 | Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
 | Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
 | Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
-| Versioning and recovery | Not implemented | `mc version`, `mc undo` | 0/10 | None | No version browse, restore, or rollback workflow. |
+| Versioning and recovery | Enable/suspend versioning per bucket, version list in detail panel, restore old versions, delete specific versions | `mc version`, `mc undo` | 7/10 | Partial | Full versioning support: enable/suspend per bucket, version list with restore and delete. No undo or rewind-by-time yet. |
 | Bulk delete and batch object workflows | Multi-select bulk delete, recursive prefix delete, S3 DeleteObjects batch API (1000 keys/call) | Recursive `mc rm`, batch-oriented workflows | 7/10 | Partial | Multi-select bulk delete and recursive prefix delete with confirmation modals. Uses S3 DeleteObjects API. No time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
 | Tags | Object tags in detail panel (view, add, remove) | `mc tag` | 7/10 | Partial | Object tags supported via S3 tagging API. No bucket tags UI yet. No recursive tag set. |
@@ -71,7 +71,7 @@ MinIO.
 | Gaps | Bucket delete | Yes | 7/10 | Implemented as recursive delete with typed-name confirmation. |
 | Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
-| Gaps | Versioning and recovery | No | 0/10 | No version browser, restore, or undo flow. |
+| Gaps | Versioning and recovery | Partial | 7/10 | Enable/suspend per bucket, version list, restore, delete version. No undo or rewind. |
 | Gaps | Bulk object operations | Partial | 7/10 | Multi-select bulk delete and recursive prefix delete with S3 DeleteObjects batch API. No time/size filtering yet. |
 | Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
 | Gaps | Tags | Partial | 7/10 | Object tags in detail panel (view, add, remove). No bucket tags UI yet. |
@@ -88,7 +88,7 @@ MinIO.
 - Search and find: time, size, metadata, and tag filters (basic name/path filtering exists).
 - Presigned sharing links.
 - Recursive sync, mirror, and diff workflows.
-- Versioning, undo, and recovery tooling.
+- Versioning: undo/rewind-by-time (version browse, restore, and delete exist).
 - Bulk object operations: time/size filters.
 - SQL and object query tools, plus inline object-content inspection.
 - Bucket tags (object tags are implemented).
@@ -129,7 +129,7 @@ Migrated to `aws-sdk-s3` to eliminate all API blockers.
 | DeleteBucketLifecycle | yes | `delete_bucket_lifecycle` | no | available, not yet wired |
 | Presign GET | yes | presigning config | no | available, not yet wired |
 | Presign PUT | yes | presigning config | no | available, not yet wired |
-| ListObjectVersions | yes | `list_object_versions` | no | available, not yet wired |
+| ListObjectVersions | yes | `list_object_versions` | yes | wired to detail panel versions list |
 | GetBucketPolicy | yes | `get_bucket_policy` | no | available, not yet wired |
 | PutBucketPolicy | yes | `put_bucket_policy` | no | available, not yet wired |
 | GetBucketVersioning | yes | `get_bucket_versioning` | no | available, not yet wired |

@@ -179,8 +179,8 @@ Which S3 operations the client calls and what's missing for planned features.
 | S3 API | Needed for | Priority |
 |---|---|---|
 | ~~GetObjectTagging, PutObjectTagging, DeleteObjectTagging~~ | ~~Object tags feature~~ | Done |
-| ListObjectVersions | Version browser | 1.0 |
-| GetBucketVersioning, PutBucketVersioning | Versioning toggle | 1.0 |
+| ~~ListObjectVersions~~ | ~~Version browser~~ | Done |
+| ~~GetBucketVersioning, PutBucketVersioning~~ | ~~Versioning toggle~~ | Done |
 | GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy | Policy management | 1.x |
 | GetBucketEncryption, PutBucketEncryption | Encryption config | 1.x |
 | GetBucketTagging, PutBucketTagging, DeleteBucketTagging | Bucket tags | 1.x |

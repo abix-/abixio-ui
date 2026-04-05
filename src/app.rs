@@ -13,7 +13,9 @@ use crate::abixio::types::{
     DisksResponse, HealResponse, HealStatusResponse, ObjectInspectResponse, StatusResponse,
 };
 use crate::config::{self, Connection, Settings};
-use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client};
+use crate::s3::client::{
+    BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client, VersionInfo,
+};
 use crate::views::testing::TestResult;
 
 pub(crate) const CURRENT_CONNECTION_ID: &str = "__current__";
@@ -140,6 +142,17 @@ pub enum Message {
     PrefixDeleteListLoaded(Result<Vec<String>, String>),
     ConfirmPrefixDelete,
     PrefixDeleteBatchFinished(Result<usize, String>),
+
+    // versioning
+    VersioningStatusLoaded(Result<String, String>),
+    VersionsLoaded(Result<Vec<VersionInfo>, String>),
+    EnableVersioning,
+    SuspendVersioning,
+    VersioningToggled(Result<(), String>),
+    DeleteVersion(String),
+    VersionDeleted(Result<(), String>),
+    RestoreVersion(String),
+    VersionRestored(Result<String, String>),
 
     // tags
     TagsLoaded(Result<std::collections::HashMap<String, String>, String>),
@@ -346,6 +359,11 @@ pub struct App {
     pub find_results: Option<Result<ListObjectsResult, String>>,
     pub finding: bool,
 
+    // versioning
+    pub bucket_versioning: Option<Result<String, String>>,
+    pub object_versions: Option<Result<Vec<VersionInfo>, String>>,
+    pub loading_versions: bool,
+
     // tags
     pub object_tags: Option<Result<std::collections::HashMap<String, String>, String>>,
     pub loading_tags: bool,
@@ -452,6 +470,9 @@ impl App {
             object_filter: String::new(),
             find_results: None,
             finding: false,
+            bucket_versioning: None,
+            object_versions: None,
+            loading_versions: false,
             object_tags: None,
             loading_tags: false,
             editing_tag_key: String::new(),
@@ -530,10 +551,13 @@ impl App {
                 self.object_filter.clear();
                 self.selected_keys.clear();
                 self.find_results = None;
-                self.selection = Selection::Bucket(name);
+                self.selection = Selection::Bucket(name.clone());
                 self.clear_object_admin_state();
                 self.loading_objects = true;
-                self.cmd_fetch_objects()
+                Task::batch(vec![
+                    self.cmd_fetch_objects(),
+                    self.cmd_fetch_versioning_status(&name),
+                ])
             }
             Message::NavigatePrefix(prefix) => {
                 self.current_prefix = prefix;
@@ -554,7 +578,9 @@ impl App {
                 };
                 self.loading_detail = true;
                 self.loading_tags = true;
+                self.loading_versions = true;
                 self.object_tags = None;
+                self.object_versions = None;
                 if self.is_abixio && self.admin_client.is_some() {
                     self.loading_object_inspect = true;
                     self.object_inspect_target = Some((bucket.clone(), key.clone()));
@@ -562,11 +588,13 @@ impl App {
                         self.cmd_fetch_detail(&bucket, &key),
                         self.cmd_fetch_object_inspect(&bucket, &key),
                         self.cmd_fetch_tags(&bucket, &key),
+                        self.cmd_fetch_versions(&bucket, &key),
                     ])
                 } else {
                     Task::batch(vec![
                         self.cmd_fetch_detail(&bucket, &key),
                         self.cmd_fetch_tags(&bucket, &key),
+                        self.cmd_fetch_versions(&bucket, &key),
                     ])
                 }
             }
@@ -1743,6 +1771,122 @@ impl App {
                 }
             }
 
+            // -- versioning --
+            Message::VersioningStatusLoaded(r) => {
+                self.bucket_versioning = Some(r);
+                Task::none()
+            }
+            Message::VersionsLoaded(r) => {
+                self.loading_versions = false;
+                self.object_versions = Some(r);
+                Task::none()
+            }
+            Message::EnableVersioning => {
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    Task::perform(
+                        async move { client.put_bucket_versioning(&bucket, "Enabled").await },
+                        Message::VersioningToggled,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::SuspendVersioning => {
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    Task::perform(
+                        async move { client.put_bucket_versioning(&bucket, "Suspended").await },
+                        Message::VersioningToggled,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::VersioningToggled(Ok(())) => {
+                // reload versioning status
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    Task::perform(
+                        async move { client.get_bucket_versioning(&bucket).await },
+                        Message::VersioningStatusLoaded,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::VersioningToggled(Err(e)) => {
+                self.error = Some(format!("versioning toggle failed: {}", e));
+                Task::none()
+            }
+            Message::DeleteVersion(vid) => {
+                if let Selection::Object { bucket, key } = &self.selection {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    let key = key.clone();
+                    self.loading_versions = true;
+                    Task::perform(
+                        async move { client.delete_object_version(&bucket, &key, &vid).await },
+                        Message::VersionDeleted,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::VersionDeleted(Ok(())) => {
+                // reload versions
+                if let Selection::Object { bucket, key } = &self.selection {
+                    self.cmd_fetch_versions(bucket, key)
+                } else {
+                    self.loading_versions = false;
+                    Task::none()
+                }
+            }
+            Message::VersionDeleted(Err(e)) => {
+                self.loading_versions = false;
+                self.error = Some(format!("version delete failed: {}", e));
+                Task::none()
+            }
+            Message::RestoreVersion(vid) => {
+                // restore = copy this version to become the latest (server-side copy)
+                if let Selection::Object { bucket, key } = &self.selection {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    let key = key.clone();
+                    self.loading_versions = true;
+                    Task::perform(
+                        async move {
+                            let data = client.get_object_version(&bucket, &key, &vid).await?;
+                            client
+                                .put_object(&bucket, &key, data, "application/octet-stream")
+                                .await
+                        },
+                        Message::VersionRestored,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::VersionRestored(Ok(_)) => {
+                if let Selection::Object { bucket, key } = &self.selection {
+                    Task::batch(vec![
+                        self.cmd_fetch_versions(bucket, key),
+                        self.cmd_fetch_detail(bucket, key),
+                    ])
+                } else {
+                    self.loading_versions = false;
+                    Task::none()
+                }
+            }
+            Message::VersionRestored(Err(e)) => {
+                self.loading_versions = false;
+                self.error = Some(format!("version restore failed: {}", e));
+                Task::none()
+            }
+
             // -- tags --
             Message::TagsLoaded(r) => {
                 self.loading_tags = false;
@@ -2010,6 +2154,25 @@ impl App {
         )
     }
 
+    fn cmd_fetch_versions(&self, bucket: &str, key: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        Task::perform(
+            async move { client.list_object_versions(&bucket, &key).await },
+            Message::VersionsLoaded,
+        )
+    }
+
+    fn cmd_fetch_versioning_status(&self, bucket: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        Task::perform(
+            async move { client.get_bucket_versioning(&bucket).await },
+            Message::VersioningStatusLoaded,
+        )
+    }
+
     fn cmd_fetch_tags(&self, bucket: &str, key: &str) -> Task<Message> {
         let client = self.client.clone();
         let bucket = bucket.to_string();
@@ -2113,6 +2276,8 @@ impl App {
         self.loading_tags = false;
         self.editing_tag_key.clear();
         self.editing_tag_value.clear();
+        self.object_versions = None;
+        self.loading_versions = false;
     }
 
     fn begin_tests(&mut self) -> Task<Message> {

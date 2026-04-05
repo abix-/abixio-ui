@@ -46,6 +46,10 @@ cargo build --release
 | [credentials.md](docs/credentials.md) | OS keychain credential storage |
 | [testing.md](docs/testing.md) | Smoke test system |
 
+## Related
+
+- **[abixio](https://github.com/abix-/abixio)** -- the S3-compatible object store server. Erasure coding, versioning, multipart upload, 196 tests. This UI connects to it (and any other S3-compatible endpoint).
+
 ## License
 
 [GNU General Public License v3.0](LICENSE)

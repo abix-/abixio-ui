@@ -39,15 +39,24 @@ Who owns what data, where it lives, and how it flows.
 ```text
 user selects a bucket
   -> App::update sets loading state
-  -> Task::perform calls S3 list_objects(...)
-  -> ObjectsLoaded updates state
-  -> UI renders the returned listing
+  -> Task::batch fires in parallel:
+     - S3 list_objects (object listing)
+     - S3 get_bucket_versioning (versioning status)
+     - S3 get_bucket_policy (policy JSON)
+     - S3 get_bucket_lifecycle (lifecycle rules)
+     - S3 get_bucket_tagging (bucket tags)
+  -> Each result updates state independently
+  -> UI renders bucket detail + object listing
 
 user selects an object
-  -> App::update sets loading_detail = true
-  -> Task::perform calls S3 head_object(...)
-  -> if AbixIO: Task::perform also calls /_admin/object?bucket=...&key=...
-  -> DetailLoaded and ObjectInspectLoaded update state
+  -> App::update sets loading state
+  -> Task::batch fires in parallel:
+     - S3 head_object (metadata)
+     - S3 get_object_tagging (tags)
+     - S3 list_object_versions (versions)
+     - S3 get_object (first 4KB preview)
+     - if AbixIO: /_admin/object (shard inspection)
+  -> Each result updates state independently
   -> UI renders the object detail panel
 
 user connects to an AbixIO server

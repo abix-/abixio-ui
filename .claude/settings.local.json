@@ -9,7 +9,10 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\)['crate']; print\\(f\\\\\"rust-s3: {d['name']}, downloads: {d['downloads']}, recent: {d['recent_downloads']}, max_version: {d['max_version']}, description: {d.get\\('description','n/a'\\)}\\\\\"\\)\")",
       "Bash(cargo test:*)",
       "Bash(cargo clippy:*)",
-      "Read(//c/code/mc/**)"
+      "Read(//c/code/mc/**)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

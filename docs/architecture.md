@@ -130,7 +130,7 @@ Features provided by aws-sdk-s3:
 - Full S3 API surface (versioning, tagging, policies, lifecycle, presigning)
 
 Operations (see `s3/client.rs` for full API):
-- Object CRUD: `list_buckets`, `list_objects`, `create_bucket`, `delete_bucket`, `put_object`, `get_object`, `head_object`, `delete_object`, `delete_objects` (batch), `copy_object`
+- Object CRUD: `list_buckets`, `list_objects`, `list_objects_recursive`, `create_bucket`, `delete_bucket`, `put_object`, `get_object`, `head_object`, `delete_object`, `delete_objects` (batch), `copy_object`
 - Tagging: `get_object_tags`, `put_object_tags`, `delete_object_tags`, `get_bucket_tags`, `put_bucket_tags`, `delete_bucket_tags`
 - Versioning: `get_bucket_versioning`, `put_bucket_versioning`, `list_object_versions`, `get_object_version`, `delete_object_version`
 - Presigning: `presign_get_object`
@@ -245,8 +245,9 @@ preview requests in parallel, then displays:
 9. **AbixIO** (when applicable): shard inspection, manual heal
 
 When a bucket is selected:
-1. **Overview**: bucket name, prefix, folder/object counts
-2. **Versioning**: status + enable/suspend buttons
+1. **Overview**: bucket name, prefix
+2. **Contents**: folder and object counts
+3. **Versioning**: status + enable/suspend buttons
 3. **Bucket Tags**: tag list with add/remove
 4. **Policy**: stored JSON display + delete
 5. **Lifecycle**: lifecycle rules display + delete

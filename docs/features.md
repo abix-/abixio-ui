@@ -69,16 +69,16 @@ MinIO.
 | Gaps | Move and rename | Yes | 7/10 | Server-side copy + delete. Move and Rename buttons in detail panel. |
 | Gaps | Search and find | Partial | 6/10 | Filter box for local listing plus recursive Find. No time/size/metadata filters yet. |
 | Gaps | Bucket delete | Yes | 7/10 | Implemented as recursive delete with typed-name confirmation. |
-| Gaps | Presigned sharing | No | 0/10 | No share-link generation. |
+| Gaps | Presigned sharing | Partial | 7/10 | Share button with expiry picker. No upload URLs. |
 | Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
 | Gaps | Versioning and recovery | Partial | 7/10 | Enable/suspend per bucket, version list, restore, delete version. No undo or rewind. |
 | Gaps | Bulk object operations | Partial | 7/10 | Multi-select bulk delete and recursive prefix delete with S3 DeleteObjects batch API. No time/size filtering yet. |
 | Gaps | Object query and inline content inspection | No | 2/10 | No SQL query or inline object viewer. |
-| Gaps | Tags | Partial | 7/10 | Object tags in detail panel (view, add, remove). No bucket tags UI yet. |
-| Gaps | Policy and anonymous access | No | 0/10 | No bucket policy or public access controls. |
+| Gaps | Tags | Partial | 8/10 | Object and bucket tags in detail panels (view, add, remove). No recursive tag set. |
+| Gaps | Policy and anonymous access | Partial | 5/10 | View + delete policy. No inline editor. |
 | Gaps | CLI or automation surface | No | 1/10 | This is still a desktop app, not a scriptable CLI. |
 | Gaps | Retention and legal hold | No | 0/10 | No governance UI yet. |
-| Gaps | Lifecycle and ILM | No | 0/10 | No lifecycle or tiering controls. |
+| Gaps | Lifecycle and ILM | Partial | 4/10 | View + delete lifecycle. No rule editor. |
 | Gaps | Encryption setup | No | 0/10 | No encryption configuration UI. |
 | Gaps | Replication, quota, events, and watch | No | 0/10 | Outside current desktop workflow coverage. |
 

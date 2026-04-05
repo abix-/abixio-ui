@@ -84,7 +84,7 @@ When you click "connect" on a connection profile:
 
 1. Read `settings.json` to get the endpoint and region
 2. Look up `{name}.access-key` and `{name}.secret-key` in the OS keychain
-3. If both keys found: create an authenticated S3 client (AWS Sig V4 via rust-s3)
+3. If both keys found: create an authenticated S3 client (AWS Sig V4 via aws-sdk-s3)
 4. If no keys found: create an anonymous S3 client
 5. List buckets to verify the connection works
 

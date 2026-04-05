@@ -3,6 +3,35 @@
 Native desktop S3 manager and AbixIO admin UI. Built with
 [iced](https://iced.rs) and [aws-sdk-s3](https://docs.rs/aws-sdk-s3).
 
+## Status
+
+**Early development. Not production-ready.**
+
+This project is 2 days old (first commit 2026-04-04). It is ~11k lines of Rust
+across 85 commits, written almost entirely by AI with human direction. The core
+browse, upload, download, copy, sync, and admin workflows function against real
+S3 endpoints, but the project has no releases, no packaging, no user base, and
+no field hours.
+
+What works today:
+- S3 object CRUD, versioning, tagging, policy, lifecycle, presigned URLs
+- Recursive diff/copy/sync with concurrent transfers and rclone-style filters
+- AbixIO admin (disks, healing, shard inspection, manual heal)
+- 145 automated tests including integration tests against real abixio servers
+
+What is honest:
+- No CI beyond `cargo check/clippy/test` on Windows (no cross-platform testing)
+- No installer, no release binaries, no update mechanism
+- Sync bandwidth enforcement fields exist in the UI but do nothing
+- Object content preview is limited to 4KB text
+- No retention, encryption, replication, or quota controls
+- CLI/scripting surface is zero -- this is a GUI-only tool
+- The integration test suite finds real bugs in the abixio server (tagging,
+  chunked encoding in relay, bucket cleanup) that are not yet fixed
+
+If you need a production S3 tool today, use
+[mc](https://github.com/minio/mc) or [rclone](https://rclone.org).
+
 ## Features
 
 - **S3 object browser.** Buckets, prefix navigation, breadcrumbs, filter, recursive find, upload (multipart for large files), download, copy, move, rename, delete (single, multi-select, batch, recursive prefix).

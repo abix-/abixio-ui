@@ -3,23 +3,7 @@
 Current prioritized backlog for `abixio-ui`, ordered by user-facing gaps.
 Detailed parity notes still live in `docs/features.md`.
 
-## 1. inline policy editor
-
-Bucket policy can be viewed and deleted, but not created or edited.
-
-- add create/edit flow for bucket policy JSON
-- validate and display policy save errors clearly
-- keep delete flow as-is
-
-## 2. inline lifecycle editor
-
-Lifecycle rules can be viewed and deleted, but not created or edited.
-
-- add create/edit flow for lifecycle rule JSON or structured fields
-- preserve current view/delete behavior
-- surface validation errors before submit when possible
-
-## 3. presigned upload URLs
+## 1. presigned upload URLs
 
 Presigned GET exists. Presigned PUT does not.
 
@@ -27,7 +11,7 @@ Presigned GET exists. Presigned PUT does not.
 - let the user choose expiry, matching the existing share URL pattern
 - keep download URL generation unchanged
 
-## 4. richer inline content viewer
+## 2. richer inline content viewer
 
 The detail panel only previews the first 4KB of text objects.
 
@@ -35,7 +19,7 @@ The detail panel only previews the first 4KB of text objects.
 - improve handling for larger text objects
 - define a clear fallback for binary or unsupported content
 
-## 5. sync, mirror, and diff
+## 3. sync, mirror, and diff
 
 Recursive import/export exists, but there is no sync-style workflow.
 
@@ -43,14 +27,14 @@ Recursive import/export exists, but there is no sync-style workflow.
 - add drift/diff visibility before destructive changes
 - make overwrite and delete behavior explicit
 
-## 6. richer search and filters
+## 4. richer search and filters
 
 Current search supports local filtering and recursive find by name/path only.
 
 - add time, size, metadata, or tag-based filters
 - preserve current simple substring and wildcard search
 
-## 7. version rewind and recovery
+## 5. version rewind and recovery
 
 Bucket versioning, version browsing, restore, and delete already exist.
 

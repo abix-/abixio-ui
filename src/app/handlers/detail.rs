@@ -1,4 +1,8 @@
 use iced::Task;
+use iced::widget::text_editor;
+
+use crate::app::{BucketDocumentKind, BucketDocumentLoadState};
+use crate::s3::lifecycle_xml;
 
 use crate::s3::client::VersionInfo;
 
@@ -52,19 +56,17 @@ impl App {
 
     // -- bucket policy/lifecycle/tags --
 
-    pub(crate) fn handle_bucket_policy_loaded(
+    pub(crate) fn handle_bucket_document_loaded(
         &mut self,
-        r: Result<String, String>,
+        kind: BucketDocumentKind,
+        r: Result<Option<String>, String>,
     ) -> Task<Message> {
-        self.bucket_policy = Some(r);
-        Task::none()
-    }
-
-    pub(crate) fn handle_bucket_lifecycle_loaded(
-        &mut self,
-        r: Result<String, String>,
-    ) -> Task<Message> {
-        self.bucket_lifecycle = Some(r);
+        let loaded = match r {
+            Ok(Some(text)) => BucketDocumentLoadState::Loaded(text),
+            Ok(None) => BucketDocumentLoadState::Absent,
+            Err(error) => BucketDocumentLoadState::Error(error),
+        };
+        self.bucket_document_state_mut(kind).set_loaded(loaded);
         Task::none()
     }
 
@@ -76,48 +78,161 @@ impl App {
         Task::none()
     }
 
-    pub(crate) fn handle_delete_bucket_policy(&mut self) -> Task<Message> {
-        if let Some(bucket) = &self.selected_bucket {
-            let client = self.client.clone();
-            let bucket = bucket.clone();
-            Task::perform(
-                async move { client.delete_bucket_policy(&bucket).await },
-                Message::BucketPolicyDeleted,
-            )
-        } else {
-            Task::none()
+    pub(crate) fn handle_open_bucket_document_editor(
+        &mut self,
+        kind: BucketDocumentKind,
+    ) -> Task<Message> {
+        for other in [BucketDocumentKind::Policy, BucketDocumentKind::Lifecycle] {
+            if other == kind {
+                self.bucket_document_state_mut(other).start_editing();
+            } else {
+                self.bucket_document_state_mut(other).cancel_editing();
+            }
         }
-    }
-
-    pub(crate) fn handle_bucket_policy_deleted(&mut self, r: Result<(), String>) -> Task<Message> {
-        if let Err(e) = r {
-            self.error = Some(format!("delete policy failed: {}", e));
-        }
-        self.bucket_policy = Some(Ok(String::new()));
         Task::none()
     }
 
-    pub(crate) fn handle_delete_bucket_lifecycle(&mut self) -> Task<Message> {
+    pub(crate) fn handle_cancel_bucket_document_editor(
+        &mut self,
+        kind: BucketDocumentKind,
+    ) -> Task<Message> {
+        self.bucket_document_state_mut(kind).cancel_editing();
+        Task::none()
+    }
+
+    pub(crate) fn handle_bucket_document_edited(
+        &mut self,
+        kind: BucketDocumentKind,
+        action: text_editor::Action,
+    ) -> Task<Message> {
+        self.bucket_document_state_mut(kind).editor.perform(action);
+        Task::none()
+    }
+
+    pub(crate) fn handle_save_bucket_document(
+        &mut self,
+        kind: BucketDocumentKind,
+    ) -> Task<Message> {
+        let Some(bucket) = self.selected_bucket.clone() else {
+            return Task::none();
+        };
+
+        let text = self.bucket_document_state(kind).editor.text();
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            self.bucket_document_state_mut(kind).error =
+                Some(kind.validation_empty_error().to_string());
+            return Task::none();
+        }
+
+        let normalized = match kind {
+            BucketDocumentKind::Policy => {
+                match serde_json::from_str::<serde_json::Value>(trimmed) {
+                    Ok(json) => match serde_json::to_string_pretty(&json) {
+                        Ok(pretty) => pretty,
+                        Err(error) => {
+                            self.bucket_document_state_mut(kind).error = Some(error.to_string());
+                            return Task::none();
+                        }
+                    },
+                    Err(error) => {
+                        self.bucket_document_state_mut(kind).error =
+                            Some(format!("Invalid JSON: {}", error));
+                        return Task::none();
+                    }
+                }
+            }
+            BucketDocumentKind::Lifecycle => match lifecycle_xml::normalize_xml(trimmed) {
+                Ok(xml) => xml,
+                Err(error) => {
+                    self.bucket_document_state_mut(kind).error =
+                        Some(format!("Invalid XML: {}", error));
+                    return Task::none();
+                }
+            },
+        };
+
+        {
+            let state = self.bucket_document_state_mut(kind);
+            state.error = None;
+            state.saving = true;
+            state.editor = text_editor::Content::with_text(&normalized);
+        }
+
+        let client = self.client.clone();
+        Task::perform(
+            async move {
+                match kind {
+                    BucketDocumentKind::Policy => {
+                        client.put_bucket_policy(&bucket, &normalized).await
+                    }
+                    BucketDocumentKind::Lifecycle => {
+                        client.put_bucket_lifecycle(&bucket, &normalized).await
+                    }
+                }
+            },
+            move |result| Message::BucketDocumentSaved(kind, result),
+        )
+    }
+
+    pub(crate) fn handle_bucket_document_saved(
+        &mut self,
+        kind: BucketDocumentKind,
+        r: Result<(), String>,
+    ) -> Task<Message> {
+        match r {
+            Ok(()) => {
+                self.bucket_document_state_mut(kind).cancel_editing();
+                if let Some(bucket) = &self.selected_bucket {
+                    self.cmd_fetch_bucket_document(kind, bucket)
+                } else {
+                    Task::none()
+                }
+            }
+            Err(error) => {
+                let state = self.bucket_document_state_mut(kind);
+                state.saving = false;
+                state.error = Some(format!("{}: {}", kind.save_error_prefix(), error));
+                Task::none()
+            }
+        }
+    }
+
+    pub(crate) fn handle_delete_bucket_document(
+        &mut self,
+        kind: BucketDocumentKind,
+    ) -> Task<Message> {
         if let Some(bucket) = &self.selected_bucket {
             let client = self.client.clone();
             let bucket = bucket.clone();
             Task::perform(
-                async move { client.delete_bucket_lifecycle(&bucket).await },
-                Message::BucketLifecycleDeleted,
+                async move {
+                    match kind {
+                        BucketDocumentKind::Policy => client.delete_bucket_policy(&bucket).await,
+                        BucketDocumentKind::Lifecycle => {
+                            client.delete_bucket_lifecycle(&bucket).await
+                        }
+                    }
+                },
+                move |result| Message::BucketDocumentDeleted(kind, result),
             )
         } else {
             Task::none()
         }
     }
 
-    pub(crate) fn handle_bucket_lifecycle_deleted(
+    pub(crate) fn handle_bucket_document_deleted(
         &mut self,
+        kind: BucketDocumentKind,
         r: Result<(), String>,
     ) -> Task<Message> {
-        if let Err(e) = r {
-            self.error = Some(format!("delete lifecycle failed: {}", e));
+        let state = self.bucket_document_state_mut(kind);
+        state.saving = false;
+        if let Err(error) = r {
+            state.error = Some(format!("{}: {}", kind.delete_error_prefix(), error));
+            return Task::none();
         }
-        self.bucket_lifecycle = Some(Ok(String::new()));
+        state.set_loaded(BucketDocumentLoadState::Absent);
         Task::none()
     }
 
@@ -453,21 +568,21 @@ impl App {
         )
     }
 
-    pub(crate) fn cmd_fetch_bucket_policy(&self, bucket: &str) -> Task<Message> {
+    pub(crate) fn cmd_fetch_bucket_document(
+        &self,
+        kind: BucketDocumentKind,
+        bucket: &str,
+    ) -> Task<Message> {
         let client = self.client.clone();
         let bucket = bucket.to_string();
         Task::perform(
-            async move { client.get_bucket_policy(&bucket).await },
-            Message::BucketPolicyLoaded,
-        )
-    }
-
-    pub(crate) fn cmd_fetch_bucket_lifecycle(&self, bucket: &str) -> Task<Message> {
-        let client = self.client.clone();
-        let bucket = bucket.to_string();
-        Task::perform(
-            async move { client.get_bucket_lifecycle(&bucket).await },
-            Message::BucketLifecycleLoaded,
+            async move {
+                match kind {
+                    BucketDocumentKind::Policy => client.get_bucket_policy(&bucket).await,
+                    BucketDocumentKind::Lifecycle => client.get_bucket_lifecycle(&bucket).await,
+                }
+            },
+            move |result| Message::BucketDocumentLoaded(kind, result),
         )
     }
 

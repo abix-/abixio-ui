@@ -139,7 +139,7 @@ Operations (see `s3/client.rs` for full API):
 - Versioning: `get_bucket_versioning`, `put_bucket_versioning`, `list_object_versions`, `get_object_version`, `delete_object_version`
 - Presigning: `presign_get_object`
 - Policy: `get_bucket_policy`, `put_bucket_policy`, `delete_bucket_policy`
-- Lifecycle: `get_bucket_lifecycle`, `delete_bucket_lifecycle`
+- Lifecycle: `get_bucket_lifecycle`, `put_bucket_lifecycle`, `delete_bucket_lifecycle`
 
 ### Copy and move strategy
 
@@ -253,8 +253,8 @@ When a bucket is selected:
 2. **Contents**: folder and object counts
 3. **Versioning**: status + enable/suspend buttons
 3. **Bucket Tags**: tag list with add/remove
-4. **Policy**: stored JSON display + delete
-5. **Lifecycle**: lifecycle rules display + delete
+4. **Policy**: inline JSON view, create, edit, delete
+5. **Lifecycle**: inline XML view, create, edit, delete
 6. **Actions**: Refresh, Delete Bucket
 
 See [s3.md](s3.md) for full details on each operation and UI feature.

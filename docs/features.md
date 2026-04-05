@@ -25,10 +25,10 @@ MinIO.
 | Bulk delete and batch object workflows | Multi-select bulk delete, recursive prefix delete, S3 DeleteObjects batch API (1000 keys/call) | Recursive `mc rm`, batch-oriented workflows | 7/10 | Partial | Multi-select bulk delete and recursive prefix delete with confirmation modals. Uses S3 DeleteObjects API. No time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Preview of first 4KB of text objects in detail panel | `mc sql`, `mc cat`, `mc head` | 5/10 | Partial | Inline text preview. No SQL query or binary viewer. |
 | Tags | Object and bucket tags in detail panels (view, add, remove) | `mc tag` | 8/10 | Partial | Object and bucket tags via S3 tagging API. No recursive tag set. |
-| Bucket policy and anonymous access | View and delete bucket policy in detail panel | `mc anonymous` | 5/10 | Partial | Policy JSON view and delete. No inline editor yet. |
+| Bucket policy and anonymous access | Inline bucket policy JSON view, edit, create, and delete in detail panel | `mc anonymous` | 7/10 | Partial | Policy editor now exists inline in bucket detail. No higher-level anonymous-access workflow yet. |
 | CLI, scripting, and automation | GUI only, plus in-app smoke tests and auto-run test mode | Full CLI, JSON and quiet modes, shell automation | 1/10 | None | `abixio-ui` is still a desktop app, not an operations CLI. |
 | Retention and legal hold | Not implemented | `mc retention`, `mc legalhold` | 0/10 | None | Governance and compliance controls are absent. |
-| Lifecycle, ILM, and tiering | View and delete lifecycle config in bucket detail | `mc ilm` | 4/10 | Partial | Lifecycle view and delete. No inline rule editor. |
+| Lifecycle, ILM, and tiering | Inline bucket lifecycle XML view, edit, create, and delete in bucket detail | `mc ilm` | 6/10 | Partial | Lifecycle editor now works inline with native XML. No higher-level rule builder or tiering workflow yet. |
 | Encryption config | Not implemented | `mc encrypt` | 0/10 | None | No bucket or object encryption configuration UI. |
 | Replication, quota, events, and watch | Not implemented | `mc replicate`, `mc quota`, `mc event`, `mc watch` | 0/10 | None | No replication, quota, event, or watch tooling. |
 | MinIO-specific admin, support, IDP, and license commands | Not implemented | `mc admin`, `mc support`, `mc idp`, `mc license` | n/a | Out of scope | These are MinIO platform-management features, not current `abixio-ui` goals. |
@@ -75,10 +75,10 @@ MinIO.
 | Gaps | Bulk object operations | Partial | 7/10 | Multi-select bulk delete and recursive prefix delete with S3 DeleteObjects batch API. No time/size filtering yet. |
 | Gaps | Object query and inline content inspection | Partial | 5/10 | First 4KB text preview in detail panel. No SQL query or binary viewer. |
 | Gaps | Tags | Partial | 8/10 | Object and bucket tags in detail panels (view, add, remove). No recursive tag set. |
-| Gaps | Policy and anonymous access | Partial | 5/10 | View + delete policy. No inline editor. |
+| Gaps | Policy and anonymous access | Partial | 7/10 | Inline JSON policy editor exists. Higher-level anonymous-access workflow is still missing. |
 | Gaps | CLI or automation surface | No | 1/10 | This is still a desktop app, not a scriptable CLI. |
 | Gaps | Retention and legal hold | No | 0/10 | No governance UI yet. |
-| Gaps | Lifecycle and ILM | Partial | 4/10 | View + delete lifecycle. No rule editor. |
+| Gaps | Lifecycle and ILM | Partial | 6/10 | Inline XML lifecycle editor exists. No structured rule builder yet. |
 | Gaps | Encryption setup | No | 0/10 | No encryption configuration UI. |
 | Gaps | Replication, quota, events, and watch | No | 0/10 | Outside current desktop workflow coverage. |
 
@@ -91,8 +91,6 @@ MinIO.
 - Versioning: undo/rewind-by-time (version browse, restore, and delete exist).
 - Bulk object operations: time/size filters.
 - SQL queries on object content.
-- Inline policy editor (view/delete exists, no create/edit).
-- Inline lifecycle rule editor (view/delete exists, no create/edit).
 - CLI and scriptable automation surface.
 - Retention and legal-hold controls.
 - Encryption setup controls.
@@ -124,13 +122,13 @@ Migrated to `aws-sdk-s3` to eliminate all API blockers.
 | PutObjectTagging | yes | `put_object_tagging` | yes | add tag from detail panel |
 | DeleteObjectTagging | yes | `delete_object_tagging` | yes | remove tag from detail panel |
 | GetBucketLifecycle | yes | `get_bucket_lifecycle` | yes | wired to bucket detail panel |
-| PutBucketLifecycle | yes | `put_bucket_lifecycle` | no | client method exists, no UI editor yet |
+| PutBucketLifecycle | yes | `put_bucket_lifecycle` | yes | inline XML editor in bucket detail panel |
 | DeleteBucketLifecycle | yes | `delete_bucket_lifecycle` | yes | wired to bucket detail panel |
 | Presign GET | yes | presigning config | yes | share button with expiry picker in detail panel |
 | Presign PUT | yes | presigning config | no | not yet implemented |
 | ListObjectVersions | yes | `list_object_versions` | yes | wired to detail panel versions list |
 | GetBucketPolicy | yes | `get_bucket_policy` | yes | wired to bucket detail panel |
-| PutBucketPolicy | yes | `put_bucket_policy` | no | client method exists, no UI editor yet |
+| PutBucketPolicy | yes | `put_bucket_policy` | yes | inline JSON editor in bucket detail panel |
 | DeleteBucketPolicy | yes | `delete_bucket_policy` | yes | wired to bucket detail panel |
 | GetBucketVersioning | yes | `get_bucket_versioning` | yes | wired to bucket detail panel |
 | PutBucketVersioning | yes | `put_bucket_versioning` | yes | enable/suspend buttons in bucket detail |
@@ -156,8 +154,7 @@ Most operations are wired to the UI. Remaining unwired operations
 - Rough parity summary: `abixio-ui` is strongest in browse, object CRUD (copy,
   move, rename, bulk delete), recursive import and export, saved connections,
   versioning, tags, and AbixIO-specific admin. It is still weak in scripting
-  parity and advanced S3 management features (inline policy/lifecycle editors,
-  retention, encryption).
+  parity and advanced S3 management features (retention, encryption).
 - The Settings view shows live network counters (requests, bytes sent,
   bytes received) from the S3 client's atomic counters.
 - Leaving credential fields blank while editing a saved connection keeps the

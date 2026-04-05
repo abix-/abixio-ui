@@ -9,11 +9,14 @@ use aws_credential_types::credential_fn::provide_credentials_fn;
 use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{AppName, BehaviorVersion, Builder, Region, timeout::TimeoutConfig};
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
     BucketVersioningStatus, CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier, Tag,
     Tagging, VersioningConfiguration,
 };
+
+use crate::s3::lifecycle_xml;
 
 const MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024; // 8MB
 const MULTIPART_PART_SIZE: usize = 8 * 1024 * 1024; // 8MB
@@ -809,17 +812,16 @@ impl S3Client {
 
     // -- bucket policy --
 
-    pub async fn get_bucket_policy(&self, bucket: &str) -> Result<String, String> {
-        let resp = self
-            .client
-            .get_bucket_policy()
-            .bucket(bucket)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+    pub async fn get_bucket_policy(&self, bucket: &str) -> Result<Option<String>, String> {
+        let resp = self.client.get_bucket_policy().bucket(bucket).send().await;
+        let resp = match resp {
+            Ok(resp) => resp,
+            Err(error) if error.code() == Some("NoSuchBucketPolicy") => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
         self.record_request();
 
-        Ok(resp.policy().unwrap_or("").to_string())
+        Ok(Some(resp.policy().unwrap_or("").to_string()))
     }
 
     pub async fn put_bucket_policy(&self, bucket: &str, policy_json: &str) -> Result<(), String> {
@@ -847,40 +849,49 @@ impl S3Client {
 
     // -- bucket lifecycle --
 
-    pub async fn get_bucket_lifecycle(&self, bucket: &str) -> Result<String, String> {
+    pub async fn get_bucket_lifecycle(&self, bucket: &str) -> Result<Option<String>, String> {
         let resp = self
             .client
             .get_bucket_lifecycle_configuration()
             .bucket(bucket)
             .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .await;
+        let resp = match resp {
+            Ok(resp) => resp,
+            Err(error) if error.code() == Some("NoSuchLifecycleConfiguration") => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
         self.record_request();
 
-        // serialize rules back to a displayable string
-        let rules = resp.rules();
-        let mut result = String::new();
-        for rule in rules {
-            result.push_str(&format!(
-                "ID: {}, Status: {:?}\n",
-                rule.id().unwrap_or(""),
-                rule.status()
-            ));
-            if let Some(exp) = rule.expiration()
-                && let Some(days) = exp.days()
-            {
-                result.push_str(&format!("  Expiration: {} days\n", days));
-            }
-            if let Some(filter) = rule.filter()
-                && let Some(prefix) = filter.prefix()
-            {
-                result.push_str(&format!("  Prefix: {}\n", prefix));
-            }
-        }
-        if result.is_empty() {
-            result = "No lifecycle rules".to_string();
-        }
-        Ok(result)
+        let config = aws_sdk_s3::types::BucketLifecycleConfiguration::builder()
+            .set_rules(Some(resp.rules().to_vec()))
+            .build()
+            .map_err(|error| error.to_string())?;
+        let xml = lifecycle_xml::lifecycle_configuration_to_xml(
+            &config,
+            resp.transition_default_minimum_object_size(),
+        )?;
+        Ok(Some(xml))
+    }
+
+    pub async fn put_bucket_lifecycle(
+        &self,
+        bucket: &str,
+        lifecycle_xml_text: &str,
+    ) -> Result<(), String> {
+        let (config, transition_default_minimum_object_size) =
+            lifecycle_xml::lifecycle_configuration_from_xml(lifecycle_xml_text)?;
+
+        self.client
+            .put_bucket_lifecycle_configuration()
+            .bucket(bucket)
+            .lifecycle_configuration(config)
+            .set_transition_default_minimum_object_size(transition_default_minimum_object_size)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        self.record_request();
+        Ok(())
     }
 
     pub async fn delete_bucket_lifecycle(&self, bucket: &str) -> Result<(), String> {

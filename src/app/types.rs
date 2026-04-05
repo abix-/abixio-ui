@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use iced::widget::text_editor;
+
 use crate::s3::client::BucketInfo;
 
 pub const CURRENT_CONNECTION_ID: &str = "__current__";
@@ -117,4 +119,154 @@ pub struct PrefixDeleteState {
     pub next_index: usize,
     pub deleting: bool,
     pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BucketDocumentKind {
+    Policy,
+    Lifecycle,
+}
+
+impl BucketDocumentKind {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Policy => "Policy",
+            Self::Lifecycle => "Lifecycle",
+        }
+    }
+
+    pub fn empty_label(self) -> &'static str {
+        match self {
+            Self::Policy => "No policy configured.",
+            Self::Lifecycle => "No lifecycle configuration.",
+        }
+    }
+
+    pub fn create_label(self) -> &'static str {
+        match self {
+            Self::Policy => "Create Policy",
+            Self::Lifecycle => "Create Lifecycle",
+        }
+    }
+
+    pub fn edit_label(self) -> &'static str {
+        match self {
+            Self::Policy => "Edit Policy",
+            Self::Lifecycle => "Edit Lifecycle",
+        }
+    }
+
+    pub fn delete_label(self) -> &'static str {
+        match self {
+            Self::Policy => "Delete Policy",
+            Self::Lifecycle => "Delete Lifecycle",
+        }
+    }
+
+    pub fn save_error_prefix(self) -> &'static str {
+        match self {
+            Self::Policy => "save policy failed",
+            Self::Lifecycle => "save lifecycle failed",
+        }
+    }
+
+    pub fn delete_error_prefix(self) -> &'static str {
+        match self {
+            Self::Policy => "delete policy failed",
+            Self::Lifecycle => "delete lifecycle failed",
+        }
+    }
+
+    pub fn validation_empty_error(self) -> &'static str {
+        match self {
+            Self::Policy => "Policy JSON cannot be empty.",
+            Self::Lifecycle => "Lifecycle XML cannot be empty.",
+        }
+    }
+
+    pub fn example(self) -> &'static str {
+        match self {
+            Self::Policy => "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": []\n}",
+            Self::Lifecycle => {
+                "<LifecycleConfiguration>\n  <Rule>\n    <ID>expire-logs</ID>\n    <Filter>\n      <Prefix>logs/</Prefix>\n    </Filter>\n    <Status>Enabled</Status>\n    <Expiration>\n      <Days>30</Days>\n    </Expiration>\n  </Rule>\n</LifecycleConfiguration>"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BucketDocumentLoadState {
+    Absent,
+    Loaded(String),
+    Error(String),
+}
+
+pub struct BucketDocumentState {
+    pub loaded: Option<BucketDocumentLoadState>,
+    pub editor: text_editor::Content,
+    pub editing: bool,
+    pub saving: bool,
+    pub error: Option<String>,
+}
+
+impl Default for BucketDocumentState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BucketDocumentState {
+    pub fn new() -> Self {
+        Self {
+            loaded: None,
+            editor: text_editor::Content::new(),
+            editing: false,
+            saving: false,
+            error: None,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.loaded = None;
+        self.reset_editor("");
+    }
+
+    pub fn start_editing(&mut self) {
+        let text = match &self.loaded {
+            Some(BucketDocumentLoadState::Loaded(text)) => text.as_str(),
+            _ => "",
+        };
+        self.editing = true;
+        self.saving = false;
+        self.error = None;
+        self.editor = text_editor::Content::with_text(text);
+    }
+
+    pub fn cancel_editing(&mut self) {
+        let text = match &self.loaded {
+            Some(BucketDocumentLoadState::Loaded(text)) => text.clone(),
+            _ => String::new(),
+        };
+        self.reset_editor(&text);
+    }
+
+    pub fn set_loaded(&mut self, loaded: BucketDocumentLoadState) {
+        let text = match &loaded {
+            BucketDocumentLoadState::Loaded(text) => text.clone(),
+            _ => String::new(),
+        };
+        self.loaded = Some(loaded);
+        if !self.editing {
+            self.editor = text_editor::Content::with_text(&text);
+        }
+        self.saving = false;
+        self.error = None;
+    }
+
+    pub fn reset_editor(&mut self, text: &str) {
+        self.editor = text_editor::Content::with_text(text);
+        self.editing = false;
+        self.saving = false;
+        self.error = None;
+    }
 }

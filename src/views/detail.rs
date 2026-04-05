@@ -1,7 +1,9 @@
-use iced::widget::{button, column, container, row, scrollable, space, text};
+use iced::widget::{button, column, container, row, scrollable, space, text, text_editor};
 use iced::{Element, Length};
 
-use crate::app::{App, Message, Selection};
+use crate::app::{
+    App, BucketDocumentKind, BucketDocumentLoadState, BucketDocumentState, Message, Selection,
+};
 
 impl App {
     pub fn detail_view(&self) -> Element<'_, Message> {
@@ -99,35 +101,14 @@ impl App {
                     col = col.push(text("No tags").size(10));
                 }
 
-                // bucket policy
-                col = col.push(section("Policy"));
-                match &self.bucket_policy {
-                    Some(Ok(p)) if !p.is_empty() => {
-                        col = col.push(text(p).size(9));
-                        col = col.push(
-                            button(text("Delete Policy").size(11))
-                                .on_press(Message::DeleteBucketPolicy),
-                        );
-                    }
-                    _ => {
-                        col = col.push(text("No policy").size(10));
-                    }
-                }
-
-                // bucket lifecycle
-                col = col.push(section("Lifecycle"));
-                match &self.bucket_lifecycle {
-                    Some(Ok(l)) if !l.is_empty() && l != "No lifecycle rules" => {
-                        col = col.push(text(l).size(9));
-                        col = col.push(
-                            button(text("Delete Lifecycle").size(11))
-                                .on_press(Message::DeleteBucketLifecycle),
-                        );
-                    }
-                    _ => {
-                        col = col.push(text("No lifecycle rules").size(10));
-                    }
-                }
+                col = col.push(bucket_document_section(
+                    BucketDocumentKind::Policy,
+                    &self.bucket_policy,
+                ));
+                col = col.push(bucket_document_section(
+                    BucketDocumentKind::Lifecycle,
+                    &self.bucket_lifecycle,
+                ));
 
                 col = col.push(section("Actions"));
                 col = col.push(
@@ -718,4 +699,84 @@ fn format_size(bytes: u64) -> String {
             bytes
         )
     }
+}
+
+fn bucket_document_section<'a>(
+    kind: BucketDocumentKind,
+    state: &'a BucketDocumentState,
+) -> Element<'a, Message> {
+    let mut col = column![section(kind.title())].spacing(4);
+
+    if state.editing {
+        if matches!(state.loaded, Some(BucketDocumentLoadState::Absent) | None) {
+            col = col.push(text("Start from this example:").size(10));
+            col = col.push(text(kind.example()).size(9));
+        }
+
+        col = col.push(
+            text_editor(&state.editor)
+                .placeholder(kind.example())
+                .on_action(move |action| Message::BucketDocumentEdited(kind, action))
+                .height(Length::Fixed(180.0))
+                .padding(8)
+                .size(10),
+        );
+
+        if let Some(error) = &state.error {
+            col = col.push(text(error).size(10));
+        }
+
+        let save_button = if state.saving {
+            button(text("Saving...").size(11))
+        } else {
+            button(text("Save").size(11)).on_press(Message::SaveBucketDocument(kind))
+        };
+
+        col = col.push(
+            row![
+                save_button,
+                button(text("Cancel").size(11)).on_press(Message::CancelBucketDocumentEditor(kind)),
+            ]
+            .spacing(4),
+        );
+
+        return col.into();
+    }
+
+    match &state.loaded {
+        None => {
+            col = col.push(text("Loading...").size(10));
+        }
+        Some(BucketDocumentLoadState::Absent) => {
+            col = col.push(text(kind.empty_label()).size(10));
+            col = col.push(
+                button(text(kind.create_label()).size(11))
+                    .on_press(Message::OpenBucketDocumentEditor(kind)),
+            );
+        }
+        Some(BucketDocumentLoadState::Loaded(text_value)) => {
+            col = col.push(text(text_value).size(9));
+            if let Some(error) = &state.error {
+                col = col.push(text(error).size(10));
+            }
+            col = col.push(
+                row![
+                    button(text(kind.edit_label()).size(11))
+                        .on_press(Message::OpenBucketDocumentEditor(kind)),
+                    button(text(kind.delete_label()).size(11))
+                        .on_press(Message::DeleteBucketDocument(kind)),
+                ]
+                .spacing(4),
+            );
+        }
+        Some(BucketDocumentLoadState::Error(error)) => {
+            col = col.push(text(format!("Error: {}", error)).size(10));
+            col = col.push(
+                button(text(kind.create_label()).size(11))
+                    .on_press(Message::OpenBucketDocumentEditor(kind)),
+            );
+        }
+    }
+
+    col.into()
 }

@@ -258,6 +258,8 @@ impl App {
                     self.find_results = None;
                     self.objects = None;
                     self.detail = None;
+                    self.reset_bucket_document_states();
+                    self.bucket_tags = None;
                     self.clear_object_admin_state();
                 }
                 self.loading_buckets = true;

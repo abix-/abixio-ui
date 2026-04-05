@@ -46,6 +46,8 @@ impl App {
                 self.object_filter.clear();
                 self.selected_keys.clear();
                 self.find_results = None;
+                self.reset_bucket_document_states();
+                self.bucket_tags = None;
                 self.clear_object_admin_state();
                 self.loading_buckets = true;
                 self.is_abixio = false;

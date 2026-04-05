@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::keyboard;
-use iced::widget::{button, column, container, row, stack, text};
+use iced::widget::{button, column, container, row, stack, text, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 
 use crate::abixio::client::AdminClient;
@@ -24,9 +24,10 @@ pub use transfer_ops::{
     prepare_export_items, prepare_import_items, run_transfer_step, wildcard_match,
 };
 pub use types::{
-    BucketDeleteState, BucketDeleteStepResult, BulkDeleteState, CURRENT_CONNECTION_ID,
-    OverwritePolicy, PrefixDeleteState, StartupOptions, TransferEndpoint, TransferItem,
-    TransferMode, TransferState, TransferStepResult,
+    BucketDeleteState, BucketDeleteStepResult, BucketDocumentKind, BucketDocumentLoadState,
+    BucketDocumentState, BulkDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy,
+    PrefixDeleteState, StartupOptions, TransferEndpoint, TransferItem, TransferMode, TransferState,
+    TransferStepResult,
 };
 
 // -- messages --
@@ -152,13 +153,15 @@ pub enum Message {
     ShareUrlGenerated(Result<String, String>),
 
     // bucket policy / lifecycle / tags
-    BucketPolicyLoaded(Result<String, String>),
-    BucketLifecycleLoaded(Result<String, String>),
+    BucketDocumentLoaded(BucketDocumentKind, Result<Option<String>, String>),
     BucketTagsLoaded(Result<std::collections::HashMap<String, String>, String>),
-    DeleteBucketPolicy,
-    DeleteBucketLifecycle,
-    BucketPolicyDeleted(Result<(), String>),
-    BucketLifecycleDeleted(Result<(), String>),
+    OpenBucketDocumentEditor(BucketDocumentKind),
+    CancelBucketDocumentEditor(BucketDocumentKind),
+    BucketDocumentEdited(BucketDocumentKind, text_editor::Action),
+    SaveBucketDocument(BucketDocumentKind),
+    BucketDocumentSaved(BucketDocumentKind, Result<(), String>),
+    DeleteBucketDocument(BucketDocumentKind),
+    BucketDocumentDeleted(BucketDocumentKind, Result<(), String>),
     BucketTagKeyChanged(String),
     BucketTagValueChanged(String),
     AddBucketTag,
@@ -283,8 +286,8 @@ pub struct App {
     pub share_expiry_secs: u64,
 
     // bucket config
-    pub bucket_policy: Option<Result<String, String>>,
-    pub bucket_lifecycle: Option<Result<String, String>>,
+    pub bucket_policy: BucketDocumentState,
+    pub bucket_lifecycle: BucketDocumentState,
     pub bucket_tags: Option<Result<std::collections::HashMap<String, String>, String>>,
     pub bucket_tag_key: String,
     pub bucket_tag_value: String,
@@ -409,8 +412,8 @@ impl App {
             share_modal_open: false,
             share_url: None,
             share_expiry_secs: 3600,
-            bucket_policy: None,
-            bucket_lifecycle: None,
+            bucket_policy: BucketDocumentState::new(),
+            bucket_lifecycle: BucketDocumentState::new(),
             bucket_tags: None,
             bucket_tag_key: String::new(),
             bucket_tag_value: String::new(),
@@ -612,13 +615,21 @@ impl App {
             Message::ShareExpiryChanged(s) => self.handle_share_expiry_changed(s),
             Message::GenerateShareUrl => self.handle_generate_share_url(),
             Message::ShareUrlGenerated(r) => self.handle_share_url_generated(r),
-            Message::BucketPolicyLoaded(r) => self.handle_bucket_policy_loaded(r),
-            Message::BucketLifecycleLoaded(r) => self.handle_bucket_lifecycle_loaded(r),
+            Message::BucketDocumentLoaded(kind, r) => self.handle_bucket_document_loaded(kind, r),
             Message::BucketTagsLoaded(r) => self.handle_bucket_tags_loaded(r),
-            Message::DeleteBucketPolicy => self.handle_delete_bucket_policy(),
-            Message::DeleteBucketLifecycle => self.handle_delete_bucket_lifecycle(),
-            Message::BucketPolicyDeleted(r) => self.handle_bucket_policy_deleted(r),
-            Message::BucketLifecycleDeleted(r) => self.handle_bucket_lifecycle_deleted(r),
+            Message::OpenBucketDocumentEditor(kind) => {
+                self.handle_open_bucket_document_editor(kind)
+            }
+            Message::CancelBucketDocumentEditor(kind) => {
+                self.handle_cancel_bucket_document_editor(kind)
+            }
+            Message::BucketDocumentEdited(kind, action) => {
+                self.handle_bucket_document_edited(kind, action)
+            }
+            Message::SaveBucketDocument(kind) => self.handle_save_bucket_document(kind),
+            Message::BucketDocumentSaved(kind, r) => self.handle_bucket_document_saved(kind, r),
+            Message::DeleteBucketDocument(kind) => self.handle_delete_bucket_document(kind),
+            Message::BucketDocumentDeleted(kind, r) => self.handle_bucket_document_deleted(kind, r),
             Message::BucketTagKeyChanged(s) => self.handle_bucket_tag_key_changed(s),
             Message::BucketTagValueChanged(s) => self.handle_bucket_tag_value_changed(s),
             Message::AddBucketTag => self.handle_add_bucket_tag(),
@@ -803,14 +814,39 @@ impl App {
         )?;
         Ok(Arc::new(client))
     }
+
+    pub(crate) fn bucket_document_state(&self, kind: BucketDocumentKind) -> &BucketDocumentState {
+        match kind {
+            BucketDocumentKind::Policy => &self.bucket_policy,
+            BucketDocumentKind::Lifecycle => &self.bucket_lifecycle,
+        }
+    }
+
+    pub(crate) fn bucket_document_state_mut(
+        &mut self,
+        kind: BucketDocumentKind,
+    ) -> &mut BucketDocumentState {
+        match kind {
+            BucketDocumentKind::Policy => &mut self.bucket_policy,
+            BucketDocumentKind::Lifecycle => &mut self.bucket_lifecycle,
+        }
+    }
+
+    pub(crate) fn reset_bucket_document_states(&mut self) {
+        self.bucket_policy.reset();
+        self.bucket_lifecycle.reset();
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use iced::widget::text_editor;
+
     use super::types::{
-        BucketDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy, TransferMode, TransferState,
+        BucketDeleteState, BucketDocumentLoadState, CURRENT_CONNECTION_ID, OverwritePolicy,
+        TransferMode, TransferState,
     };
-    use super::{App, Message, Selection, StartupOptions};
+    use super::{App, BucketDocumentKind, Message, Selection, StartupOptions};
     use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
 
     fn sample_inspect(bucket: &str, key: &str) -> ObjectInspectResponse {
@@ -993,5 +1029,100 @@ mod tests {
         ));
 
         assert!(app.bucket_delete_can_start());
+    }
+
+    #[test]
+    fn opening_one_bucket_document_editor_closes_the_other() {
+        let (mut app, _) = App::new(empty_startup());
+        app.bucket_policy
+            .set_loaded(BucketDocumentLoadState::Loaded(
+                "{\"Version\":\"2012-10-17\"}".to_string(),
+            ));
+        app.bucket_lifecycle
+            .set_loaded(BucketDocumentLoadState::Loaded(
+                "<LifecycleConfiguration />".to_string(),
+            ));
+
+        let _ = app.update(Message::OpenBucketDocumentEditor(
+            BucketDocumentKind::Policy,
+        ));
+        assert!(app.bucket_policy.editing);
+        assert!(!app.bucket_lifecycle.editing);
+
+        let _ = app.update(Message::OpenBucketDocumentEditor(
+            BucketDocumentKind::Lifecycle,
+        ));
+        assert!(!app.bucket_policy.editing);
+        assert!(app.bucket_lifecycle.editing);
+    }
+
+    #[test]
+    fn cancel_bucket_document_editor_restores_loaded_text() {
+        let (mut app, _) = App::new(empty_startup());
+        app.bucket_policy
+            .set_loaded(BucketDocumentLoadState::Loaded(
+                "{\"Version\":\"2012-10-17\"}".to_string(),
+            ));
+
+        let _ = app.update(Message::OpenBucketDocumentEditor(
+            BucketDocumentKind::Policy,
+        ));
+        app.bucket_policy.editor = text_editor::Content::with_text("{\"Version\":\"custom\"}");
+
+        let _ = app.update(Message::CancelBucketDocumentEditor(
+            BucketDocumentKind::Policy,
+        ));
+
+        assert!(!app.bucket_policy.editing);
+        assert_eq!(
+            app.bucket_policy.editor.text(),
+            "{\"Version\":\"2012-10-17\"}"
+        );
+    }
+
+    #[test]
+    fn empty_bucket_document_save_is_blocked_locally() {
+        let (mut app, _) = App::new(empty_startup());
+        app.selected_bucket = Some("bucket-a".to_string());
+        app.selection = Selection::Bucket("bucket-a".to_string());
+        app.bucket_policy
+            .set_loaded(BucketDocumentLoadState::Absent);
+
+        let _ = app.update(Message::OpenBucketDocumentEditor(
+            BucketDocumentKind::Policy,
+        ));
+        app.bucket_policy.editor = text_editor::Content::with_text("   ");
+
+        let _ = app.update(Message::SaveBucketDocument(BucketDocumentKind::Policy));
+
+        assert_eq!(
+            app.bucket_policy.error.as_deref(),
+            Some("Policy JSON cannot be empty.")
+        );
+        assert!(!app.bucket_policy.saving);
+    }
+
+    #[test]
+    fn selecting_bucket_resets_bucket_document_editors() {
+        let (mut app, _) = App::new(empty_startup());
+        app.bucket_policy
+            .set_loaded(BucketDocumentLoadState::Loaded(
+                "{\"Version\":\"2012-10-17\"}".to_string(),
+            ));
+        app.bucket_lifecycle
+            .set_loaded(BucketDocumentLoadState::Loaded(
+                "<LifecycleConfiguration />".to_string(),
+            ));
+        let _ = app.update(Message::OpenBucketDocumentEditor(
+            BucketDocumentKind::Policy,
+        ));
+        app.bucket_policy.error = Some("invalid".to_string());
+
+        let _ = app.update(Message::SelectBucket("bucket-b".to_string()));
+
+        assert!(!app.bucket_policy.editing);
+        assert!(app.bucket_policy.loaded.is_none());
+        assert!(app.bucket_policy.error.is_none());
+        assert!(app.bucket_lifecycle.loaded.is_none());
     }
 }

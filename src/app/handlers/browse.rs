@@ -3,7 +3,7 @@ use iced::Task;
 use crate::s3::client::{BucketInfo, ListObjectsResult, ObjectDetail};
 
 use super::super::transfer_ops::wildcard_match;
-use super::super::{App, Message, Selection};
+use super::super::{App, BucketDocumentKind, Message, Selection};
 
 impl App {
     pub(crate) fn handle_select_bucket(&mut self, name: String) -> Task<Message> {
@@ -15,14 +15,13 @@ impl App {
         self.selection = Selection::Bucket(name.clone());
         self.clear_object_admin_state();
         self.loading_objects = true;
-        self.bucket_policy = None;
-        self.bucket_lifecycle = None;
+        self.reset_bucket_document_states();
         self.bucket_tags = None;
         Task::batch(vec![
             self.cmd_fetch_objects(),
             self.cmd_fetch_versioning_status(&name),
-            self.cmd_fetch_bucket_policy(&name),
-            self.cmd_fetch_bucket_lifecycle(&name),
+            self.cmd_fetch_bucket_document(BucketDocumentKind::Policy, &name),
+            self.cmd_fetch_bucket_document(BucketDocumentKind::Lifecycle, &name),
             self.cmd_fetch_bucket_tags(&name),
         ])
     }
@@ -73,6 +72,8 @@ impl App {
     pub(crate) fn handle_clear_selection(&mut self) -> Task<Message> {
         self.selection = Selection::None;
         self.clear_object_admin_state();
+        self.bucket_policy.cancel_editing();
+        self.bucket_lifecycle.cancel_editing();
         Task::none()
     }
 
@@ -121,6 +122,7 @@ impl App {
             Ok(()) => {
                 self.selection = Selection::None;
                 self.clear_object_admin_state();
+                self.reset_bucket_document_states();
                 self.loading_objects = true;
                 self.cmd_fetch_objects()
             }
@@ -148,6 +150,7 @@ impl App {
                 self.find_results = None;
                 self.objects = None;
                 self.detail = None;
+                self.reset_bucket_document_states();
                 self.loading_buckets = true;
                 self.loading_objects = true;
                 Task::batch(vec![self.cmd_fetch_buckets(), self.cmd_fetch_objects()])

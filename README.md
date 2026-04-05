@@ -7,6 +7,7 @@ Native desktop S3 manager and AbixIO admin UI. Built with
 
 - **S3 object browser.** Buckets, prefix navigation, breadcrumbs, filter, recursive find, upload (multipart for large files), download, copy, move, rename, delete (single, multi-select, batch, recursive prefix).
 - **Object versioning.** Enable/suspend versioning per bucket. Version list in detail panel with restore and delete.
+- **Bucket policy and lifecycle editors.** Inline JSON policy editor and inline XML lifecycle editor in the bucket detail panel.
 - **Object tagging.** View, add, remove tags in the detail panel.
 - **Multi-server connections.** Save, edit, test, switch. OS keychain for credentials.
 - **AWS Sig V4 auth.** Works with AWS, MinIO, AbixIO, Backblaze, or any S3-compatible endpoint.
@@ -30,7 +31,6 @@ cargo build --release
 
 ## Not yet implemented
 
-- Inline policy/lifecycle rule editor (view and delete exist)
 - Presigned upload URLs (download URLs implemented)
 - Full inline content viewer (first 4KB text preview exists)
 

@@ -20,7 +20,7 @@ MinIO.
 | Search, find, and filtering | Filter box with substring and wildcard matching on current listing, plus recursive Find across all prefixes | `mc find` | 6/10 | Partial | Local instant filter on loaded objects plus recursive find with wildcard or substring pattern. Missing: time, size, metadata, and tag filters. |
 | Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
 | Presigned sharing | Share button in detail panel with expiry picker and generated URL | `mc share` | 7/10 | Partial | Presigned GET URL generation with configurable expiry. No upload URLs yet. |
-| Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
+| Recursive sync, mirror, and diff | Phase 1 planning scaffold only; no execution yet | `mc mirror`, `mc diff` | 1/10 | None | Sync section, state, planner module, and tuning fields exist, but there is no shipped diff engine or execution workflow yet. |
 | Versioning and recovery | Enable/suspend versioning per bucket, version list in detail panel, restore old versions, delete specific versions | `mc version`, `mc undo` | 7/10 | Partial | Full versioning support: enable/suspend per bucket, version list with restore and delete. No undo or rewind-by-time yet. |
 | Bulk delete and batch object workflows | Multi-select bulk delete, recursive prefix delete, S3 DeleteObjects batch API (1000 keys/call) | Recursive `mc rm`, batch-oriented workflows | 7/10 | Partial | Multi-select bulk delete and recursive prefix delete with confirmation modals. Uses S3 DeleteObjects API. No time/size filters, no dry-run. |
 | SQL, object query, and inline content inspection | Preview of first 4KB of text objects in detail panel | `mc sql`, `mc cat`, `mc head` | 5/10 | Partial | Inline text preview. No SQL query or binary viewer. |
@@ -70,7 +70,7 @@ MinIO.
 | Gaps | Search and find | Partial | 6/10 | Filter box for local listing plus recursive Find. No time/size/metadata filters yet. |
 | Gaps | Bucket delete | Yes | 7/10 | Implemented as recursive delete with typed-name confirmation. |
 | Gaps | Presigned sharing | Yes | 7/10 | Share button with expiry picker. No upload URLs. |
-| Gaps | Mirror, diff, sync | No | 0/10 | No recursive sync workflow. |
+| Gaps | Mirror, diff, sync | No | 1/10 | Phase 1 scaffold exists. No real diff planning or copy/mirror execution yet. |
 | Gaps | Versioning and recovery | Partial | 7/10 | Enable/suspend per bucket, version list, restore, delete version. No undo or rewind. |
 | Gaps | Bulk object operations | Partial | 7/10 | Multi-select bulk delete and recursive prefix delete with S3 DeleteObjects batch API. No time/size filtering yet. |
 | Gaps | Object query and inline content inspection | Partial | 5/10 | First 4KB text preview in detail panel. No SQL query or binary viewer. |
@@ -87,7 +87,7 @@ MinIO.
 - Move and rename: multi-source move, recursive prefix move (single-object move/rename exists).
 - Search and find: time, size, metadata, and tag filters (basic name/path filtering exists).
 - Presigned upload URLs (download URLs implemented).
-- Recursive sync, mirror, and diff workflows.
+- Recursive sync, mirror, and diff workflows (Phase 1 scaffold only; see `docs/sync.md`).
 - Versioning: undo/rewind-by-time (version browse, restore, and delete exist).
 - Bulk object operations: time/size filters.
 - SQL queries on object content.
@@ -154,7 +154,7 @@ Most operations are wired to the UI. Remaining unwired operations
 - Rough parity summary: `abixio-ui` is strongest in browse, object CRUD (copy,
   move, rename, bulk delete), recursive import and export, saved connections,
   versioning, tags, and AbixIO-specific admin. It is still weak in scripting
-  parity and advanced S3 management features (retention, encryption).
+  parity and advanced S3 management features (retention, encryption, sync).
 - The Settings view shows live network counters (requests, bytes sent,
   bytes received) from the S3 client's atomic counters.
 - Leaving credential fields blank while editing a saved connection keeps the

@@ -23,9 +23,17 @@ The detail panel only previews the first 4KB of text objects.
 
 Recursive import/export exists, but there is no sync-style workflow.
 
-- add recursive sync or mirror between local and S3
-- add drift/diff visibility before destructive changes
-- make overwrite and delete behavior explicit
+Current status:
+- Phase 1 scaffold exists in the app (`Sync` section, state/messages/view, planner module, sync-oriented S3 listing helper)
+- real enumeration, real diff preview, and all execution behavior are still pending
+
+Implementation phases:
+- Phase 1: finish real diff planning and preview
+- Phase 2: copy execution from plan
+- Phase 3: mirror execution with guarded deletes
+- Phase 4: performance tuning, fast-list/top-up, richer filters, telemetry
+
+See `docs/sync.md` for the full design and rollout plan.
 
 ## 4. richer search and filters
 

@@ -32,6 +32,7 @@ cargo build --release
 ## Not yet implemented
 
 - Presigned upload URLs (download URLs implemented)
+- Real sync/mirror execution. Phase 1 sync planning scaffold exists; see `docs/sync.md`.
 - Full inline content viewer (first 4KB text preview exists)
 
 ## Documentation
@@ -41,6 +42,7 @@ cargo build --release
 | [s3.md](docs/s3.md) | S3 SDK config, every operation, UI features, response handling |
 | [features.md](docs/features.md) | MinIO client parity tracking |
 | [architecture.md](docs/architecture.md) | App architecture, layout, async model |
+| [sync.md](docs/sync.md) | Sync design, performance model, and phased rollout |
 | [credentials.md](docs/credentials.md) | OS keychain credential storage |
 | [testing.md](docs/testing.md) | Smoke test system |
 

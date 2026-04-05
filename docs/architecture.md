@@ -25,6 +25,7 @@ src/
   main.rs             # iced::application() entry point
   app/
     mod.rs            # App state, Message enum, update(), view()
+    sync_ops.rs       # Sync planning helpers and compare engine
     types.rs          # App-owned state structs and workflow state
     transfer_ops.rs   # Shared transfer/import/export helpers
     handlers/         # Per-domain update handlers
@@ -50,6 +51,7 @@ src/
     detail.rs         # right context panel (metadata, actions, AbixIO admin, bulk delete modal)
     transfer.rs       # copy/move/rename modal, import/export workflows
     settings.rs       # settings view (theme, perf stats, about)
+    sync.rs           # sync/diff configuration and preview workflow
     testing.rs        # in-app end-to-end smoke tests
 ```
 
@@ -207,7 +209,7 @@ Three-panel layout:
 40px     flexible              280px
 ```
 
-- **Left**: icon rail (40px). B=Browse, +=Connections, T=Testing, S=Settings.
+- **Left**: icon rail (40px). B=Browse, Y=Sync, +=Connections, T=Testing, S=Settings.
   D=Disks and H=Healing appear only for AbixIO connections.
 - **Center**: main content, changes based on selected section
 - **Right**: detail panel, shows metadata for the selected object.
@@ -258,6 +260,38 @@ When a bucket is selected:
 6. **Actions**: Refresh, Delete Bucket
 
 See [s3.md](s3.md) for full details on each operation and UI feature.
+
+## Sync architecture
+
+The sync feature is being built as a separate subsystem, not an extension of
+the existing copy/move/import/export modal.
+
+Current scaffold:
+
+- `src/app/types.rs`
+  Sync state, plan, telemetry, tuning, and endpoint types
+- `src/app/handlers/sync.rs`
+  Sync message/update routing and async orchestration skeleton
+- `src/app/sync_ops.rs`
+  Planner helpers, filter handling, and compare engine entry points
+- `src/views/sync.rs`
+  Sync section UI with source/destination config, tuning fields, and plan area
+- `src/s3/client.rs`
+  Sync-oriented recursive S3 listing helper
+
+The intended execution model is staged:
+
+1. source enumerate
+2. destination enumerate
+3. compare
+4. plan build
+5. preview
+6. later: execute plan for copy or mirror
+
+This separation is deliberate. Sync needs its own performance tunables,
+telemetry, and destructive-operation guardrails.
+
+See [sync.md](sync.md) for the detailed phased plan.
 
 ## Testing tab
 

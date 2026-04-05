@@ -19,16 +19,16 @@ MinIO.
 | Copy, move, rename, import, and export | Server-side copy (same-bucket and cross-bucket), move (copy+delete), rename, recursive folder import, recursive prefix export, overwrite prompts | Core `mc cp` and `mc mv` workflows | 8/10 | Partial | Copy uses S3 server-side CopyObject API for both same-bucket and cross-bucket operations. Move and rename use copy-then-delete. No multi-source copy or advanced `mc cp` option surface. |
 | Search, find, and filtering | Filter box with substring and wildcard matching on current listing, plus recursive Find across all prefixes | `mc find` | 6/10 | Partial | Local instant filter on loaded objects plus recursive find with wildcard or substring pattern. Missing: time, size, metadata, and tag filters. |
 | Bucket create and delete | Create bucket modal and recursive bucket delete with typed-name confirmation | `mc mb`, `mc rb` | 7/10 | Partial | Core bucket lifecycle now exists. Advanced options and CLI flags are still missing. |
-| Presigned sharing | Not implemented | `mc share` | 0/10 | None | No temporary share, download, or upload URL generation. |
+| Presigned sharing | Share button in detail panel with expiry picker and generated URL | `mc share` | 7/10 | Partial | Presigned GET URL generation with configurable expiry. No upload URLs yet. |
 | Recursive sync, mirror, and diff | Not implemented | `mc mirror`, `mc diff` | 0/10 | None | No folder sync, replica, or drift comparison workflow. |
 | Versioning and recovery | Enable/suspend versioning per bucket, version list in detail panel, restore old versions, delete specific versions | `mc version`, `mc undo` | 7/10 | Partial | Full versioning support: enable/suspend per bucket, version list with restore and delete. No undo or rewind-by-time yet. |
 | Bulk delete and batch object workflows | Multi-select bulk delete, recursive prefix delete, S3 DeleteObjects batch API (1000 keys/call) | Recursive `mc rm`, batch-oriented workflows | 7/10 | Partial | Multi-select bulk delete and recursive prefix delete with confirmation modals. Uses S3 DeleteObjects API. No time/size filters, no dry-run. |
-| SQL, object query, and inline content inspection | Metadata only | `mc sql`, `mc cat`, `mc head` | 2/10 | Partial | Metadata inspection exists, but there is no object-content query or inline viewer workflow. |
-| Tags | Object tags in detail panel (view, add, remove) | `mc tag` | 7/10 | Partial | Object tags supported via S3 tagging API. No bucket tags UI yet. No recursive tag set. |
-| Bucket policy and anonymous access | Not implemented | `mc anonymous` | 0/10 | None | No bucket policy or public-access management UI. |
+| SQL, object query, and inline content inspection | Preview of first 4KB of text objects in detail panel | `mc sql`, `mc cat`, `mc head` | 5/10 | Partial | Inline text preview. No SQL query or binary viewer. |
+| Tags | Object and bucket tags in detail panels (view, add, remove) | `mc tag` | 8/10 | Partial | Object and bucket tags via S3 tagging API. No recursive tag set. |
+| Bucket policy and anonymous access | View and delete bucket policy in detail panel | `mc anonymous` | 5/10 | Partial | Policy JSON view and delete. No inline editor yet. |
 | CLI, scripting, and automation | GUI only, plus in-app smoke tests and auto-run test mode | Full CLI, JSON and quiet modes, shell automation | 1/10 | None | `abixio-ui` is still a desktop app, not an operations CLI. |
 | Retention and legal hold | Not implemented | `mc retention`, `mc legalhold` | 0/10 | None | Governance and compliance controls are absent. |
-| Lifecycle, ILM, and tiering | Not implemented | `mc ilm` | 0/10 | None | No lifecycle-rule or tiering controls. |
+| Lifecycle, ILM, and tiering | View and delete lifecycle config in bucket detail | `mc ilm` | 4/10 | Partial | Lifecycle view and delete. No inline rule editor. |
 | Encryption config | Not implemented | `mc encrypt` | 0/10 | None | No bucket or object encryption configuration UI. |
 | Replication, quota, events, and watch | Not implemented | `mc replicate`, `mc quota`, `mc event`, `mc watch` | 0/10 | None | No replication, quota, event, or watch tooling. |
 | MinIO-specific admin, support, IDP, and license commands | Not implemented | `mc admin`, `mc support`, `mc idp`, `mc license` | n/a | Out of scope | These are MinIO platform-management features, not current `abixio-ui` goals. |
@@ -86,13 +86,12 @@ MinIO.
 
 - Move and rename: multi-source move, recursive prefix move (single-object move/rename exists).
 - Search and find: time, size, metadata, and tag filters (basic name/path filtering exists).
-- Presigned sharing links.
+- Presigned upload URLs (download URLs implemented).
 - Recursive sync, mirror, and diff workflows.
 - Versioning: undo/rewind-by-time (version browse, restore, and delete exist).
 - Bulk object operations: time/size filters.
-- SQL and object query tools, plus inline object-content inspection.
-- Bucket tags (object tags are implemented).
-- Bucket policy and anonymous-access management.
+- SQL queries on object content.
+- Inline policy/lifecycle editor (view/delete exists).
 - CLI and scriptable automation surface.
 - Retention and legal-hold controls.
 - Lifecycle, ILM, and tiering controls.

@@ -577,6 +577,173 @@ impl S3Client {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    // -- presigned URLs --
+
+    pub async fn presign_get_object(
+        &self,
+        bucket: &str,
+        key: &str,
+        expires_secs: u64,
+    ) -> Result<String, String> {
+        let presigning_config = aws_sdk_s3::presigning::PresigningConfig::builder()
+            .expires_in(Duration::from_secs(expires_secs))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let presigned = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(presigned.uri().to_string())
+    }
+
+    // -- bucket policy --
+
+    pub async fn get_bucket_policy(&self, bucket: &str) -> Result<String, String> {
+        let resp = self
+            .client
+            .get_bucket_policy()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(resp.policy().unwrap_or("").to_string())
+    }
+
+    pub async fn put_bucket_policy(
+        &self,
+        bucket: &str,
+        policy_json: &str,
+    ) -> Result<(), String> {
+        self.client
+            .put_bucket_policy()
+            .bucket(bucket)
+            .policy(policy_json)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_bucket_policy(&self, bucket: &str) -> Result<(), String> {
+        self.client
+            .delete_bucket_policy()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // -- bucket lifecycle --
+
+    pub async fn get_bucket_lifecycle(&self, bucket: &str) -> Result<String, String> {
+        let resp = self
+            .client
+            .get_bucket_lifecycle_configuration()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // serialize rules back to a displayable string
+        let rules = resp.rules();
+        let mut result = String::new();
+        for rule in rules {
+            result.push_str(&format!(
+                "ID: {}, Status: {:?}\n",
+                rule.id().unwrap_or(""),
+                rule.status()
+            ));
+            if let Some(exp) = rule.expiration() {
+                if let Some(days) = exp.days() {
+                    result.push_str(&format!("  Expiration: {} days\n", days));
+                }
+            }
+            if let Some(filter) = rule.filter() {
+                if let Some(prefix) = filter.prefix() {
+                    result.push_str(&format!("  Prefix: {}\n", prefix));
+                }
+            }
+        }
+        if result.is_empty() {
+            result = "No lifecycle rules".to_string();
+        }
+        Ok(result)
+    }
+
+    pub async fn delete_bucket_lifecycle(&self, bucket: &str) -> Result<(), String> {
+        self.client
+            .delete_bucket_lifecycle()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // -- bucket tags --
+
+    pub async fn get_bucket_tags(
+        &self,
+        bucket: &str,
+    ) -> Result<HashMap<String, String>, String> {
+        let resp = self
+            .client
+            .get_bucket_tagging()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut tags = HashMap::new();
+        for tag in resp.tag_set() {
+            tags.insert(tag.key().to_string(), tag.value().to_string());
+        }
+        Ok(tags)
+    }
+
+    pub async fn put_bucket_tags(
+        &self,
+        bucket: &str,
+        tags: HashMap<String, String>,
+    ) -> Result<(), String> {
+        let tag_set: Vec<Tag> = tags
+            .into_iter()
+            .map(|(k, v)| Tag::builder().key(k).value(v).build().expect("tag fields"))
+            .collect();
+
+        let tagging = Tagging::builder()
+            .set_tag_set(Some(tag_set))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        self.client
+            .put_bucket_tagging()
+            .bucket(bucket)
+            .tagging(tagging)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_bucket_tags(&self, bucket: &str) -> Result<(), String> {
+        self.client
+            .delete_bucket_tagging()
+            .bucket(bucket)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

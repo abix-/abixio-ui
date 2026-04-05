@@ -143,6 +143,30 @@ pub enum Message {
     ConfirmPrefixDelete,
     PrefixDeleteBatchFinished(Result<usize, String>),
 
+    // presigned sharing
+    OpenShareModal,
+    CloseShareModal,
+    ShareExpiryChanged(String),
+    GenerateShareUrl,
+    ShareUrlGenerated(Result<String, String>),
+
+    // bucket policy / lifecycle / tags
+    BucketPolicyLoaded(Result<String, String>),
+    BucketLifecycleLoaded(Result<String, String>),
+    BucketTagsLoaded(Result<std::collections::HashMap<String, String>, String>),
+    DeleteBucketPolicy,
+    DeleteBucketLifecycle,
+    BucketPolicyDeleted(Result<(), String>),
+    BucketLifecycleDeleted(Result<(), String>),
+    BucketTagKeyChanged(String),
+    BucketTagValueChanged(String),
+    AddBucketTag,
+    RemoveBucketTag(String),
+    BucketTagsSaved(Result<(), String>),
+
+    // object preview
+    PreviewLoaded(Result<String, String>),
+
     // versioning
     VersioningStatusLoaded(Result<String, String>),
     VersionsLoaded(Result<Vec<VersionInfo>, String>),
@@ -359,6 +383,21 @@ pub struct App {
     pub find_results: Option<Result<ListObjectsResult, String>>,
     pub finding: bool,
 
+    // presigned sharing
+    pub share_modal_open: bool,
+    pub share_url: Option<String>,
+    pub share_expiry_secs: u64,
+
+    // bucket config
+    pub bucket_policy: Option<Result<String, String>>,
+    pub bucket_lifecycle: Option<Result<String, String>>,
+    pub bucket_tags: Option<Result<std::collections::HashMap<String, String>, String>>,
+    pub bucket_tag_key: String,
+    pub bucket_tag_value: String,
+
+    // object preview
+    pub object_preview: Option<Result<String, String>>,
+
     // versioning
     pub bucket_versioning: Option<Result<String, String>>,
     pub object_versions: Option<Result<Vec<VersionInfo>, String>>,
@@ -470,6 +509,15 @@ impl App {
             object_filter: String::new(),
             find_results: None,
             finding: false,
+            share_modal_open: false,
+            share_url: None,
+            share_expiry_secs: 3600,
+            bucket_policy: None,
+            bucket_lifecycle: None,
+            bucket_tags: None,
+            bucket_tag_key: String::new(),
+            bucket_tag_value: String::new(),
+            object_preview: None,
             bucket_versioning: None,
             object_versions: None,
             loading_versions: false,
@@ -554,9 +602,15 @@ impl App {
                 self.selection = Selection::Bucket(name.clone());
                 self.clear_object_admin_state();
                 self.loading_objects = true;
+                self.bucket_policy = None;
+                self.bucket_lifecycle = None;
+                self.bucket_tags = None;
                 Task::batch(vec![
                     self.cmd_fetch_objects(),
                     self.cmd_fetch_versioning_status(&name),
+                    self.cmd_fetch_bucket_policy(&name),
+                    self.cmd_fetch_bucket_lifecycle(&name),
+                    self.cmd_fetch_bucket_tags(&name),
                 ])
             }
             Message::NavigatePrefix(prefix) => {
@@ -589,12 +643,14 @@ impl App {
                         self.cmd_fetch_object_inspect(&bucket, &key),
                         self.cmd_fetch_tags(&bucket, &key),
                         self.cmd_fetch_versions(&bucket, &key),
+                        self.cmd_fetch_preview(&bucket, &key),
                     ])
                 } else {
                     Task::batch(vec![
                         self.cmd_fetch_detail(&bucket, &key),
                         self.cmd_fetch_tags(&bucket, &key),
                         self.cmd_fetch_versions(&bucket, &key),
+                        self.cmd_fetch_preview(&bucket, &key),
                     ])
                 }
             }
@@ -1771,6 +1827,168 @@ impl App {
                 }
             }
 
+            // -- presigned sharing --
+            Message::OpenShareModal => {
+                self.share_modal_open = true;
+                self.share_url = None;
+                Task::none()
+            }
+            Message::CloseShareModal => {
+                self.share_modal_open = false;
+                self.share_url = None;
+                Task::none()
+            }
+            Message::ShareExpiryChanged(s) => {
+                self.share_expiry_secs = s.parse().unwrap_or(3600);
+                Task::none()
+            }
+            Message::GenerateShareUrl => {
+                if let Selection::Object { bucket, key } = &self.selection {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    let key = key.clone();
+                    let secs = self.share_expiry_secs;
+                    Task::perform(
+                        async move { client.presign_get_object(&bucket, &key, secs).await },
+                        Message::ShareUrlGenerated,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::ShareUrlGenerated(r) => {
+                match r {
+                    Ok(url) => self.share_url = Some(url),
+                    Err(e) => self.error = Some(format!("presign failed: {}", e)),
+                }
+                Task::none()
+            }
+
+            // -- bucket policy/lifecycle/tags --
+            Message::BucketPolicyLoaded(r) => {
+                self.bucket_policy = Some(r);
+                Task::none()
+            }
+            Message::BucketLifecycleLoaded(r) => {
+                self.bucket_lifecycle = Some(r);
+                Task::none()
+            }
+            Message::BucketTagsLoaded(r) => {
+                self.bucket_tags = Some(r);
+                Task::none()
+            }
+            Message::DeleteBucketPolicy => {
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    Task::perform(
+                        async move { client.delete_bucket_policy(&bucket).await },
+                        Message::BucketPolicyDeleted,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::BucketPolicyDeleted(r) => {
+                if let Err(e) = r {
+                    self.error = Some(format!("delete policy failed: {}", e));
+                }
+                self.bucket_policy = Some(Ok(String::new()));
+                Task::none()
+            }
+            Message::DeleteBucketLifecycle => {
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    Task::perform(
+                        async move { client.delete_bucket_lifecycle(&bucket).await },
+                        Message::BucketLifecycleDeleted,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::BucketLifecycleDeleted(r) => {
+                if let Err(e) = r {
+                    self.error = Some(format!("delete lifecycle failed: {}", e));
+                }
+                self.bucket_lifecycle = Some(Ok(String::new()));
+                Task::none()
+            }
+            Message::BucketTagKeyChanged(s) => {
+                self.bucket_tag_key = s;
+                Task::none()
+            }
+            Message::BucketTagValueChanged(s) => {
+                self.bucket_tag_value = s;
+                Task::none()
+            }
+            Message::AddBucketTag => {
+                let key = self.bucket_tag_key.trim().to_string();
+                let value = self.bucket_tag_value.trim().to_string();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                let mut tags = match &self.bucket_tags {
+                    Some(Ok(t)) => t.clone(),
+                    _ => std::collections::HashMap::new(),
+                };
+                tags.insert(key, value);
+                self.bucket_tag_key.clear();
+                self.bucket_tag_value.clear();
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    Task::perform(
+                        async move { client.put_bucket_tags(&bucket, tags).await },
+                        Message::BucketTagsSaved,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::RemoveBucketTag(tag_key) => {
+                let mut tags = match &self.bucket_tags {
+                    Some(Ok(t)) => t.clone(),
+                    _ => std::collections::HashMap::new(),
+                };
+                tags.remove(&tag_key);
+                if let Some(bucket) = &self.selected_bucket {
+                    let client = self.client.clone();
+                    let bucket = bucket.clone();
+                    if tags.is_empty() {
+                        Task::perform(
+                            async move { client.delete_bucket_tags(&bucket).await },
+                            Message::BucketTagsSaved,
+                        )
+                    } else {
+                        Task::perform(
+                            async move { client.put_bucket_tags(&bucket, tags).await },
+                            Message::BucketTagsSaved,
+                        )
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            Message::BucketTagsSaved(Ok(())) => {
+                if let Some(bucket) = &self.selected_bucket {
+                    self.cmd_fetch_bucket_tags(bucket)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::BucketTagsSaved(Err(e)) => {
+                self.error = Some(format!("bucket tag save failed: {}", e));
+                Task::none()
+            }
+
+            // -- object preview --
+            Message::PreviewLoaded(r) => {
+                self.object_preview = Some(r);
+                Task::none()
+            }
+
             // -- versioning --
             Message::VersioningStatusLoaded(r) => {
                 self.bucket_versioning = Some(r);
@@ -2114,10 +2332,15 @@ impl App {
         } else {
             with_transfer
         };
-        if self.prefix_delete.is_some() {
+        let with_prefix = if self.prefix_delete.is_some() {
             stack![with_bulk, self.prefix_delete_modal()].into()
         } else {
             with_bulk
+        };
+        if self.share_modal_open {
+            stack![with_prefix, self.share_modal()].into()
+        } else {
+            with_prefix
         }
     }
 
@@ -2161,6 +2384,48 @@ impl App {
         Task::perform(
             async move { client.list_object_versions(&bucket, &key).await },
             Message::VersionsLoaded,
+        )
+    }
+
+    fn cmd_fetch_bucket_policy(&self, bucket: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        Task::perform(
+            async move { client.get_bucket_policy(&bucket).await },
+            Message::BucketPolicyLoaded,
+        )
+    }
+
+    fn cmd_fetch_bucket_lifecycle(&self, bucket: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        Task::perform(
+            async move { client.get_bucket_lifecycle(&bucket).await },
+            Message::BucketLifecycleLoaded,
+        )
+    }
+
+    fn cmd_fetch_bucket_tags(&self, bucket: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        Task::perform(
+            async move { client.get_bucket_tags(&bucket).await },
+            Message::BucketTagsLoaded,
+        )
+    }
+
+    fn cmd_fetch_preview(&self, bucket: &str, key: &str) -> Task<Message> {
+        let client = self.client.clone();
+        let bucket = bucket.to_string();
+        let key = key.to_string();
+        Task::perform(
+            async move {
+                let data = client.get_object(&bucket, &key).await?;
+                // take first 4KB, lossy UTF-8
+                let preview_bytes = &data[..data.len().min(4096)];
+                Ok(String::from_utf8_lossy(preview_bytes).to_string())
+            },
+            Message::PreviewLoaded,
         )
     }
 
@@ -2278,6 +2543,9 @@ impl App {
         self.editing_tag_value.clear();
         self.object_versions = None;
         self.loading_versions = false;
+        self.object_preview = None;
+        self.share_modal_open = false;
+        self.share_url = None;
     }
 
     fn begin_tests(&mut self) -> Task<Message> {

@@ -3,31 +3,33 @@
 ## last session: 2026-04-04
 
 ### what we worked on
-- abixio server: structured error responses (RequestId + Resource in XML, x-amz-request-id header)
-- abixio server: presigned URL auth (SigV4 query param verification with expiration)
-- abixio server: conditional requests (If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since)
-- abixio server: object + bucket tagging endpoints (6 S3 endpoints)
-- abixio-ui: object tagging UI in detail panel (view, add, remove)
-- abixio-ui: tagging smoke tests
+- full object versioning across both repos (server storage model + S3 endpoints + UI)
+- server: versioned disk layout (versions.json + uuid data dirs per version)
+- server: proper erasure encode/decode for versioned shards
+- server: PutBucketVersioning, GetBucketVersioning, ListObjectVersions endpoints
+- server: version-id on GET/HEAD/DELETE/PUT, delete markers
+- client: version methods (get/put versioning, list versions, get/delete version)
+- ui: versioning toggle on bucket, version list in object detail, restore, delete version
+- 33 new S3 integration tests (47 total, was 14)
+- tests cover: tagging, conditionals, request-id, versioning, copy, batch delete, range, metadata
 
 ### decisions made
-- **request_id as hex nanos**: matches MinIO pattern, generated in dispatch(), set on all responses via post-processing
-- **error XML includes RequestId + Resource**: matches S3 spec, AWS SDKs parse these
-- **presigned auth reuses existing crypto**: same derive_signing_key, canonical_uri, sha256_hex. new verify_presigned_v4 reads from query params instead of Authorization header
-- **canonical query for presigned excludes X-Amz-Signature**: matches S3/MinIO spec
-- **conditional check order**: If-None-Match (304), If-Modified-Since (304), If-Match (412), If-Unmodified-Since (412) -- matches MinIO/S3 spec
+- **versioned encode/decode**: added encode_and_write_versioned + read_and_decode_versioned that write/read directly to/from version uuid dirs. no legacy path for versioned objects
+- **version index**: versions.json per object dir, newest-first array of VersionEntry
+- **delete markers**: entry in versions.json with is_delete_marker=true, no data dir
+- **suspended versioning**: PUTs use version_id="null", overwrites existing null version
+- **find_latest_version**: handlers check versions.json first, fall back to legacy shard.dat for unversioned
 
 ### current state
-- abixio server: compiles clean, 121 tests pass, 17 S3 endpoints
+- abixio server: 154 tests pass (94 unit + 13 admin + 47 s3 integration)
 - abixio-ui: compiles clean, all tests pass
-- server compliance: 8/10 (up from 7/10)
-- presigned URL auth: working (was "unknown")
-- conditional requests: working (was missing)
-- error responses: now include RequestId, Resource, x-amz-request-id header
+- server: 20 S3 endpoints implemented
+- versioning parity: 7/10 (was 0/10)
+- tags parity: 7/10
+- s3 compliance: 4/10 (honest -- 20 of ~100 endpoints)
 
 ### next steps
-- wire presigned sharing UI in abixio-ui (server presigned auth is ready)
-- bucket tagging UI (server endpoints exist)
-- version browser (requires server versioning -- large scope)
+- presigned sharing UI (server presigned auth is ready, need UI button + modal)
+- search filters (time, size) -- 6/10 to 8/10
+- inline content viewer (mc cat equivalent) -- 2/10 to 5/10
 - multipart upload (required for files >5GB -- large scope)
-- search filters (time, size) to improve find from 6/10

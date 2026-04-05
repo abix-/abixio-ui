@@ -54,6 +54,81 @@ impl App {
                     }
                 }
 
+                // bucket tags
+                col = col.push(section("Bucket Tags"));
+                if let Some(Ok(tags)) = &self.bucket_tags {
+                    if tags.is_empty() {
+                        col = col.push(text("No tags").size(10));
+                    } else {
+                        let mut sorted: Vec<_> = tags.keys().collect();
+                        sorted.sort();
+                        for k in sorted {
+                            let v = &tags[k];
+                            let kc = k.clone();
+                            col = col.push(
+                                row![
+                                    text(k).size(10).width(Length::FillPortion(2)),
+                                    text(v).size(10).width(Length::FillPortion(2)),
+                                    button(text("x").size(9))
+                                        .on_press(Message::RemoveBucketTag(kc))
+                                        .style(button::text),
+                                ]
+                                .spacing(4),
+                            );
+                        }
+                    }
+                    col = col.push(
+                        row![
+                            iced::widget::text_input("key", &self.bucket_tag_key)
+                                .on_input(Message::BucketTagKeyChanged)
+                                .size(10)
+                                .width(Length::FillPortion(2)),
+                            iced::widget::text_input("value", &self.bucket_tag_value)
+                                .on_input(Message::BucketTagValueChanged)
+                                .size(10)
+                                .width(Length::FillPortion(2)),
+                            if self.bucket_tag_key.trim().is_empty() {
+                                button(text("Add").size(9))
+                            } else {
+                                button(text("Add").size(9)).on_press(Message::AddBucketTag)
+                            },
+                        ]
+                        .spacing(4),
+                    );
+                } else if let Some(Err(_)) = &self.bucket_tags {
+                    col = col.push(text("No tags").size(10));
+                }
+
+                // bucket policy
+                col = col.push(section("Policy"));
+                match &self.bucket_policy {
+                    Some(Ok(p)) if !p.is_empty() => {
+                        col = col.push(text(p).size(9));
+                        col = col.push(
+                            button(text("Delete Policy").size(11))
+                                .on_press(Message::DeleteBucketPolicy),
+                        );
+                    }
+                    _ => {
+                        col = col.push(text("No policy").size(10));
+                    }
+                }
+
+                // bucket lifecycle
+                col = col.push(section("Lifecycle"));
+                match &self.bucket_lifecycle {
+                    Some(Ok(l)) if !l.is_empty() && l != "No lifecycle rules" => {
+                        col = col.push(text(l).size(9));
+                        col = col.push(
+                            button(text("Delete Lifecycle").size(11))
+                                .on_press(Message::DeleteBucketLifecycle),
+                        );
+                    }
+                    _ => {
+                        col = col.push(text("No lifecycle rules").size(10));
+                    }
+                }
+
                 col = col.push(section("Actions"));
                 col = col.push(
                     row![
@@ -187,11 +262,27 @@ impl App {
                         col = col.push(text(format!("Versions error: {}", e)).size(10));
                     }
 
+                    // preview (first 4KB of text objects)
+                    if let Some(Ok(preview)) = &self.object_preview {
+                        if !preview.is_empty() {
+                            col = col.push(section("Preview"));
+                            col = col.push(
+                                text(if preview.len() > 500 {
+                                    format!("{}...", &preview[..500])
+                                } else {
+                                    preview.clone()
+                                })
+                                .size(9),
+                            );
+                        }
+                    }
+
                     col = col.push(section("Actions"));
                     col = col.push(
                         row![
                             button(text("Download").size(11))
                                 .on_press(Message::Download(bucket.clone(), key.clone())),
+                            button(text("Share").size(11)).on_press(Message::OpenShareModal),
                             button(text("Copy").size(11)).on_press(Message::OpenCopyObject),
                             button(text("Move").size(11)).on_press(Message::OpenMoveObject),
                             button(text("Rename").size(11)).on_press(Message::OpenRenameObject),
@@ -274,6 +365,64 @@ impl App {
         );
 
         scrollable(col).height(Length::Fill).into()
+    }
+
+    pub fn share_modal(&self) -> Element<'_, Message> {
+        if !self.share_modal_open {
+            return container(text("")).width(Length::Shrink).into();
+        }
+
+        let expiry_options = vec![
+            ("1 hour", "3600"),
+            ("6 hours", "21600"),
+            ("24 hours", "86400"),
+            ("7 days", "604800"),
+        ];
+
+        let mut body = column![
+            text("Share Object").size(16),
+            text("Generate a presigned download URL.").size(11),
+        ]
+        .spacing(8)
+        .padding(12);
+
+        body = body.push(text("Expiry:").size(11));
+        for (label, secs) in &expiry_options {
+            let is_selected = self.share_expiry_secs.to_string() == *secs;
+            let secs_str = secs.to_string();
+            body = body.push(
+                button(text(if is_selected {
+                    format!("> {}", label)
+                } else {
+                    label.to_string()
+                })
+                .size(10))
+                .on_press(Message::ShareExpiryChanged(secs_str))
+                .style(if is_selected {
+                    button::primary
+                } else {
+                    button::text
+                }),
+            );
+        }
+
+        body = body.push(
+            button(text("Generate URL").size(11)).on_press(Message::GenerateShareUrl),
+        );
+
+        if let Some(url) = &self.share_url {
+            body = body.push(
+                iced::widget::text_input("", url)
+                    .size(9)
+                    .width(Length::Fill),
+            );
+        }
+
+        body = body.push(
+            button(text("Close").size(11)).on_press(Message::CloseShareModal),
+        );
+
+        modal_card(body, 420)
     }
 
     pub fn heal_confirm_modal(&self) -> Element<'_, Message> {

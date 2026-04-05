@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://crates.io/api/v1/crates/rust-s3/versions?per_page=3\")",
+      "Bash(cargo build:*)",
+      "Bash(curl -s https://crates.io/api/v1/crates/aws-sdk-s3)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\)['crate']; print\\(f\\\\\"aws-sdk-s3: {d['name']}, downloads: {d['downloads']}, recent: {d['recent_downloads']}, max_version: {d['max_version']}, description: {d.get\\('description','n/a'\\)}\\\\\"\\)\")",
+      "Bash(curl -s https://crates.io/api/v1/crates/rust-s3)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\)['crate']; print\\(f\\\\\"rust-s3: {d['name']}, downloads: {d['downloads']}, recent: {d['recent_downloads']}, max_version: {d['max_version']}, description: {d.get\\('description','n/a'\\)}\\\\\"\\)\")",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Read(//c/code/mc/**)"
+    ]
+  }
+}

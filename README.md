@@ -77,7 +77,7 @@ cargo build --release
 
 ## Related
 
-- **[abixio](https://github.com/abix-/abixio)** -- the S3-compatible object store server. Erasure coding, versioning, multipart upload, 196 tests. This UI connects to it (and any other S3-compatible endpoint).
+- **[abixio](https://github.com/abix-/abixio)** -- the S3-compatible object store server. Erasure coding, versioning, multipart upload, 95 tests. This UI connects to it (and any other S3-compatible endpoint).
 
 ## License
 

@@ -48,7 +48,7 @@ option b: delete perf.rs and remove the metrics section from settings view.
 
 do not ship fake dashboards.
 
-## 4. unit tests for s3/client.rs and config.rs
+## ~~4. unit tests for config.rs, s3 types, abixio types, perf, keychain~~ (done)
 
 s3/client.rs (789 lines) and config.rs (102 lines) have zero unit tests.
 smoke tests cover happy paths but miss:

@@ -532,6 +532,38 @@ impl S3Client {
         })
     }
 
+    pub async fn list_objects_recursive_for_sync(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Result<Vec<crate::app::SyncObject>, String> {
+        let listing = self.list_objects_recursive(bucket, prefix).await?;
+        Ok(listing
+            .objects
+            .into_iter()
+            .map(|object| crate::app::SyncObject {
+                relative_path: object
+                    .key
+                    .strip_prefix(prefix)
+                    .unwrap_or(&object.key)
+                    .trim_start_matches('/')
+                    .to_string(),
+                size: object.size,
+                modified: if object.last_modified.is_empty() {
+                    None
+                } else {
+                    Some(object.last_modified)
+                },
+                etag: if object.etag.is_empty() {
+                    None
+                } else {
+                    Some(object.etag)
+                },
+                is_dir_marker: false,
+            })
+            .collect())
+    }
+
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), String> {
         self.client
             .delete_object()

@@ -122,6 +122,309 @@ pub struct PrefixDeleteState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    Diff,
+    Copy,
+    Sync,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPreset {
+    Converge,
+    UpdateOnly,
+    Exact,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncDestinationNewerPolicy {
+    SourceWins,
+    Skip,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncDeletePhase {
+    Before,
+    During,
+    After,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncPolicy {
+    pub overwrite_changed: bool,
+    pub delete_extras: bool,
+    pub destination_newer_policy: SyncDestinationNewerPolicy,
+    pub delete_phase: SyncDeletePhase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncCompareMode {
+    SizeOnly,
+    SizeAndModTime,
+    UpdateIfSourceNewer,
+    ChecksumIfAvailable,
+    AlwaysOverwrite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncListMode {
+    Streaming,
+    FastList,
+    TopUp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncEndpointKind {
+    S3,
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncEndpoint {
+    S3 {
+        connection_id: String,
+        bucket: String,
+        prefix: String,
+    },
+    Local {
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncFilterSet {
+    pub include_patterns_text: String,
+    pub exclude_patterns_text: String,
+    pub newer_than_text: String,
+    pub older_than_text: String,
+    pub min_size_text: String,
+    pub max_size_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncTuning {
+    pub list_mode: SyncListMode,
+    pub compare_mode: SyncCompareMode,
+    pub list_workers_text: String,
+    pub compare_workers_text: String,
+    pub fast_list_enabled: bool,
+    pub prefer_server_modtime: bool,
+    pub max_planner_items_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncObject {
+    pub relative_path: String,
+    pub size: u64,
+    pub modified: Option<String>,
+    pub etag: Option<String>,
+    pub is_dir_marker: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPlanAction {
+    Create,
+    Update,
+    Delete,
+    Skip,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPlanReason {
+    MissingOnDestination,
+    MissingOnSource,
+    SizeMismatch,
+    SourceNewer,
+    DestinationNewer,
+    ChecksumMismatch,
+    FilteredOut,
+    Identical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPlanItem {
+    pub action: SyncPlanAction,
+    pub reason: SyncPlanReason,
+    pub relative_path: String,
+    pub source: Option<SyncObject>,
+    pub destination: Option<SyncObject>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SyncPlanSummary {
+    pub creates: usize,
+    pub updates: usize,
+    pub deletes: usize,
+    pub skips: usize,
+    pub conflicts: usize,
+    pub bytes_to_create: u64,
+    pub bytes_to_update: u64,
+    pub bytes_to_delete: u64,
+    pub source_scanned: usize,
+    pub destination_scanned: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPlan {
+    pub items: Vec<SyncPlanItem>,
+    pub summary: SyncPlanSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncTelemetry {
+    pub stage: String,
+    pub source_scanned: usize,
+    pub destination_scanned: usize,
+    pub compared: usize,
+    pub filtered: usize,
+    pub started_at: Option<String>,
+    pub last_update_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncState {
+    pub mode: SyncMode,
+    pub preset: SyncPreset,
+    pub policy: SyncPolicy,
+    pub source_kind: SyncEndpointKind,
+    pub destination_kind: SyncEndpointKind,
+    pub source_connection_id: String,
+    pub destination_connection_id: String,
+    pub source_bucket: String,
+    pub destination_bucket: String,
+    pub source_prefix: String,
+    pub destination_prefix: String,
+    pub source_local_path: Option<PathBuf>,
+    pub destination_local_path: Option<PathBuf>,
+    pub source_buckets: Option<Result<Vec<BucketInfo>, String>>,
+    pub destination_buckets: Option<Result<Vec<BucketInfo>, String>>,
+    pub loading_source_buckets: bool,
+    pub loading_destination_buckets: bool,
+    pub tuning: SyncTuning,
+    pub filters: SyncFilterSet,
+    pub running: bool,
+    pub plan: Option<SyncPlan>,
+    pub source_snapshot: Option<Vec<SyncObject>>,
+    pub destination_snapshot: Option<Vec<SyncObject>>,
+    pub telemetry: SyncTelemetry,
+    pub error: Option<String>,
+    pub show_advanced: bool,
+    pub preview_before_run: bool,
+    pub allow_direct_run: bool,
+}
+
+impl SyncState {
+    pub fn new(current_connection_id: String) -> Self {
+        Self {
+            mode: SyncMode::Diff,
+            preset: SyncPreset::Converge,
+            policy: SyncPreset::Converge.policy(),
+            source_kind: SyncEndpointKind::S3,
+            destination_kind: SyncEndpointKind::S3,
+            source_connection_id: current_connection_id.clone(),
+            destination_connection_id: current_connection_id,
+            source_bucket: String::new(),
+            destination_bucket: String::new(),
+            source_prefix: String::new(),
+            destination_prefix: String::new(),
+            source_local_path: None,
+            destination_local_path: None,
+            source_buckets: None,
+            destination_buckets: None,
+            loading_source_buckets: false,
+            loading_destination_buckets: false,
+            tuning: SyncTuning {
+                list_mode: SyncListMode::Streaming,
+                compare_mode: SyncCompareMode::SizeAndModTime,
+                list_workers_text: "8".to_string(),
+                compare_workers_text: "8".to_string(),
+                fast_list_enabled: false,
+                prefer_server_modtime: true,
+                max_planner_items_text: "250000".to_string(),
+            },
+            filters: SyncFilterSet {
+                include_patterns_text: String::new(),
+                exclude_patterns_text: String::new(),
+                newer_than_text: String::new(),
+                older_than_text: String::new(),
+                min_size_text: String::new(),
+                max_size_text: String::new(),
+            },
+            running: false,
+            plan: None,
+            source_snapshot: None,
+            destination_snapshot: None,
+            telemetry: SyncTelemetry {
+                stage: "Idle".to_string(),
+                source_scanned: 0,
+                destination_scanned: 0,
+                compared: 0,
+                filtered: 0,
+                started_at: None,
+                last_update_at: None,
+            },
+            error: None,
+            show_advanced: false,
+            preview_before_run: true,
+            allow_direct_run: false,
+        }
+    }
+}
+
+impl SyncPreset {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Converge => "Converge",
+            Self::UpdateOnly => "Update Only",
+            Self::Exact => "Exact",
+            Self::Custom => "Custom",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Converge => "Source wins. Update changed objects and delete destination extras.",
+            Self::UpdateOnly => "Update changed objects, but keep destination extras.",
+            Self::Exact => {
+                "Require review for destination-newer conflicts before exact convergence."
+            }
+            Self::Custom => "Advanced policy overrides are active.",
+        }
+    }
+
+    pub fn policy(self) -> SyncPolicy {
+        match self {
+            Self::Converge => SyncPolicy {
+                overwrite_changed: true,
+                delete_extras: true,
+                destination_newer_policy: SyncDestinationNewerPolicy::SourceWins,
+                delete_phase: SyncDeletePhase::After,
+            },
+            Self::UpdateOnly => SyncPolicy {
+                overwrite_changed: true,
+                delete_extras: false,
+                destination_newer_policy: SyncDestinationNewerPolicy::SourceWins,
+                delete_phase: SyncDeletePhase::After,
+            },
+            Self::Exact => SyncPolicy {
+                overwrite_changed: true,
+                delete_extras: true,
+                destination_newer_policy: SyncDestinationNewerPolicy::Conflict,
+                delete_phase: SyncDeletePhase::After,
+            },
+            Self::Custom => SyncPolicy {
+                overwrite_changed: true,
+                delete_extras: true,
+                destination_newer_policy: SyncDestinationNewerPolicy::SourceWins,
+                delete_phase: SyncDeletePhase::After,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BucketDocumentKind {
     Policy,
     Lifecycle,

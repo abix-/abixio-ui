@@ -1,4 +1,4 @@
-# Sync, Mirror, And Diff
+# Diff, Copy, And Sync
 
 This document is the working design for the upcoming high-performance sync
 engine in `abixio-ui`.
@@ -29,18 +29,18 @@ The repo now contains the Phase 1 scaffold:
 What is present today:
 
 - source and destination selection for S3 or local endpoints
-- sync mode selection (`Diff`, `Copy`, `Mirror`)
+- sync mode selection (`Diff`, `Copy`, `Sync`)
 - compare mode and list mode selectors
 - advanced tuning and filter form fields
 - sync telemetry/state storage
-- a minimal plan type and placeholder diff path
+- a real preview planner wired to local and S3 enumeration
 
 What is not present yet:
 
 - real source enumeration in the handler flow
 - real destination enumeration in the handler flow
 - full diff preview from actual snapshots
-- copy or mirror execution
+- copy or sync execution
 - delete guardrails
 - bandwidth and multipart tunables
 
@@ -48,7 +48,7 @@ This means sync is **scaffolded, not shipped**.
 
 ## Product Model
 
-The sync workflow is intentionally split into three modes:
+The sync workflow is intentionally split into three product flows:
 
 1. `Diff`
    - Read source and destination
@@ -59,11 +59,12 @@ The sync workflow is intentionally split into three modes:
    - Apply creates and updates
    - Never delete destination extras
 
-3. `Mirror`
-   - Apply creates, updates, and deletes
-   - Destination should match source
+3. `Sync`
+   - Flexible reconcile workflow with presets and advanced policy controls
+   - Default preset is `Converge`: overwrite changed destination objects and delete destination extras
+   - Destination should match source when the selected policy says it should
 
-`Diff` comes first. `Copy` and `Mirror` build on the same plan model.
+`Diff` comes first. `Copy` and `Sync` build on the same plan model and shared engine.
 
 ## Endpoint Support
 
@@ -92,7 +93,12 @@ The design is influenced by the documented behavior of:
 - `rclone copy`
 - `rclone sync`
 
-The user-facing semantics should feel familiar to operators who rely on those tools.
+The user-facing semantics are intentionally hybrid:
+
+- `Copy` matches `rclone copy`
+- `Sync` is the flexible reconcile workflow
+- the default `Sync` preset (`Converge`) is equivalent to `rclone sync` and `mc mirror --overwrite --remove`
+- advanced sync controls still let the user express weaker MinIO-style combinations such as overwrite-without-remove or remove-without-overwrite
 
 ## Tunables
 
@@ -157,13 +163,14 @@ Later phases should add:
 
 ## Phased Delivery
 
-### Phase 1: Scaffold And Diff Planner
+### Phase 1: Preview Planner
 
 Deliver:
 
 - dedicated Sync section
 - source and destination config for local or S3
 - compare and list strategy selection
+- sync presets plus advanced reconcile policy controls
 - advanced tuning fields
 - sync plan data types
 - real source/destination enumeration
@@ -191,7 +198,7 @@ Deliver:
 
 No deletes yet.
 
-### Phase 3: Mirror Execution
+### Phase 3: Sync Execution
 
 Deliver:
 
@@ -224,7 +231,7 @@ Possible additions:
 
 ## Design Constraints
 
-- `Mirror` must always be preview-first
+- `Sync` is preview-first by default, with an expert direct-run bypass kept behind advanced controls
 - destructive deletes must never be hidden behind a small checkbox
 - the compare engine must be deterministic and explainable
 - performance settings must describe their tradeoffs
@@ -233,6 +240,7 @@ Possible additions:
 ## Summary
 
 The sync subsystem is being built as a first-class feature with a real planning
-engine, not a larger copy modal. The current repo contains the scaffold for
-that work. The next implementation milestone is finishing Phase 1 by replacing
-the placeholder planner path with real enumeration and a real diff preview.
+engine, not a larger copy modal. The current repo now has a working preview
+planner for `Diff`, `Copy`, and policy-backed `Sync`. The next implementation
+milestone is execution: first copy-from-plan, then destructive sync with
+guardrails.

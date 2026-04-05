@@ -6,5 +6,6 @@ pub mod healing;
 pub mod objects;
 pub mod settings;
 pub mod sidebar;
+pub mod sync;
 pub mod testing;
 pub mod transfer;

@@ -14,6 +14,7 @@ impl App {
             col = col.push(self.nav_btn("H", Section::Healing));
         }
 
+        col = col.push(self.nav_btn("Y", Section::Sync));
         col = col.push(self.nav_btn("+", Section::Connections));
         col = col.push(self.nav_btn("T", Section::Testing));
         col = col.push(iced::widget::space::vertical());

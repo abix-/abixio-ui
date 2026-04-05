@@ -286,7 +286,7 @@ The intended execution model is staged:
 3. compare
 4. plan build
 5. preview
-6. later: execute plan for copy or mirror
+6. later: execute plan for copy or sync
 
 This separation is deliberate. Sync needs its own performance tunables,
 telemetry, and destructive-operation guardrails.

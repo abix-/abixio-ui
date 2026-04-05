@@ -32,7 +32,7 @@ cargo build --release
 ## Not yet implemented
 
 - Presigned upload URLs (download URLs implemented)
-- Real sync/mirror execution. Phase 1 sync planning scaffold exists; see `docs/sync.md`.
+- Real `Diff` / `Copy` / `Sync` execution. The preview planner exists, but the execution engine is still in progress; see `docs/sync.md`.
 - Full inline content viewer (first 4KB text preview exists)
 
 ## Documentation

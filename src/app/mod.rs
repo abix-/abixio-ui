@@ -1,4 +1,5 @@
 mod handlers;
+pub mod sync_ops;
 pub mod transfer_ops;
 pub mod types;
 
@@ -26,8 +27,11 @@ pub use transfer_ops::{
 pub use types::{
     BucketDeleteState, BucketDeleteStepResult, BucketDocumentKind, BucketDocumentLoadState,
     BucketDocumentState, BulkDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy,
-    PrefixDeleteState, StartupOptions, TransferEndpoint, TransferItem, TransferMode, TransferState,
-    TransferStepResult,
+    PrefixDeleteState, StartupOptions, SyncCompareMode, SyncDeletePhase,
+    SyncDestinationNewerPolicy, SyncEndpoint, SyncEndpointKind, SyncFilterSet, SyncListMode,
+    SyncMode, SyncObject, SyncPlan, SyncPlanAction, SyncPlanItem, SyncPlanReason, SyncPlanSummary,
+    SyncPolicy, SyncPreset, SyncState, SyncTelemetry, SyncTuning, TransferEndpoint, TransferItem,
+    TransferMode, TransferState, TransferStepResult,
 };
 
 // -- messages --
@@ -88,6 +92,49 @@ pub enum Message {
     BucketDeleteStepFinished(Result<BucketDeleteStepResult, String>),
     SetTheme(AppTheme),
     DismissError,
+
+    OpenSync,
+    CloseSync,
+    SyncModeChanged(SyncMode),
+    SyncPresetChanged(SyncPreset),
+    SyncSourceKindChanged(SyncEndpointKind),
+    SyncDestinationKindChanged(SyncEndpointKind),
+    SyncSourceConnectionChanged(String),
+    SyncDestinationConnectionChanged(String),
+    SyncSourceBucketChanged(String),
+    SyncDestinationBucketChanged(String),
+    SyncSourcePrefixChanged(String),
+    SyncDestinationPrefixChanged(String),
+    PickSyncSourceLocalPath,
+    PickSyncDestinationLocalPath,
+    SyncSourceLocalPathPicked(Option<PathBuf>),
+    SyncDestinationLocalPathPicked(Option<PathBuf>),
+    SyncSourceBucketsLoaded(Result<Vec<BucketInfo>, String>),
+    SyncDestinationBucketsLoaded(Result<Vec<BucketInfo>, String>),
+    SyncCompareModeChanged(SyncCompareMode),
+    SyncListModeChanged(SyncListMode),
+    SyncListWorkersChanged(String),
+    SyncCompareWorkersChanged(String),
+    SyncFastListToggled(bool),
+    SyncPreferServerModtimeToggled(bool),
+    SyncMaxPlannerItemsChanged(String),
+    SyncOverwriteChanged(bool),
+    SyncDeleteExtrasChanged(bool),
+    SyncDestinationNewerPolicyChanged(SyncDestinationNewerPolicy),
+    SyncDeletePhaseChanged(SyncDeletePhase),
+    SyncPreviewBeforeRunChanged(bool),
+    SyncAllowDirectRunChanged(bool),
+    SyncIncludePatternsChanged(String),
+    SyncExcludePatternsChanged(String),
+    SyncNewerThanChanged(String),
+    SyncOlderThanChanged(String),
+    SyncMinSizeChanged(String),
+    SyncMaxSizeChanged(String),
+    ToggleSyncAdvanced,
+    StartSyncPlan,
+    SyncSourceEnumerated(Result<Vec<SyncObject>, String>),
+    SyncDestinationEnumerated(Result<Vec<SyncObject>, String>),
+    SyncPlanBuilt(Result<SyncPlan, String>),
 
     // connection manager
     ConnectTo(String),
@@ -200,6 +247,7 @@ pub enum Message {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Section {
     Browse,
+    Sync,
     Disks,
     Config,
     Healing,
@@ -284,6 +332,7 @@ pub struct App {
     pub share_modal_open: bool,
     pub share_url: Option<String>,
     pub share_expiry_secs: u64,
+    pub sync: Option<SyncState>,
 
     // bucket config
     pub bucket_policy: BucketDocumentState,
@@ -412,6 +461,7 @@ impl App {
             share_modal_open: false,
             share_url: None,
             share_expiry_secs: 3600,
+            sync: None,
             bucket_policy: BucketDocumentState::new(),
             bucket_lifecycle: BucketDocumentState::new(),
             bucket_tags: None,
@@ -662,6 +712,88 @@ impl App {
                 Task::none()
             }
 
+            // -- sync --
+            Message::OpenSync => self.handle_open_sync(),
+            Message::CloseSync => self.handle_close_sync(),
+            Message::SyncModeChanged(mode) => self.handle_sync_mode_changed(mode),
+            Message::SyncPresetChanged(preset) => self.handle_sync_preset_changed(preset),
+            Message::SyncSourceKindChanged(kind) => self.handle_sync_source_kind_changed(kind),
+            Message::SyncDestinationKindChanged(kind) => {
+                self.handle_sync_destination_kind_changed(kind)
+            }
+            Message::SyncSourceConnectionChanged(id) => {
+                self.handle_sync_source_connection_changed(id)
+            }
+            Message::SyncDestinationConnectionChanged(id) => {
+                self.handle_sync_destination_connection_changed(id)
+            }
+            Message::SyncSourceBucketChanged(bucket) => {
+                self.handle_sync_source_bucket_changed(bucket)
+            }
+            Message::SyncDestinationBucketChanged(bucket) => {
+                self.handle_sync_destination_bucket_changed(bucket)
+            }
+            Message::SyncSourcePrefixChanged(prefix) => {
+                self.handle_sync_source_prefix_changed(prefix)
+            }
+            Message::SyncDestinationPrefixChanged(prefix) => {
+                self.handle_sync_destination_prefix_changed(prefix)
+            }
+            Message::PickSyncSourceLocalPath => self.handle_pick_sync_source_local_path(),
+            Message::PickSyncDestinationLocalPath => self.handle_pick_sync_destination_local_path(),
+            Message::SyncSourceLocalPathPicked(path) => {
+                self.handle_sync_source_local_path_picked(path)
+            }
+            Message::SyncDestinationLocalPathPicked(path) => {
+                self.handle_sync_destination_local_path_picked(path)
+            }
+            Message::SyncSourceBucketsLoaded(r) => self.handle_sync_source_buckets_loaded(r),
+            Message::SyncDestinationBucketsLoaded(r) => {
+                self.handle_sync_destination_buckets_loaded(r)
+            }
+            Message::SyncCompareModeChanged(mode) => self.handle_sync_compare_mode_changed(mode),
+            Message::SyncListModeChanged(mode) => self.handle_sync_list_mode_changed(mode),
+            Message::SyncListWorkersChanged(value) => self.handle_sync_list_workers_changed(value),
+            Message::SyncCompareWorkersChanged(value) => {
+                self.handle_sync_compare_workers_changed(value)
+            }
+            Message::SyncFastListToggled(enabled) => self.handle_sync_fast_list_toggled(enabled),
+            Message::SyncPreferServerModtimeToggled(enabled) => {
+                self.handle_sync_prefer_server_modtime_toggled(enabled)
+            }
+            Message::SyncMaxPlannerItemsChanged(value) => {
+                self.handle_sync_max_planner_items_changed(value)
+            }
+            Message::SyncOverwriteChanged(enabled) => self.handle_sync_overwrite_changed(enabled),
+            Message::SyncDeleteExtrasChanged(enabled) => {
+                self.handle_sync_delete_extras_changed(enabled)
+            }
+            Message::SyncDestinationNewerPolicyChanged(policy) => {
+                self.handle_sync_destination_newer_policy_changed(policy)
+            }
+            Message::SyncDeletePhaseChanged(phase) => self.handle_sync_delete_phase_changed(phase),
+            Message::SyncPreviewBeforeRunChanged(enabled) => {
+                self.handle_sync_preview_before_run_changed(enabled)
+            }
+            Message::SyncAllowDirectRunChanged(enabled) => {
+                self.handle_sync_allow_direct_run_changed(enabled)
+            }
+            Message::SyncIncludePatternsChanged(value) => {
+                self.handle_sync_include_patterns_changed(value)
+            }
+            Message::SyncExcludePatternsChanged(value) => {
+                self.handle_sync_exclude_patterns_changed(value)
+            }
+            Message::SyncNewerThanChanged(value) => self.handle_sync_newer_than_changed(value),
+            Message::SyncOlderThanChanged(value) => self.handle_sync_older_than_changed(value),
+            Message::SyncMinSizeChanged(value) => self.handle_sync_min_size_changed(value),
+            Message::SyncMaxSizeChanged(value) => self.handle_sync_max_size_changed(value),
+            Message::ToggleSyncAdvanced => self.handle_toggle_sync_advanced(),
+            Message::StartSyncPlan => self.handle_start_sync_plan(),
+            Message::SyncSourceEnumerated(r) => self.handle_sync_source_enumerated(r),
+            Message::SyncDestinationEnumerated(r) => self.handle_sync_destination_enumerated(r),
+            Message::SyncPlanBuilt(r) => self.handle_sync_plan_built(r),
+
             // -- testing --
             Message::RunTests => self.handle_run_tests(),
             Message::TestsComplete(r) => self.handle_tests_complete(r),
@@ -674,6 +806,7 @@ impl App {
         let sidebar = self.sidebar_view();
         let content: Element<'_, Message> = match self.section {
             Section::Browse => self.browse_view(),
+            Section::Sync => self.sync_view(),
             Section::Connections => self.connections_view(),
             Section::Disks if self.is_abixio => self.disks_view(),
             Section::Healing if self.is_abixio => self.healing_view(),
@@ -844,7 +977,7 @@ mod tests {
 
     use super::types::{
         BucketDeleteState, BucketDocumentLoadState, CURRENT_CONNECTION_ID, OverwritePolicy,
-        TransferMode, TransferState,
+        SyncDeletePhase, SyncDestinationNewerPolicy, SyncPreset, TransferMode, TransferState,
     };
     use super::{App, BucketDocumentKind, Message, Selection, StartupOptions};
     use crate::abixio::types::{ErasureInfo, HealResponse, ObjectInspectResponse, ShardInfo};
@@ -1124,5 +1257,36 @@ mod tests {
         assert!(app.bucket_policy.loaded.is_none());
         assert!(app.bucket_policy.error.is_none());
         assert!(app.bucket_lifecycle.loaded.is_none());
+    }
+
+    #[test]
+    fn opening_sync_defaults_to_converge_policy() {
+        let (mut app, _) = App::new(empty_startup());
+
+        let _ = app.update(Message::OpenSync);
+
+        let sync = app.sync.expect("sync state should exist");
+        assert_eq!(sync.preset, SyncPreset::Converge);
+        assert!(sync.policy.overwrite_changed);
+        assert!(sync.policy.delete_extras);
+        assert_eq!(
+            sync.policy.destination_newer_policy,
+            SyncDestinationNewerPolicy::SourceWins
+        );
+        assert_eq!(sync.policy.delete_phase, SyncDeletePhase::After);
+        assert!(sync.preview_before_run);
+        assert!(!sync.allow_direct_run);
+    }
+
+    #[test]
+    fn editing_sync_policy_switches_preset_to_custom() {
+        let (mut app, _) = App::new(empty_startup());
+
+        let _ = app.update(Message::OpenSync);
+        let _ = app.update(Message::SyncDeleteExtrasChanged(false));
+
+        let sync = app.sync.expect("sync state should exist");
+        assert_eq!(sync.preset, SyncPreset::Custom);
+        assert!(!sync.policy.delete_extras);
     }
 }

@@ -3,30 +3,31 @@
 ## last session: 2026-04-04
 
 ### what we worked on
-- implemented object tagging across both repos (abixio server + abixio-ui)
-- server: added tags field to ObjectMeta, 6 S3 tagging endpoints (get/put/delete for object + bucket)
-- client: added get/put/delete_object_tags methods using aws-sdk-s3
-- ui: tags section in object detail panel with view, add, remove
-- smoke tests: tagging round-trip test in testing tab
-- fixed stale docs entries (recursive prefix delete was listed as missing)
+- abixio server: structured error responses (RequestId + Resource in XML, x-amz-request-id header)
+- abixio server: presigned URL auth (SigV4 query param verification with expiration)
+- abixio server: conditional requests (If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since)
+- abixio server: object + bucket tagging endpoints (6 S3 endpoints)
+- abixio-ui: object tagging UI in detail panel (view, add, remove)
+- abixio-ui: tagging smoke tests
 
 ### decisions made
-- **object tags stored in ObjectMeta**: tags are a HashMap<String,String> field on ObjectMeta, written to each shard's meta.json. tag updates write meta to all disks without rewriting shard data (via Backend::update_meta)
-- **bucket tags stored as .tagging.json**: bucket-level tags use a json file in the bucket directory on the first disk, same pattern as MinIO
-- **S3 XML compliance**: tagging endpoints use standard S3 XML format (<Tagging><TagSet><Tag>...) for interop with mc and other S3 clients
-- **max 10 tags per object**: enforced in UI (S3 spec limit)
+- **request_id as hex nanos**: matches MinIO pattern, generated in dispatch(), set on all responses via post-processing
+- **error XML includes RequestId + Resource**: matches S3 spec, AWS SDKs parse these
+- **presigned auth reuses existing crypto**: same derive_signing_key, canonical_uri, sha256_hex. new verify_presigned_v4 reads from query params instead of Authorization header
+- **canonical query for presigned excludes X-Amz-Signature**: matches S3/MinIO spec
+- **conditional check order**: If-None-Match (304), If-Modified-Since (304), If-Match (412), If-Unmodified-Since (412) -- matches MinIO/S3 spec
 
 ### current state
-- abixio-ui: compiles clean, all tests pass, object tagging wired end-to-end
-- abixio server: compiles clean, all tests pass, 17 S3 endpoints (was 11)
-- server compliance: 7/10 (up from 6/10)
-- client API coverage: 5/10 for full S3 surface, core CRUD + tagging is 9/10
-- tags parity: 7/10 (was 0/10)
+- abixio server: compiles clean, 121 tests pass, 17 S3 endpoints
+- abixio-ui: compiles clean, all tests pass
+- server compliance: 8/10 (up from 7/10)
+- presigned URL auth: working (was "unknown")
+- conditional requests: working (was missing)
+- error responses: now include RequestId, Resource, x-amz-request-id header
 
 ### next steps
-- wire bucket tagging UI (server endpoints exist, client methods needed)
-- presigned sharing URLs (0/10 parity, aws-sdk-s3 presigning available)
-- version browser (0/10 parity, ListObjectVersions not yet on server)
+- wire presigned sharing UI in abixio-ui (server presigned auth is ready)
+- bucket tagging UI (server endpoints exist)
+- version browser (requires server versioning -- large scope)
+- multipart upload (required for files >5GB -- large scope)
 - search filters (time, size) to improve find from 6/10
-- retry config: max_attempts(1) for connection test path
-- server: structured error responses (RequestId, Resource fields)

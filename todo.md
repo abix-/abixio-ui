@@ -1,6 +1,6 @@
 # todo
 
-## 1. split app.rs
+## ~~1. split app.rs~~ (done)
 
 app.rs is 3,355 lines (45% of codebase). extract into modules that mirror the
 existing views/ structure.
@@ -15,7 +15,7 @@ existing views/ structure.
 - keep App::view() dispatching to views/ as-is -- that structure already works
 - target: app.rs under 500 lines, just wiring
 
-## 2. fix stale docs
+## ~~2. fix stale docs~~ (done)
 
 features.md API parity table lists 7 operations as "not yet wired" that are
 shipping in the code:

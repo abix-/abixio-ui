@@ -118,7 +118,7 @@ Source-level guards (run with `cargo test --test idle_guard`):
 
 | Test | What it checks |
 |---|---|
-| `no_repaint_in_app_logic` | Zero `request_repaint()` in `src/app.rs` |
+| `no_repaint_in_app_logic` | Zero `request_repaint()` in `src/app/**/*.rs` |
 | `no_repaint_in_views` | Zero `request_repaint()` in `src/views/*.rs` |
 | `no_spinners_anywhere` | Zero `spinner()` in app or views |
 | `no_animation_widgets` | No banned animated widget patterns in any src/ file |

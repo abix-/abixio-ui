@@ -23,7 +23,11 @@ connect via `/_admin/status`.
 ```
 src/
   main.rs             # iced::application() entry point
-  app.rs              # App state, Message enum, update(), view()
+  app/
+    mod.rs            # App state, Message enum, update(), view()
+    types.rs          # App-owned state structs and workflow state
+    transfer_ops.rs   # Shared transfer/import/export helpers
+    handlers/         # Per-domain update handlers
 
   perf.rs             # performance stats (5m sliding window)
   config.rs           # settings.json persistence (connections + regions, no secrets)
@@ -107,7 +111,7 @@ iced 0.14 uses reactive rendering by default:
 - No `request_repaint` calls anywhere in our code
 - Framework handles all repaint scheduling
 
-This is fundamentally different from immediate mode (egui) where every OS
+This is fundamentally different from immediate mode (egui), where every OS
 event triggers a full UI rebuild.
 
 ## S3 client

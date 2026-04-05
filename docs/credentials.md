@@ -175,4 +175,4 @@ secret data in the OS keychain. This means:
 - `src/config.rs`. Settings struct plus load, save, add, and remove connection logic.
 - `src/keychain.rs`. OS keychain wrapper with store, get, and delete helpers.
 - `src/views/connections.rs`. Connection manager UI.
-- `src/app.rs`. `ConnectTo` message handler that resolves keys and creates the client.
+- `src/app/mod.rs`. `ConnectTo` message handler that resolves keys and creates the client.

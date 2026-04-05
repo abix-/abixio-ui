@@ -1,91 +1,67 @@
 # todo
 
-## ~~1. split app.rs~~ (done)
+Current prioritized backlog for `abixio-ui`, ordered by user-facing gaps.
+Detailed parity notes still live in `docs/features.md`.
 
-app.rs is 3,355 lines (45% of codebase). extract into modules that mirror the
-existing views/ structure.
+## 1. inline policy editor
 
-- extract Message enum into `src/message.rs`
-- extract App struct fields into domain-grouped sub-structs (connection state,
-  transfer state, admin state, testing state, share/presign state, bucket
-  detail state, bulk delete state)
-- move update() match arms into per-domain handler functions in separate files
-  (e.g. `src/handlers/transfer.rs`, `src/handlers/admin.rs`,
-  `src/handlers/connection.rs`)
-- keep App::view() dispatching to views/ as-is -- that structure already works
-- target: app.rs under 500 lines, just wiring
+Bucket policy can be viewed and deleted, but not created or edited.
 
-## ~~2. fix stale docs~~ (done)
+- add create/edit flow for bucket policy JSON
+- validate and display policy save errors clearly
+- keep delete flow as-is
 
-features.md API parity table lists 7 operations as "not yet wired" that are
-shipping in the code:
+## 2. inline lifecycle editor
 
-- GetBucketLifecycle (app.rs:2403, s3/client.rs:647)
-- DeleteBucketLifecycle (app.rs:1904, s3/client.rs:682)
-- GetBucketPolicy (app.rs:2394, s3/client.rs:608)
-- DeleteBucketPolicy (app.rs:1885, s3/client.rs:635)
-- Presign GET (app.rs:1852, s3/client.rs:583)
-- GetBucketVersioning (app.rs:2436, s3/client.rs:454)
-- PutBucketVersioning (app.rs:2007)
+Lifecycle rules can be viewed and deleted, but not created or edited.
 
-also fix:
+- add create/edit flow for lifecycle rule JSON or structured fields
+- preserve current view/delete behavior
+- surface validation errors before submit when possible
 
-- README.md "not yet implemented" still lists presigned sharing links -- remove
-  that line, it ships
-- features.md parity scores for presign, policy, lifecycle, versioning should
-  reflect actual implementation
-- any other "not yet wired" / "no" entries that are now "yes"
+## 3. presigned upload URLs
 
-## ~~3. wire or kill perf counters~~ (done)
+Presigned GET exists. Presigned PUT does not.
 
-perf.rs (189 lines) feeds fake numbers to the settings view. features.md line
-157 confirms "request and byte metrics are not currently wired to real network
-activity."
+- add presigned upload URL generation from the object detail/share flow
+- let the user choose expiry, matching the existing share URL pattern
+- keep download URL generation unchanged
 
-option a: instrument S3Client methods to increment atomic counters for
-requests sent and bytes transferred, feed those into PerfStats.
-option b: delete perf.rs and remove the metrics section from settings view.
+## 4. richer inline content viewer
 
-do not ship fake dashboards.
+The detail panel only previews the first 4KB of text objects.
 
-## ~~4. unit tests for config.rs, s3 types, abixio types, perf, keychain~~ (done)
+- extend preview beyond the current text snippet
+- improve handling for larger text objects
+- define a clear fallback for binary or unsupported content
 
-s3/client.rs (789 lines) and config.rs (102 lines) have zero unit tests.
-smoke tests cover happy paths but miss:
+## 5. sync, mirror, and diff
 
-- s3/client.rs: error mapping from SDK errors to String, empty list responses,
-  malformed server responses, presign config edge cases (0 expiry, huge expiry),
-  copy_source formatting for cross-bucket copy, batch delete chunking at 1000
-  boundary
-- config.rs: missing settings file (first launch), corrupt JSON, missing fields
-  (forward compat), connection with empty name/endpoint
+Recursive import/export exists, but there is no sync-style workflow.
 
-use mockall or manual mocks for the aws-sdk-s3 client trait if needed.
+- add recursive sync or mirror between local and S3
+- add drift/diff visibility before destructive changes
+- make overwrite and delete behavior explicit
 
-## ~~5. multipart upload~~ (done)
+## 6. richer search and filters
 
-aws-sdk-s3 supports CreateMultipartUpload / UploadPart / CompleteMultipartUpload
-natively. without this, uploads over ~5GB fail silently on most S3 backends.
+Current search supports local filtering and recursive find by name/path only.
 
-- add multipart methods to S3Client: create_multipart, upload_part,
-  complete_multipart, abort_multipart
-- threshold: files > 100MB use multipart (configurable)
-- part size: 8MB default
-- wire progress reporting back to UI via channel or periodic message
-- add abort-on-cancel so partial uploads don't leak
-- update import workflow to use multipart for large files
+- add time, size, metadata, or tag-based filters
+- preserve current simple substring and wildcard search
 
-## 6. add CI
+## 7. version rewind and recovery
 
-no github actions exist. add `.github/workflows/ci.yml`:
+Bucket versioning, version browsing, restore, and delete already exist.
 
-- trigger: push and pull_request
-- steps: cargo build, cargo test, cargo clippy -- -D warnings
-- matrix: stable rust on windows (primary target)
-- optional: cargo fmt --check
+- add undo or rewind-by-time style recovery workflow
+- make version recovery easier for non-expert users
 
-## 7. move async_op.rs behind cfg(test)
+## later gaps
 
-async_op.rs (56 lines) is documented as "used by tests, not the app"
-(architecture.md line 28). gate it with `#[cfg(test)]` or move into a test
-helper module so it does not compile into release builds.
+- recursive bulk object operations with more filters
+- SQL-style object query
+- CLI or automation surface
+- retention and legal hold controls
+- encryption setup
+- replication, quota, events, and watch

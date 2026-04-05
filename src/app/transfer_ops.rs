@@ -301,6 +301,46 @@ pub async fn execute_sync_run_item(
                     .map(|_| ())
             }
         }
+        SyncExecutionStrategy::DeleteRemote => {
+            let TransferEndpoint::S3 { bucket, key, .. } = &item.destination else {
+                return Err("remote delete requires an s3 destination".to_string());
+            };
+            let destination_client = destination_client.ok_or("missing destination client")?;
+            destination_client.delete_object(bucket, key).await
+        }
+        SyncExecutionStrategy::DeleteLocal => {
+            let TransferEndpoint::Local { path } = &item.destination else {
+                return Err("local delete requires a local destination".to_string());
+            };
+            delete_local_path(path).await
+        }
+    }
+}
+
+async fn delete_local_path(path: &Path) -> Result<(), String> {
+    tokio::fs::remove_file(path)
+        .await
+        .map_err(|e| e.to_string())?;
+    prune_empty_parent_dirs(path).await;
+    Ok(())
+}
+
+async fn prune_empty_parent_dirs(path: &Path) {
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        let mut entries = match tokio::fs::read_dir(dir).await {
+            Ok(entries) => entries,
+            Err(_) => break,
+        };
+        match entries.next_entry().await {
+            Ok(None) => {
+                if tokio::fs::remove_dir(dir).await.is_err() {
+                    break;
+                }
+                current = dir.parent();
+            }
+            Ok(Some(_)) | Err(_) => break,
+        }
     }
 }
 

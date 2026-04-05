@@ -32,7 +32,7 @@ cargo build --release
 ## Not yet implemented
 
 - Presigned upload URLs (download URLs implemented)
-- `Diff` preview and `Copy` execution now exist. Delete-capable `Sync` execution is still in progress; see `docs/sync.md`.
+- `Diff`, `Copy`, and guarded `Sync` execution now exist. The next sync gap is performance tuning and richer execution telemetry; see `docs/sync.md`.
 - Full inline content viewer (first 4KB text preview exists)
 
 ## Documentation

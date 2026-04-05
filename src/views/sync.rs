@@ -266,16 +266,35 @@ impl App {
                     ]
                     .spacing(6),
                 );
-                advanced = advanced.push(text("Execution Defaults").size(11));
                 advanced = advanced.push(
-                    checkbox(sync.preview_before_run)
-                        .label("Preview before run by default")
-                        .on_toggle(Message::SyncPreviewBeforeRunChanged),
+                    checkbox(sync.delete_guardrails.ignore_errors)
+                        .label("Ignore transfer/delete errors")
+                        .on_toggle(Message::SyncIgnoreErrorsChanged),
+                );
+                advanced = advanced.push(text("Delete Guardrails").size(11));
+                advanced = advanced.push(
+                    row![
+                        text("Delete Workers").size(11).width(130),
+                        text_input("4", &sync.delete_guardrails.delete_workers_text)
+                            .on_input(Message::SyncDeleteWorkersChanged),
+                    ]
+                    .spacing(6),
                 );
                 advanced = advanced.push(
-                    checkbox(sync.allow_direct_run)
-                        .label("Allow expert run-now bypass")
-                        .on_toggle(Message::SyncAllowDirectRunChanged),
+                    row![
+                        text("Max Deletes").size(11).width(130),
+                        text_input("off", &sync.delete_guardrails.max_delete_count_text)
+                            .on_input(Message::SyncMaxDeleteCountChanged),
+                    ]
+                    .spacing(6),
+                );
+                advanced = advanced.push(
+                    row![
+                        text("Max Delete Bytes").size(11).width(130),
+                        text_input("off", &sync.delete_guardrails.max_delete_bytes_text)
+                            .on_input(Message::SyncMaxDeleteBytesChanged),
+                    ]
+                    .spacing(6),
                 );
             }
 
@@ -315,6 +334,21 @@ impl App {
         }
 
         content = content.push(iced::widget::rule::horizontal(1));
+        let copy_ready = sync.mode == SyncMode::Copy
+            && sync
+                .run_plan
+                .as_ref()
+                .is_some_and(|plan| !plan.transfers.is_empty())
+            && !sync
+                .execution
+                .as_ref()
+                .is_some_and(|execution| execution.running);
+        let sync_ready = sync.mode == SyncMode::Sync
+            && sync.plan.is_some()
+            && !sync
+                .execution
+                .as_ref()
+                .is_some_and(|execution| execution.running);
         content = content.push(
             row![
                 if sync.running {
@@ -323,26 +357,29 @@ impl App {
                     button(text(build_plan_label(sync.mode)).size(11))
                         .on_press(Message::StartSyncPlan)
                 },
-                if sync.mode == SyncMode::Copy
-                    && sync.plan.is_some()
+                if copy_ready {
+                    button(text("Run Copy").size(11)).on_press(Message::StartSyncCopy)
+                } else if sync.mode == SyncMode::Copy
                     && sync
-                        .run_plan
-                        .as_ref()
-                        .is_some_and(|items| !items.is_empty())
-                    && !sync
                         .execution
                         .as_ref()
                         .is_some_and(|execution| execution.running)
                 {
-                    button(text("Run Copy").size(11)).on_press(Message::StartSyncCopy)
-                } else if sync
-                    .execution
-                    .as_ref()
-                    .is_some_and(|execution| execution.running)
-                {
                     button(text("Copying...").size(11))
                 } else {
                     button(text("Run Copy").size(11))
+                },
+                if sync_ready {
+                    button(text("Run Sync").size(11)).on_press(Message::StartSync)
+                } else if sync.mode == SyncMode::Sync
+                    && sync
+                        .execution
+                        .as_ref()
+                        .is_some_and(|execution| execution.running)
+                {
+                    button(text("Syncing...").size(11))
+                } else {
+                    button(text("Run Sync").size(11))
                 },
                 button(text("Reset").size(11)).on_press(Message::OpenSync),
             ]
@@ -373,12 +410,13 @@ impl App {
             )));
             content = content.push(text(format!(
                 "Bytes create: {}  update: {}  delete: {}",
-                plan.summary.bytes_to_create,
-                plan.summary.bytes_to_update,
-                plan.summary.bytes_to_delete
+                format_bytes(plan.summary.bytes_to_create),
+                format_bytes(plan.summary.bytes_to_update),
+                format_bytes(plan.summary.bytes_to_delete)
             )));
             if let Some(run_plan) = &sync.run_plan {
                 let relay_count = run_plan
+                    .transfers
                     .iter()
                     .filter(|item| item.strategy == SyncExecutionStrategy::ClientRelay)
                     .count();
@@ -391,6 +429,18 @@ impl App {
                         .size(11),
                     );
                 }
+                if sync.mode == SyncMode::Sync {
+                    content = content.push(text(format!(
+                        "Delete phase: {}  Ignore errors: {}  Delete workers: {}",
+                        sync.policy.delete_phase,
+                        if sync.delete_guardrails.ignore_errors {
+                            "yes"
+                        } else {
+                            "no"
+                        },
+                        sync.delete_guardrails.delete_workers_text
+                    )));
+                }
             }
             if plan.items.is_empty() {
                 content = content.push(text("No plan items yet.").size(11));
@@ -398,7 +448,9 @@ impl App {
                 for item in &plan.items {
                     let strategy = sync.run_plan.as_ref().and_then(|items| {
                         items
+                            .transfers
                             .iter()
+                            .chain(items.deletes.iter())
                             .find(|run_item| run_item.relative_path == item.relative_path)
                             .map(|run_item| run_item.strategy)
                     });
@@ -419,10 +471,15 @@ impl App {
 
         if let Some(execution) = &sync.execution {
             content = content.push(iced::widget::rule::horizontal(1));
-            content = content.push(text("Copy Execution").size(12));
+            content = content.push(text("Execution").size(12));
             content = content.push(text(format!(
-                "Copied: {}  Failed: {}  Bytes: {} / {}",
-                execution.completed, execution.failed, execution.bytes_done, execution.total_bytes
+                "Copied: {}  Deleted: {}  Transfer failures: {}  Delete failures: {}  Bytes: {} / {}",
+                execution.completed_transfers,
+                execution.completed_deletes,
+                execution.failed_transfers,
+                execution.failed_deletes,
+                format_bytes(execution.bytes_done),
+                format_bytes(execution.total_bytes)
             )));
             if execution.has_client_relay {
                 content = content.push(
@@ -439,12 +496,64 @@ impl App {
             if let Some(summary) = &execution.summary {
                 content = content.push(text(summary).size(11));
             }
+            if execution.delete_phase_skipped {
+                content = content.push(
+                    text("Delete phase skipped because earlier transfers failed and ignore-errors is off.")
+                        .size(11),
+                );
+            }
         }
 
         scrollable(content)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+
+    pub fn sync_delete_confirm_modal(&self) -> Element<'_, Message> {
+        let Some(sync) = &self.sync else {
+            return container(text("")).width(Length::Shrink).into();
+        };
+        let Some(confirm) = &sync.delete_confirm else {
+            return container(text("")).width(Length::Shrink).into();
+        };
+
+        let mut body = column![
+            text("Confirm Sync Delete").size(16),
+            text("This sync run will delete destination-only objects.").size(11),
+            text(format!("Planned deletes: {}", confirm.planned_deletes)).size(11),
+            text(format!(
+                "Planned delete bytes: {}",
+                format_bytes(confirm.planned_delete_bytes)
+            ))
+            .size(11),
+        ]
+        .spacing(8)
+        .padding(12);
+
+        if let Some(reason) = &confirm.threshold_reason {
+            body = body.push(text(format!("Extra confirmation required: {}", reason)).size(11));
+        }
+        if confirm.typed_required {
+            body = body.push(text(format!(
+                "Type 'delete {}' to enable sync.",
+                confirm.planned_deletes
+            )));
+            body = body.push(
+                text_input("delete count", &confirm.confirm_text)
+                    .on_input(Message::SyncDeleteConfirmTextChanged),
+            );
+        }
+
+        body = body.push(
+            row![
+                button(text("Cancel").size(11)).on_press(Message::CancelSyncDeleteConfirm),
+                button(text("Run Sync").size(11)).on_press(Message::ConfirmSyncDeleteRun),
+            ]
+            .spacing(8),
+        );
+
+        modal_card(body, 460)
     }
 }
 
@@ -559,6 +668,38 @@ fn sync_local_endpoint_block(
     .into()
 }
 
+fn modal_card<'a>(content: iced::widget::Column<'a, Message>, width: u16) -> Element<'a, Message> {
+    use iced::widget::container;
+
+    let card = container(content)
+        .width(width as u32)
+        .style(iced::widget::container::rounded_box)
+        .padding(0);
+
+    container(card)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
+}
+
+fn format_bytes(n: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if n >= GB {
+        format!("{:.2} GB", n as f64 / GB as f64)
+    } else if n >= MB {
+        format!("{:.1} MB", n as f64 / MB as f64)
+    } else if n >= KB {
+        format!("{:.1} KB", n as f64 / KB as f64)
+    } else {
+        format!("{} B", n)
+    }
+}
+
 impl std::fmt::Display for SyncMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -633,6 +774,8 @@ impl std::fmt::Display for SyncExecutionStrategy {
             Self::Download => write!(f, "download"),
             Self::ServerSideCopy => write!(f, "server-side copy"),
             Self::ClientRelay => write!(f, "client relay"),
+            Self::DeleteRemote => write!(f, "remote delete"),
+            Self::DeleteLocal => write!(f, "local delete"),
         }
     }
 }

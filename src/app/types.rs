@@ -278,6 +278,8 @@ pub enum SyncExecutionStrategy {
     Download,
     ServerSideCopy,
     ClientRelay,
+    DeleteRemote,
+    DeleteLocal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,13 +292,37 @@ pub struct SyncRunItem {
     pub bytes: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncRunPlan {
+    pub transfers: Vec<SyncRunItem>,
+    pub deletes: Vec<SyncRunItem>,
+    pub total_transfer_bytes: u64,
+    pub total_delete_bytes: u64,
+    pub has_client_relay: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncExecutionPhase {
+    DeletingBefore,
+    Copying,
+    DeletingDuring,
+    DeletingAfter,
+    Done,
+    Stopped,
+}
+
 #[derive(Debug, Clone)]
 pub struct SyncExecutionState {
-    pub items: Vec<SyncRunItem>,
-    pub next_index: usize,
-    pub completed: usize,
-    pub skipped: usize,
-    pub failed: usize,
+    pub phase: SyncExecutionPhase,
+    pub run_plan: SyncRunPlan,
+    pub next_transfer_index: usize,
+    pub next_delete_index: usize,
+    pub active_transfer: bool,
+    pub active_delete_batches: usize,
+    pub completed_transfers: usize,
+    pub completed_deletes: usize,
+    pub failed_transfers: usize,
+    pub failed_deletes: usize,
     pub bytes_done: u64,
     pub total_bytes: u64,
     pub current_item: Option<String>,
@@ -304,6 +330,33 @@ pub struct SyncExecutionState {
     pub running: bool,
     pub summary: Option<String>,
     pub has_client_relay: bool,
+    pub delete_phase_skipped: bool,
+    pub transfer_failed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDeleteGuardrails {
+    pub ignore_errors: bool,
+    pub delete_workers_text: String,
+    pub max_delete_count_text: String,
+    pub max_delete_bytes_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDeleteConfirmState {
+    pub planned_deletes: usize,
+    pub planned_delete_bytes: u64,
+    pub typed_required: bool,
+    pub threshold_reason: Option<String>,
+    pub confirm_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDeleteBatchResult {
+    pub completed: usize,
+    pub failed: usize,
+    pub bytes: u64,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,10 +393,12 @@ pub struct SyncState {
     pub filters: SyncFilterSet,
     pub running: bool,
     pub plan: Option<SyncPlan>,
-    pub run_plan: Option<Vec<SyncRunItem>>,
+    pub run_plan: Option<SyncRunPlan>,
     pub source_snapshot: Option<Vec<SyncObject>>,
     pub destination_snapshot: Option<Vec<SyncObject>>,
     pub execution: Option<SyncExecutionState>,
+    pub delete_guardrails: SyncDeleteGuardrails,
+    pub delete_confirm: Option<SyncDeleteConfirmState>,
     pub telemetry: SyncTelemetry,
     pub error: Option<String>,
     pub show_advanced: bool,
@@ -394,6 +449,13 @@ impl SyncState {
             source_snapshot: None,
             destination_snapshot: None,
             execution: None,
+            delete_guardrails: SyncDeleteGuardrails {
+                ignore_errors: false,
+                delete_workers_text: "4".to_string(),
+                max_delete_count_text: String::new(),
+                max_delete_bytes_text: String::new(),
+            },
+            delete_confirm: None,
             telemetry: SyncTelemetry {
                 stage: "Idle".to_string(),
                 source_scanned: 0,

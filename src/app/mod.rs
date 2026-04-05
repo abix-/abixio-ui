@@ -27,12 +27,13 @@ pub use transfer_ops::{
 pub use types::{
     BucketDeleteState, BucketDeleteStepResult, BucketDocumentKind, BucketDocumentLoadState,
     BucketDocumentState, BulkDeleteState, CURRENT_CONNECTION_ID, OverwritePolicy,
-    PrefixDeleteState, StartupOptions, SyncCompareMode, SyncDeletePhase,
-    SyncDestinationNewerPolicy, SyncEndpoint, SyncEndpointKind, SyncExecutionState,
-    SyncExecutionStrategy, SyncFilterSet, SyncListMode, SyncMode, SyncObject, SyncPlan,
-    SyncPlanAction, SyncPlanItem, SyncPlanReason, SyncPlanSummary, SyncPolicy, SyncPreset,
-    SyncRunItem, SyncState, SyncTelemetry, SyncTuning, TransferEndpoint, TransferItem,
-    TransferMode, TransferState, TransferStepResult,
+    PrefixDeleteState, StartupOptions, SyncCompareMode, SyncDeleteBatchResult,
+    SyncDeleteConfirmState, SyncDeleteGuardrails, SyncDeletePhase, SyncDestinationNewerPolicy,
+    SyncEndpoint, SyncEndpointKind, SyncExecutionPhase, SyncExecutionState, SyncExecutionStrategy,
+    SyncFilterSet, SyncListMode, SyncMode, SyncObject, SyncPlan, SyncPlanAction, SyncPlanItem,
+    SyncPlanReason, SyncPlanSummary, SyncPolicy, SyncPreset, SyncRunItem, SyncRunPlan, SyncState,
+    SyncTelemetry, SyncTuning, TransferEndpoint, TransferItem, TransferMode, TransferState,
+    TransferStepResult,
 };
 
 // -- messages --
@@ -123,8 +124,10 @@ pub enum Message {
     SyncDeleteExtrasChanged(bool),
     SyncDestinationNewerPolicyChanged(SyncDestinationNewerPolicy),
     SyncDeletePhaseChanged(SyncDeletePhase),
-    SyncPreviewBeforeRunChanged(bool),
-    SyncAllowDirectRunChanged(bool),
+    SyncIgnoreErrorsChanged(bool),
+    SyncDeleteWorkersChanged(String),
+    SyncMaxDeleteCountChanged(String),
+    SyncMaxDeleteBytesChanged(String),
     SyncIncludePatternsChanged(String),
     SyncExcludePatternsChanged(String),
     SyncNewerThanChanged(String),
@@ -138,6 +141,11 @@ pub enum Message {
     SyncPlanBuilt(Result<SyncPlan, String>),
     StartSyncCopy,
     SyncCopyStepFinished(Result<SyncRunItem, String>),
+    StartSync,
+    CancelSyncDeleteConfirm,
+    SyncDeleteConfirmTextChanged(String),
+    ConfirmSyncDeleteRun,
+    SyncDeleteBatchFinished(Result<SyncDeleteBatchResult, String>),
 
     // connection manager
     ConnectTo(String),
@@ -775,11 +783,17 @@ impl App {
                 self.handle_sync_destination_newer_policy_changed(policy)
             }
             Message::SyncDeletePhaseChanged(phase) => self.handle_sync_delete_phase_changed(phase),
-            Message::SyncPreviewBeforeRunChanged(enabled) => {
-                self.handle_sync_preview_before_run_changed(enabled)
+            Message::SyncIgnoreErrorsChanged(enabled) => {
+                self.handle_sync_ignore_errors_changed(enabled)
             }
-            Message::SyncAllowDirectRunChanged(enabled) => {
-                self.handle_sync_allow_direct_run_changed(enabled)
+            Message::SyncDeleteWorkersChanged(value) => {
+                self.handle_sync_delete_workers_changed(value)
+            }
+            Message::SyncMaxDeleteCountChanged(value) => {
+                self.handle_sync_max_delete_count_changed(value)
+            }
+            Message::SyncMaxDeleteBytesChanged(value) => {
+                self.handle_sync_max_delete_bytes_changed(value)
             }
             Message::SyncIncludePatternsChanged(value) => {
                 self.handle_sync_include_patterns_changed(value)
@@ -798,6 +812,13 @@ impl App {
             Message::SyncPlanBuilt(r) => self.handle_sync_plan_built(r),
             Message::StartSyncCopy => self.handle_start_sync_copy(),
             Message::SyncCopyStepFinished(r) => self.handle_sync_copy_step_finished(r),
+            Message::StartSync => self.handle_start_sync(),
+            Message::CancelSyncDeleteConfirm => self.handle_cancel_sync_delete_confirm(),
+            Message::SyncDeleteConfirmTextChanged(value) => {
+                self.handle_sync_delete_confirm_text_changed(value)
+            }
+            Message::ConfirmSyncDeleteRun => self.handle_confirm_sync_delete_run(),
+            Message::SyncDeleteBatchFinished(r) => self.handle_sync_delete_batch_finished(r),
 
             // -- testing --
             Message::RunTests => self.handle_run_tests(),
@@ -897,10 +918,19 @@ impl App {
         } else {
             with_bulk
         };
-        if self.share_modal_open {
+        let with_share = if self.share_modal_open {
             stack![with_prefix, self.share_modal()].into()
         } else {
             with_prefix
+        };
+        if self
+            .sync
+            .as_ref()
+            .is_some_and(|sync| sync.delete_confirm.is_some())
+        {
+            stack![with_share, self.sync_delete_confirm_modal()].into()
+        } else {
+            with_share
         }
     }
 
@@ -1280,8 +1310,8 @@ mod tests {
             SyncDestinationNewerPolicy::SourceWins
         );
         assert_eq!(sync.policy.delete_phase, SyncDeletePhase::After);
-        assert!(sync.preview_before_run);
-        assert!(!sync.allow_direct_run);
+        assert!(!sync.delete_guardrails.ignore_errors);
+        assert_eq!(sync.delete_guardrails.delete_workers_text, "4");
     }
 
     #[test]
@@ -1326,11 +1356,139 @@ mod tests {
             summary: super::SyncPlanSummary::default(),
         });
 
-        let _ = app.update(Message::SyncPlanBuilt(Ok(app.sync.as_ref().unwrap().plan.clone().unwrap())));
+        let _ = app.update(Message::SyncPlanBuilt(Ok(app
+            .sync
+            .as_ref()
+            .unwrap()
+            .plan
+            .clone()
+            .unwrap())));
 
         let sync = app.sync.expect("sync state should exist");
         let run_plan = sync.run_plan.expect("run plan should exist");
-        assert_eq!(run_plan.len(), 1);
-        assert_eq!(run_plan[0].strategy, SyncExecutionStrategy::ServerSideCopy);
+        assert_eq!(run_plan.transfers.len(), 1);
+        assert_eq!(
+            run_plan.transfers[0].strategy,
+            SyncExecutionStrategy::ServerSideCopy
+        );
+    }
+
+    #[test]
+    fn sync_start_with_deletes_opens_confirmation() {
+        let (mut app, _) = App::new(empty_startup());
+
+        let _ = app.update(Message::OpenSync);
+        let sync = app.sync.as_mut().expect("sync state should exist");
+        sync.mode = SyncMode::Sync;
+        sync.source_kind = super::SyncEndpointKind::S3;
+        sync.destination_kind = super::SyncEndpointKind::S3;
+        sync.source_connection_id = CURRENT_CONNECTION_ID.to_string();
+        sync.destination_connection_id = CURRENT_CONNECTION_ID.to_string();
+        sync.source_bucket = "source".to_string();
+        sync.destination_bucket = "destination".to_string();
+        sync.telemetry.source_scanned = 0;
+        sync.telemetry.destination_scanned = 10;
+        sync.plan = Some(super::SyncPlan {
+            items: vec![super::SyncPlanItem {
+                action: super::SyncPlanAction::Delete,
+                reason: super::SyncPlanReason::MissingOnSource,
+                relative_path: "file.txt".to_string(),
+                source: None,
+                destination: Some(super::SyncObject {
+                    relative_path: "file.txt".to_string(),
+                    size: 10,
+                    modified: None,
+                    etag: None,
+                    is_dir_marker: false,
+                }),
+            }],
+            summary: super::SyncPlanSummary {
+                deletes: 1,
+                destination_scanned: 10,
+                ..super::SyncPlanSummary::default()
+            },
+        });
+
+        let _ = app.update(Message::SyncPlanBuilt(Ok(app
+            .sync
+            .as_ref()
+            .unwrap()
+            .plan
+            .clone()
+            .unwrap())));
+        let _ = app.update(Message::StartSync);
+
+        let sync = app.sync.expect("sync state should exist");
+        assert!(sync.delete_confirm.is_some());
+        assert!(sync.execution.is_none());
+    }
+
+    #[test]
+    fn sync_delete_guardrail_blocks_run() {
+        let (mut app, _) = App::new(empty_startup());
+
+        let _ = app.update(Message::OpenSync);
+        let sync = app.sync.as_mut().expect("sync state should exist");
+        sync.mode = SyncMode::Sync;
+        sync.source_kind = super::SyncEndpointKind::S3;
+        sync.destination_kind = super::SyncEndpointKind::S3;
+        sync.source_connection_id = CURRENT_CONNECTION_ID.to_string();
+        sync.destination_connection_id = CURRENT_CONNECTION_ID.to_string();
+        sync.source_bucket = "source".to_string();
+        sync.destination_bucket = "destination".to_string();
+        sync.delete_guardrails.max_delete_count_text = "1".to_string();
+        sync.plan = Some(super::SyncPlan {
+            items: vec![
+                super::SyncPlanItem {
+                    action: super::SyncPlanAction::Delete,
+                    reason: super::SyncPlanReason::MissingOnSource,
+                    relative_path: "a.txt".to_string(),
+                    source: None,
+                    destination: Some(super::SyncObject {
+                        relative_path: "a.txt".to_string(),
+                        size: 10,
+                        modified: None,
+                        etag: None,
+                        is_dir_marker: false,
+                    }),
+                },
+                super::SyncPlanItem {
+                    action: super::SyncPlanAction::Delete,
+                    reason: super::SyncPlanReason::MissingOnSource,
+                    relative_path: "b.txt".to_string(),
+                    source: None,
+                    destination: Some(super::SyncObject {
+                        relative_path: "b.txt".to_string(),
+                        size: 10,
+                        modified: None,
+                        etag: None,
+                        is_dir_marker: false,
+                    }),
+                },
+            ],
+            summary: super::SyncPlanSummary {
+                deletes: 2,
+                bytes_to_delete: 20,
+                ..super::SyncPlanSummary::default()
+            },
+        });
+
+        let _ = app.update(Message::SyncPlanBuilt(Ok(app
+            .sync
+            .as_ref()
+            .unwrap()
+            .plan
+            .clone()
+            .unwrap())));
+        let _ = app.update(Message::StartSync);
+
+        let sync = app.sync.expect("sync state should exist");
+        assert!(sync.delete_confirm.is_none());
+        assert!(sync.execution.is_none());
+        assert!(
+            sync.error
+                .expect("error should be present")
+                .contains("Delete count guardrail exceeded")
+        );
     }
 }

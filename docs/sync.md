@@ -18,10 +18,10 @@ operator expectations shaped by tools like MinIO Client `mc mirror` and
 
 ## Current Status
 
-The repo now contains the planner and the first execution phase:
+The repo now contains the planner and the first two execution phases:
 
 - sync state and message plumbing in `src/app/mod.rs` and `src/app/types.rs`
-- sync handler and copy execution flow in `src/app/handlers/sync.rs`
+- sync handler and guarded sync execution flow in `src/app/handlers/sync.rs`
 - sync planner module in `src/app/sync_ops.rs`
 - sync UI section in `src/views/sync.rs`
 - sync-oriented recursive S3 listing helper in `src/s3/client.rs`
@@ -35,16 +35,18 @@ What is present today:
 - sync telemetry/state storage
 - a real preview planner wired to local and S3 enumeration
 - copy execution from the current plan
+- guarded sync execution from the current plan
 - explicit execution strategies for upload, download, server-side copy, and client relay
+- delete execution for local and remote destinations
+- delete confirmation and delete-count/delete-byte guardrails
+- `delete-before`, `delete-during`, and `delete-after`
 
 What is not present yet:
-- delete-capable sync execution
-- delete guardrails
 - bandwidth and multipart tunables
-- worker-pool concurrency
+- transfer worker-pool concurrency
 - richer execution telemetry
 
-This means the sync subsystem is **partially shipped**: planning and non-destructive copy execution exist, but full sync execution does not.
+This means the sync subsystem is **partially shipped**: planning, non-destructive copy execution, and guarded sync execution all exist, but the high-end performance/tuning work is still pending.
 
 ## Product Model
 
@@ -210,6 +212,13 @@ Deliver:
 - delete worker pool
 - delete-phase tuning and reporting
 
+Status:
+
+- shipped
+- default behavior is `delete-after`
+- deletes are skipped after earlier transfer failures unless `ignore errors` is enabled
+- delete confirmation escalates to typed confirmation only when the plan crosses risk thresholds
+
 ### Phase 4: Performance And Advanced Filters
 
 Deliver:
@@ -233,7 +242,7 @@ Possible additions:
 
 ## Design Constraints
 
-- `Sync` is preview-first by default, with an expert direct-run bypass kept behind advanced controls
+- `Sync` is preview-first and runs only from the current reviewed plan
 - destructive deletes must never be hidden behind a small checkbox
 - the compare engine must be deterministic and explainable
 - performance settings must describe their tradeoffs
@@ -244,5 +253,6 @@ Possible additions:
 The sync subsystem is being built as a first-class feature with a real planning
 engine, not a larger copy modal. The current repo now has a working preview
 planner for `Diff`, `Copy`, and policy-backed `Sync`, plus non-destructive
-`Copy` execution from that plan. The next implementation milestone is
-destructive `Sync` execution with delete guardrails.
+`Copy` execution and guarded delete-capable `Sync` execution from that plan.
+The next implementation milestone is Phase 4 performance work: richer tuning,
+fast-list/top-up optimizations, and better execution telemetry.

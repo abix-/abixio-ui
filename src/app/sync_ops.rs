@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::app::{
     SyncCompareMode, SyncDestinationNewerPolicy, SyncEndpointKind, SyncExecutionStrategy,
     SyncFilterSet, SyncMode, SyncObject, SyncPlan, SyncPlanAction, SyncPlanItem, SyncPlanReason,
-    SyncPlanSummary, SyncPolicy, SyncRunItem, SyncState, TransferEndpoint, wildcard_match,
+    SyncPlanSummary, SyncPolicy, SyncRunItem, SyncRunPlan, SyncState, TransferEndpoint,
+    wildcard_match,
 };
 use crate::s3::client::S3Client;
 
@@ -271,36 +272,61 @@ fn missing_on_source_action(
     }
 }
 
-pub fn prepare_copy_run_plan(
-    sync: &SyncState,
-    plan: &SyncPlan,
-) -> Result<Vec<SyncRunItem>, String> {
-    let mut items = Vec::new();
+pub fn prepare_sync_run_plan(sync: &SyncState, plan: &SyncPlan) -> Result<SyncRunPlan, String> {
+    let mut transfers = Vec::new();
+    let mut deletes = Vec::new();
     for plan_item in &plan.items {
-        if !matches!(
-            plan_item.action,
-            SyncPlanAction::Create | SyncPlanAction::Update
-        ) {
-            continue;
+        match plan_item.action {
+            SyncPlanAction::Create | SyncPlanAction::Update => {
+                let source = build_transfer_endpoint(sync, true, &plan_item.relative_path)?;
+                let destination = build_transfer_endpoint(sync, false, &plan_item.relative_path)?;
+                let strategy = determine_execution_strategy(&source, &destination)?;
+                let bytes = plan_item
+                    .source
+                    .as_ref()
+                    .map(|object| object.size)
+                    .unwrap_or(0);
+                transfers.push(SyncRunItem {
+                    relative_path: plan_item.relative_path.clone(),
+                    action: plan_item.action,
+                    source,
+                    destination,
+                    strategy,
+                    bytes,
+                });
+            }
+            SyncPlanAction::Delete => {
+                let destination = build_transfer_endpoint(sync, false, &plan_item.relative_path)?;
+                let strategy = determine_delete_strategy(&destination)?;
+                let bytes = plan_item
+                    .destination
+                    .as_ref()
+                    .map(|object| object.size)
+                    .unwrap_or(0);
+                deletes.push(SyncRunItem {
+                    relative_path: plan_item.relative_path.clone(),
+                    action: plan_item.action,
+                    source: destination.clone(),
+                    destination,
+                    strategy,
+                    bytes,
+                });
+            }
+            SyncPlanAction::Skip | SyncPlanAction::Conflict => {}
         }
-        let source = build_transfer_endpoint(sync, true, &plan_item.relative_path)?;
-        let destination = build_transfer_endpoint(sync, false, &plan_item.relative_path)?;
-        let strategy = determine_execution_strategy(&source, &destination)?;
-        let bytes = plan_item
-            .source
-            .as_ref()
-            .map(|object| object.size)
-            .unwrap_or(0);
-        items.push(SyncRunItem {
-            relative_path: plan_item.relative_path.clone(),
-            action: plan_item.action,
-            source,
-            destination,
-            strategy,
-            bytes,
-        });
     }
-    Ok(items)
+    let total_transfer_bytes = transfers.iter().map(|item| item.bytes).sum();
+    let total_delete_bytes = deletes.iter().map(|item| item.bytes).sum();
+    let has_client_relay = transfers
+        .iter()
+        .any(|item| item.strategy == SyncExecutionStrategy::ClientRelay);
+    Ok(SyncRunPlan {
+        transfers,
+        deletes,
+        total_transfer_bytes,
+        total_delete_bytes,
+        has_client_relay,
+    })
 }
 
 fn build_transfer_endpoint(
@@ -378,6 +404,15 @@ fn determine_execution_strategy(
         (TransferEndpoint::Local { .. }, TransferEndpoint::Local { .. }) => {
             Err("Local to local copy is not supported in sync execution.".to_string())
         }
+    }
+}
+
+fn determine_delete_strategy(
+    destination: &TransferEndpoint,
+) -> Result<SyncExecutionStrategy, String> {
+    match destination {
+        TransferEndpoint::S3 { .. } => Ok(SyncExecutionStrategy::DeleteRemote),
+        TransferEndpoint::Local { .. } => Ok(SyncExecutionStrategy::DeleteLocal),
     }
 }
 
@@ -580,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_copy_run_plan_marks_cross_endpoint_s3_as_client_relay() {
+    fn prepare_sync_run_plan_marks_cross_endpoint_s3_as_client_relay() {
         let mut sync = crate::app::SyncState::new("source-a".to_string());
         sync.mode = SyncMode::Copy;
         sync.source_kind = SyncEndpointKind::S3;
@@ -604,8 +639,41 @@ mod tests {
             SyncCompareMode::SizeOnly,
         );
 
-        let run_plan = prepare_copy_run_plan(&sync, &plan).expect("copy run plan");
-        assert_eq!(run_plan.len(), 1);
-        assert_eq!(run_plan[0].strategy, SyncExecutionStrategy::ClientRelay);
+        let run_plan = prepare_sync_run_plan(&sync, &plan).expect("copy run plan");
+        assert_eq!(run_plan.transfers.len(), 1);
+        assert_eq!(
+            run_plan.transfers[0].strategy,
+            SyncExecutionStrategy::ClientRelay
+        );
+    }
+
+    #[test]
+    fn prepare_sync_run_plan_builds_delete_items() {
+        let mut sync = crate::app::SyncState::new("source-a".to_string());
+        sync.mode = SyncMode::Sync;
+        sync.destination_kind = SyncEndpointKind::S3;
+        sync.destination_connection_id = "dest-a".to_string();
+        sync.destination_bucket = "dest-bucket".to_string();
+
+        let plan = build_sync_plan(
+            Vec::new(),
+            vec![SyncObject {
+                relative_path: "file.txt".to_string(),
+                size: 5,
+                modified: None,
+                etag: None,
+                is_dir_marker: false,
+            }],
+            SyncMode::Sync,
+            crate::app::SyncPreset::Converge.policy(),
+            SyncCompareMode::SizeOnly,
+        );
+
+        let run_plan = prepare_sync_run_plan(&sync, &plan).expect("sync run plan");
+        assert_eq!(run_plan.deletes.len(), 1);
+        assert_eq!(
+            run_plan.deletes[0].strategy,
+            SyncExecutionStrategy::DeleteRemote
+        );
     }
 }

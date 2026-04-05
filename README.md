@@ -32,7 +32,7 @@ cargo build --release
 ## Not yet implemented
 
 - Presigned upload URLs (download URLs implemented)
-- `Diff`, `Copy`, and guarded `Sync` execution now exist. The next sync gap is performance tuning and richer execution telemetry; see `docs/sync.md`.
+- `Diff`, `Copy`, and guarded `Sync` with concurrent transfers, rclone-compatible filters, and throughput telemetry are shipped. The next sync gap is bandwidth enforcement and watch mode; see `docs/sync.md`.
 - Full inline content viewer (first 4KB text preview exists)
 
 ## Documentation

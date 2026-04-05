@@ -91,9 +91,8 @@ No temp files. No caches. No logs to disk.
 
 ## Current metric limitations
 
-The Settings view shows request counters, but the app does not currently wire
-real network activity into `PerfStats::record_request()`. The update counters
-are real; the network counters are placeholders for now.
+The Settings view shows live request and byte counters sourced from shared
+atomic counters in the S3 client. Update counters track `App::update()` calls.
 
 ## Verified idle: real CPU measurement tests
 

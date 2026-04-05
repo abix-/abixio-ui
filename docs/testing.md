@@ -155,9 +155,89 @@ curl.exe "http://localhost:10000/_admin/object?bucket=testbucket&key=resilience-
 3. Click `run tests`
 4. Review the PASS/FAIL table
 
+Source: `src/views/testing.rs::run_e2e_tests()`
+
+### S3 API tests
+
+| Test | What it verifies |
+|---|---|
+| create bucket | PUT bucket returns success |
+| list buckets contains test bucket | new bucket appears in listing |
+| empty bucket removed from list | bucket delete + verify gone |
+| put object | PUT object returns success |
+| get object | GET returns correct body, ETag, content-type, last-modified |
+| head object | HEAD returns size, ETag, content-type |
+| put empty object | 0-byte upload works |
+| get empty object | 0-byte download returns content-length: 0 |
+| list objects contains hello.txt | object appears in listing |
+| list objects has common prefixes | delimiter grouping works |
+| list prefix=docs/ has readme | prefix filtering works |
+| list prefix=docs/ excludes cat | prefix excludes other prefixes |
+| delete object | DELETE returns success |
+| get after delete fails | GET returns error after delete |
+
+### Copy and transfer tests
+
+| Test | What it verifies |
+|---|---|
+| copy object | server-side copy, verify destination content |
+| copy overwrite verify | copy to existing key, overwrite policy |
+| import folder recursive copy | local dir -> S3 recursive upload |
+| imported alpha exists | verify uploaded file content |
+| imported nested beta exists | verify nested file content |
+| export prefix recursive copy | S3 prefix -> local dir recursive download |
+| exported alpha exists | verify downloaded file content |
+| exported nested beta exists | verify nested download |
+
+### Object tagging tests
+
+| Test | What it verifies |
+|---|---|
+| get tags empty | fresh object has no tags |
+| put tags | set 2 tags (env=test, owner=e2e) |
+| get tags count | verify 2 tags returned |
+| get tags env | verify tag value matches |
+| delete tags | remove all tags |
+| tags deleted | verify tags are gone |
+
+### Versioning tests
+
+| Test | What it verifies |
+|---|---|
+| enable versioning | PutBucketVersioning Enabled |
+| versioning enabled | GetBucketVersioning returns Enabled |
+| put v1 | first versioned PUT |
+| put v2 | second versioned PUT |
+| list versions count | at least 2 versions returned |
+| suspend versioning | PutBucketVersioning Suspended |
+| versioning suspended | GetBucketVersioning returns Suspended |
+
+### AbixIO admin tests (only when connected to AbixIO)
+
+| Test | What it verifies |
+|---|---|
+| admin status has version | /_admin/status returns version |
+| admin disks count>0 | disks endpoint returns disks |
+| admin disks all online | all disks report online |
+| admin disks have space info | space metrics present |
+| admin heal mrf_pending>=0 | heal status endpoint works |
+| inspect bucket | shard inspection returns correct bucket |
+| inspect key | shard inspection returns correct key |
+| inspect has etag | shard data includes etag |
+| inspect all shards ok | all shards healthy |
+| inspect encoded key | URL-encoded keys work |
+| admin tests skipped (not abixio) | gracefully skips for non-AbixIO servers |
+
+### Cleanup
+
+| Test | What it verifies |
+|---|---|
+| version cleanup | delete all versions before bucket delete |
+| delete non-empty bucket | recursive cleanup + bucket delete |
+| non-empty bucket removed from list | bucket gone from listing |
+
 For AbixIO endpoints the Testing tab also checks the admin status, disks,
-healing, and object-inspection APIs. It also deletes its test buckets during
-cleanup now that bucket delete exists in the app.
+healing, and object-inspection APIs.
 
 ## In-app AbixIO object admin
 

@@ -285,7 +285,7 @@ async fn run_raw_disk() {
     let mut r = BenchResult { op: "WRITE", size: "1MB", size_bytes: 1024 * 1024, iters, timings };
     print_one(&mut r);
 
-    // raw write 10MB
+    // raw write 10MB (cached)
     let iters = 10;
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
@@ -295,6 +295,23 @@ async fn run_raw_disk() {
         timings.push(t.elapsed());
     }
     let mut r = BenchResult { op: "WRITE", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
+    print_one(&mut r);
+
+    // raw write 10MB + fsync (real disk speed)
+    let iters = 10;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("s10m_{}", i));
+        let t = Instant::now();
+        {
+            use tokio::io::AsyncWriteExt;
+            let mut f = tokio::fs::File::create(&path).await.unwrap();
+            f.write_all(&payload_10m).await.unwrap();
+            f.sync_all().await.unwrap();
+        }
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "FSYNC", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
     print_one(&mut r);
 
     // raw read 1KB

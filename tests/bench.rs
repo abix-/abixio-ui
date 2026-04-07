@@ -234,10 +234,116 @@ async fn run_bench(disks: usize) {
 
 // -- test entry points --
 
+async fn run_raw_disk() {
+    eprintln!("\n--- raw disk baseline (tokio::fs) ---");
+    eprintln!(
+        "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}",
+        "OP", "SIZE", "", "avg", "p50", "p99", "throughput"
+    );
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let payload_1k = vec![0x42u8; 1024];
+    let payload_1m = vec![0x42u8; 1024 * 1024];
+    let payload_10m = vec![0x42u8; 10 * 1024 * 1024];
+
+    // raw write 1KB
+    let iters = 200;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("w1k_{}", i));
+        let t = Instant::now();
+        tokio::fs::write(&path, &payload_1k).await.unwrap();
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "WRITE", size: "1KB", size_bytes: 1024, iters, timings };
+    print_one(&mut r);
+
+    // raw write 1MB
+    let iters = 50;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("w1m_{}", i));
+        let t = Instant::now();
+        tokio::fs::write(&path, &payload_1m).await.unwrap();
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "WRITE", size: "1MB", size_bytes: 1024 * 1024, iters, timings };
+    print_one(&mut r);
+
+    // raw write 10MB
+    let iters = 10;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("w10m_{}", i));
+        let t = Instant::now();
+        tokio::fs::write(&path, &payload_10m).await.unwrap();
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "WRITE", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
+    print_one(&mut r);
+
+    // raw read 1KB
+    let iters = 200;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("w1k_{}", i));
+        let t = Instant::now();
+        let _ = tokio::fs::read(&path).await.unwrap();
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "READ", size: "1KB", size_bytes: 1024, iters, timings };
+    print_one(&mut r);
+
+    // raw read 1MB
+    let iters = 50;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("w1m_{}", i));
+        let t = Instant::now();
+        let _ = tokio::fs::read(&path).await.unwrap();
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "READ", size: "1MB", size_bytes: 1024 * 1024, iters, timings };
+    print_one(&mut r);
+
+    // raw read 10MB
+    let iters = 10;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let path = base.join(format!("w10m_{}", i));
+        let t = Instant::now();
+        let _ = tokio::fs::read(&path).await.unwrap();
+        timings.push(t.elapsed());
+    }
+    let mut r = BenchResult { op: "READ", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
+    print_one(&mut r);
+}
+
+fn print_one(r: &mut BenchResult) {
+    let total: Duration = r.timings.iter().sum();
+    let a = avg(&r.timings);
+    let p50 = percentile(&mut r.timings, 50.0);
+    let p99 = percentile(&mut r.timings, 99.0);
+    let tp = format_throughput(r.size_bytes, r.iters, total);
+    eprintln!(
+        "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}",
+        r.op, r.size, r.iters,
+        format_duration(a), format_duration(p50), format_duration(p99), tp,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn bench_0_raw_disk() {
+    eprintln!("\nabixio benchmark\n");
+    run_raw_disk().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn bench_1_disk() {
-    eprintln!("\nabixio benchmark\n");
     run_bench(1).await;
 }
 

@@ -219,6 +219,33 @@ impl S3Client {
         Ok(String::new())
     }
 
+    /// PUT with UNSIGNED-PAYLOAD: skips client-side SHA256 of the body.
+    /// Use for trusted networks (HTTP, not HTTPS) where body integrity
+    /// is not required at the transport level.
+    pub async fn put_object_unsigned(
+        &self,
+        bucket: &str,
+        key: &str,
+        data: Vec<u8>,
+        content_type: &str,
+    ) -> Result<String, String> {
+        let len = data.len() as u64;
+        self.client
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .content_type(content_type)
+            .body(ByteStream::from(data))
+            .customize()
+            .disable_payload_signing()
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        self.record_request();
+        self.record_bytes_out(len);
+        Ok(String::new())
+    }
+
     /// Upload a local file. Uses multipart upload for files > 8MB,
     /// single PutObject for smaller files. On multipart failure,
     /// aborts the upload to prevent orphaned parts.

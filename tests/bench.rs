@@ -169,6 +169,19 @@ async fn run_bench(disks: usize) {
     }
     results.push(BenchResult { op: "PUT", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings });
 
+    // -- PUT 10MB UNSIGNED (skip client-side SHA256) --
+    let iters = 5;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        client
+            .put_object_unsigned("bench", &format!("unsigned/{}", i), payload_10m.clone(), "application/octet-stream")
+            .await
+            .unwrap();
+        timings.push(t.elapsed());
+    }
+    results.push(BenchResult { op: "PUT*", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings });
+
     // -- GET 1KB --
     let iters = 100;
     let mut timings = Vec::with_capacity(iters);

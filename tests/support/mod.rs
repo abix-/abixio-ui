@@ -1,3 +1,5 @@
+pub mod server;
+
 use std::future::Future;
 use std::sync::LazyLock;
 

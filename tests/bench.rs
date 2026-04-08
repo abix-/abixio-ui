@@ -841,3 +841,223 @@ async fn bench_clients() {
 
     eprintln!();
 }
+
+// ============================================================================
+// Comprehensive matrix: 3 servers x 3 clients x 3 sizes x 2 ops
+// ============================================================================
+
+struct MatrixResult {
+    server: String,
+    client: String,
+    size: String,
+    size_bytes: usize,
+    put_ops: f64,
+    put_avg_us: f64,
+    get_ops: f64,
+    get_avg_us: f64,
+}
+
+async fn matrix_sdk(
+    name: &str,
+    client: &abixio_ui::s3::client::S3Client,
+    bucket: &str,
+    sizes: &[(&str, usize, usize)],
+) -> Vec<MatrixResult> {
+    let _ = client.create_bucket(bucket).await;
+    let mut results = Vec::new();
+
+    for &(label, size_bytes, iters) in sizes {
+        let payload = vec![0x42u8; size_bytes];
+
+        for i in 0..3.min(iters) {
+            let _ = client.put_object(bucket, &format!("w_{}_{}", label, i), payload.clone(), "application/octet-stream").await;
+        }
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = client.put_object(bucket, &format!("{}/{}", label, i), payload.clone(), "application/octet-stream").await;
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = client.get_object(bucket, &format!("{}/{}", label, i)).await;
+        }
+        let get_elapsed = start.elapsed();
+
+        results.push(MatrixResult {
+            server: name.to_string(),
+            client: "aws-sdk-s3".to_string(),
+            size: label.to_string(),
+            size_bytes,
+            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
+            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
+            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
+        });
+    }
+    results
+}
+
+fn matrix_mc(
+    server_name: &str,
+    mc: &str,
+    sizes: &[(&str, usize, usize)],
+) -> Vec<MatrixResult> {
+    let mut results = Vec::new();
+
+    for &(label, size_bytes, iters) in sizes {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), &vec![0x42u8; size_bytes]).unwrap();
+        let tmppath = tmp.path().to_str().unwrap().to_string();
+        let sink = tempfile::NamedTempFile::new().unwrap();
+        let sinkpath = sink.path().to_str().unwrap().to_string();
+
+        let iters = if size_bytes >= 1024 * 1024 * 1024 { iters.min(2) }
+                    else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
+                    else { iters.min(30) };
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(mc)
+                .args(["cp", &tmppath, &format!("mx/{}/{}/{}", server_name, label, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(mc)
+                .args(["cp", &format!("mx/{}/{}/{}", server_name, label, i), &sinkpath])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let get_elapsed = start.elapsed();
+
+        results.push(MatrixResult {
+            server: server_name.to_string(),
+            client: "mc".to_string(),
+            size: label.to_string(),
+            size_bytes,
+            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
+            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
+            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
+        });
+    }
+    results
+}
+
+fn format_cell(ops: f64, avg_us: f64, size_bytes: usize) -> String {
+    let mbps = ops * size_bytes as f64 / 1024.0 / 1024.0;
+    if size_bytes <= 65536 {
+        format!("{:>5.0} obj/s {:>7.0}us", ops, avg_us)
+    } else {
+        format!("{:>6.1} MB/s {:>8.0}ms", mbps, avg_us / 1000.0)
+    }
+}
+
+fn print_matrix(results: &[MatrixResult]) {
+    for size_label in &["4KB", "10MB", "1GB"] {
+        eprintln!();
+        eprintln!("--- {} ---", size_label);
+        eprintln!("| {:12} | {:10} | {:>24} | {:>24} |", "Server", "Client", "PUT", "GET");
+        eprintln!("|{:-<14}|{:-<12}|{:-<26}|{:-<26}|", "", "", "", "");
+
+        for r in results.iter().filter(|r| r.size == *size_label) {
+            eprintln!("| {:<12} | {:<10} | {} | {} |",
+                r.server, r.client,
+                format_cell(r.put_ops, r.put_avg_us, r.size_bytes),
+                format_cell(r.get_ops, r.get_avg_us, r.size_bytes),
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn bench_matrix() {
+    eprintln!();
+    eprintln!("=============================================================");
+    eprintln!("  COMPREHENSIVE BENCHMARK MATRIX");
+    eprintln!("  3 servers x 2 clients x 3 sizes x 2 ops");
+    eprintln!("=============================================================");
+
+    let sizes: Vec<(&str, usize, usize)> = vec![
+        ("4KB", 4096, 200),
+        ("10MB", 10 * 1024 * 1024, 5),
+        ("1GB", 1024 * 1024 * 1024, 2),
+    ];
+
+    let mc_bin = find_binary("MC", r"C:\tools\mc.exe");
+    let mut all_results: Vec<MatrixResult> = Vec::new();
+
+    // --- AbixIO ---
+    eprintln!("\nstarting AbixIO...");
+    let abixio = AbixioServer::builder().volume_count(1).no_auth(false).start();
+    let abixio_endpoint = abixio.endpoint();
+
+    eprintln!("  aws-sdk-s3...");
+    all_results.extend(matrix_sdk("AbixIO", &abixio.s3_client(), "matrix", &sizes).await);
+
+    if let Some(ref mc) = mc_bin {
+        eprintln!("  mc...");
+        let _ = Command::new(mc)
+            .args(["alias", "set", "mx", &abixio_endpoint, "test", "testsecret", "--api", "S3v4"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new(mc).args(["mb", "mx/AbixIO"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        all_results.extend(matrix_mc("AbixIO", mc, &sizes));
+    }
+
+    // --- RustFS ---
+    if let Some(rustfs) = ExternalServer::start_rustfs(11701) {
+        eprintln!("\nstarting RustFS...");
+        let rustfs_endpoint = format!("http://127.0.0.1:{}", rustfs.port);
+        let client = rustfs.s3_client(("benchuser", "benchpass"));
+
+        eprintln!("  aws-sdk-s3...");
+        all_results.extend(matrix_sdk("RustFS", &client, "matrix", &sizes).await);
+
+        if let Some(ref mc) = mc_bin {
+            eprintln!("  mc...");
+            let _ = Command::new(mc)
+                .args(["alias", "set", "mx", &rustfs_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new(mc).args(["mb", "mx/RustFS"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            all_results.extend(matrix_mc("RustFS", mc, &sizes));
+        }
+    } else {
+        eprintln!("\nRustFS not found, skipping");
+    }
+
+    // --- MinIO ---
+    if let Some(minio) = ExternalServer::start_minio(11703) {
+        eprintln!("\nstarting MinIO...");
+        let minio_endpoint = format!("http://127.0.0.1:{}", minio.port);
+        let client = minio.s3_client(("benchuser", "benchpass"));
+
+        eprintln!("  aws-sdk-s3...");
+        all_results.extend(matrix_sdk("MinIO", &client, "matrix", &sizes).await);
+
+        if let Some(ref mc) = mc_bin {
+            eprintln!("  mc...");
+            let _ = Command::new(mc)
+                .args(["alias", "set", "mx", &minio_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new(mc).args(["mb", "mx/MinIO"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            all_results.extend(matrix_mc("MinIO", mc, &sizes));
+        }
+    } else {
+        eprintln!("\nMinIO not found, skipping");
+    }
+
+    if let Some(ref mc) = mc_bin {
+        let _ = Command::new(mc).args(["alias", "rm", "mx"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+
+    eprintln!();
+    eprintln!("=============================================================");
+    eprintln!("  RESULTS");
+    eprintln!("=============================================================");
+    print_matrix(&all_results);
+    eprintln!();
+}

@@ -908,11 +908,18 @@ fn matrix_mc(
     sizes: &[(&str, usize, usize)],
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
+    let bucket = server_name.to_lowercase(); // S3 bucket names must be lowercase
 
     for &(label, size_bytes, iters) in sizes {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), &vec![0x42u8; size_bytes]).unwrap();
-        let tmppath = tmp.path().to_str().unwrap().to_string();
+        // write payload to a persistent temp file (NamedTempFile can get deleted too early on Windows)
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let tmppath = tmpdir.path().join("payload.dat");
+        std::fs::write(&tmppath, &vec![0x42u8; size_bytes]).unwrap();
+        let tmppath = tmppath.to_str().unwrap().to_string();
+
+        // verify file exists and has right size
+        let meta = std::fs::metadata(&tmppath).unwrap();
+        assert_eq!(meta.len(), size_bytes as u64, "temp file wrong size");
         let sink = tempfile::NamedTempFile::new().unwrap();
         let sinkpath = sink.path().to_str().unwrap().to_string();
 
@@ -920,18 +927,33 @@ fn matrix_mc(
                     else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
                     else { iters.min(30) };
 
-        let start = Instant::now();
-        for i in 0..iters {
-            let _ = Command::new(mc)
-                .args(["cp", &tmppath, &format!("mx/{}/{}/{}", server_name, label, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        // test first PUT with error capture
+        let test = Command::new(mc)
+            .args(["cp", &tmppath, &format!("mx/bench{}/{}/test", bucket, label)])
+            .output();
+        if let Ok(output) = &test {
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                eprintln!("    mc {} {} error: {}", server_name, label, err.trim());
+            }
         }
-        let put_elapsed = start.elapsed();
 
         let start = Instant::now();
         for i in 0..iters {
             let _ = Command::new(mc)
-                .args(["cp", &format!("mx/{}/{}/{}", server_name, label, i), &sinkpath])
+                .args(["cp", &tmppath, &format!("mx/bench{}/{}/{}", bucket, label, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let put_elapsed = start.elapsed();
+
+        let sinkdir = tempfile::TempDir::new().unwrap();
+        let sinkpath = sinkdir.path().join("out.dat");
+        let sinkpath = sinkpath.to_str().unwrap().to_string();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(mc)
+                .args(["cp", &format!("mx/bench{}/{}/{}", bucket, label, i), &sinkpath])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
         }
         let get_elapsed = start.elapsed();
@@ -1007,7 +1029,7 @@ async fn bench_matrix() {
         let _ = Command::new(mc)
             .args(["alias", "set", "mx", &abixio_endpoint, "test", "testsecret", "--api", "S3v4"])
             .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        let _ = Command::new(mc).args(["mb", "mx/AbixIO"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new(mc).args(["mb", "mx/benchabixio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
         all_results.extend(matrix_mc("AbixIO", mc, &sizes));
     }
 
@@ -1025,7 +1047,7 @@ async fn bench_matrix() {
             let _ = Command::new(mc)
                 .args(["alias", "set", "mx", &rustfs_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let _ = Command::new(mc).args(["mb", "mx/RustFS"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new(mc).args(["mb", "mx/benchrustfs"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
             all_results.extend(matrix_mc("RustFS", mc, &sizes));
         }
     } else {
@@ -1046,7 +1068,7 @@ async fn bench_matrix() {
             let _ = Command::new(mc)
                 .args(["alias", "set", "mx", &minio_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let _ = Command::new(mc).args(["mb", "mx/MinIO"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new(mc).args(["mb", "mx/benchminio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
             all_results.extend(matrix_mc("MinIO", mc, &sizes));
         }
     } else {

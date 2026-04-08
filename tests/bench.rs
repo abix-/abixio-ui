@@ -916,7 +916,7 @@ fn matrix_mc(
         let sink = tempfile::NamedTempFile::new().unwrap();
         let sinkpath = sink.path().to_str().unwrap().to_string();
 
-        let iters = if size_bytes >= 1024 * 1024 * 1024 { iters.min(2) }
+        let iters = if size_bytes >= 1024 * 1024 * 1024 { iters.min(3) }
                     else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
                     else { iters.min(30) };
 
@@ -988,7 +988,7 @@ async fn bench_matrix() {
     let sizes: Vec<(&str, usize, usize)> = vec![
         ("4KB", 4096, 200),
         ("10MB", 10 * 1024 * 1024, 5),
-        ("1GB", 1024 * 1024 * 1024, 2),
+        ("1GB", 1024 * 1024 * 1024, 3),
     ];
 
     let mc_bin = find_binary("MC", r"C:\tools\mc.exe");

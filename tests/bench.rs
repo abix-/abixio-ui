@@ -69,8 +69,8 @@ fn print_results(config_name: &str, results: &mut [BenchResult]) {
     eprintln!();
     eprintln!("--- {} ---", config_name);
     eprintln!(
-        "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}",
-        "OP", "SIZE", "", "avg", "p50", "p99", "throughput"
+        "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}  {:>10}",
+        "OP", "SIZE", "", "avg", "p50", "p99", "MB/s", "obj/sec"
     );
 
     for r in results.iter_mut() {
@@ -79,9 +79,14 @@ fn print_results(config_name: &str, results: &mut [BenchResult]) {
         let p50 = percentile(&mut r.timings, 50.0);
         let p99 = percentile(&mut r.timings, 99.0);
         let tp = format_throughput(r.size_bytes, r.iters, total);
+        let ops = if total.as_secs_f64() > 0.0 {
+            format!("{:.0}", r.iters as f64 / total.as_secs_f64())
+        } else {
+            "-".to_string()
+        };
 
         eprintln!(
-            "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}",
+            "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}  {:>10}",
             r.op,
             r.size,
             r.iters,
@@ -89,6 +94,7 @@ fn print_results(config_name: &str, results: &mut [BenchResult]) {
             format_duration(p50),
             format_duration(p99),
             tp,
+            ops,
         );
     }
 }
@@ -116,6 +122,7 @@ async fn run_bench(disks: usize) {
     }
 
     // pre-generate payloads
+    let payload_4k = vec![0x42u8; 4096];
     let payload_1k = vec![0x42u8; 1024];
     let payload_1m = vec![0x42u8; 1024 * 1024];
     let payload_10m = vec![0x42u8; 10 * 1024 * 1024];
@@ -129,6 +136,58 @@ async fn run_bench(disks: usize) {
             .await
             .unwrap();
     }
+
+    // -- PUT 4KB (small object hot path) --
+    let iters = 500;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        client
+            .put_object("bench", &format!("tiny/{}", i), payload_4k.clone(), "application/octet-stream")
+            .await
+            .unwrap();
+        timings.push(t.elapsed());
+    }
+    results.push(BenchResult { op: "PUT", size: "4KB", size_bytes: 4096, iters, timings });
+
+    // -- GET 4KB --
+    let iters = 500;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        let _ = client
+            .get_object("bench", &format!("tiny/{}", i))
+            .await
+            .unwrap();
+        timings.push(t.elapsed());
+    }
+    results.push(BenchResult { op: "GET", size: "4KB", size_bytes: 4096, iters, timings });
+
+    // -- HEAD 4KB --
+    let iters = 500;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        let _ = client
+            .head_object("bench", &format!("tiny/{}", i))
+            .await
+            .unwrap();
+        timings.push(t.elapsed());
+    }
+    results.push(BenchResult { op: "HEAD", size: "4KB", size_bytes: 0, iters, timings });
+
+    // -- DELETE 4KB --
+    let iters = 500;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        client
+            .delete_object("bench", &format!("tiny/{}", i))
+            .await
+            .unwrap();
+        timings.push(t.elapsed());
+    }
+    results.push(BenchResult { op: "DELETE", size: "4KB", size_bytes: 0, iters, timings });
 
     // -- PUT 1KB --
     let iters = 100;

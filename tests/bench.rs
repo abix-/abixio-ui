@@ -869,16 +869,19 @@ async fn matrix_sdk(
     for &(label, size_bytes, iters) in sizes {
         let payload = vec![0x42u8; size_bytes];
 
+        // warmup (unsigned)
         for i in 0..3.min(iters) {
-            let _ = client.put_object(bucket, &format!("w_{}_{}", label, i), payload.clone(), "application/octet-stream").await;
+            let _ = client.put_object_unsigned(bucket, &format!("w_{}_{}", label, i), payload.clone(), "application/octet-stream").await;
         }
 
+        // PUT (unsigned -- same as mc, rclone, AWS CLI over HTTPS)
         let start = Instant::now();
         for i in 0..iters {
-            let _ = client.put_object(bucket, &format!("{}/{}", label, i), payload.clone(), "application/octet-stream").await;
+            let _ = client.put_object_unsigned(bucket, &format!("{}/{}", label, i), payload.clone(), "application/octet-stream").await;
         }
         let put_elapsed = start.elapsed();
 
+        // GET
         let start = Instant::now();
         for i in 0..iters {
             let _ = client.get_object(bucket, &format!("{}/{}", label, i)).await;

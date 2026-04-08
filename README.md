@@ -36,14 +36,14 @@ If you need a production S3 client today, use [mc](https://github.com/minio/mc) 
 
 ## What AbixIO UI Is
 
-AbixIO UI is the native desktop client and admin console for the AbixIO server.
+AbixIO UI is a native desktop S3 client and an admin console for the AbixIO server.
 
-It can also connect to other S3-compatible endpoints, but that is secondary. The primary purpose of this repo is to give AbixIO server users a desktop interface for:
-- Browsing buckets and objects
-- Running file transfer workflows
-- Managing bucket-level S3 features
-- Inspecting AbixIO server health and healing state
-- Investigating shard placement and repair operations
+Both are first-class use cases. This repo is meant for:
+- Browsing buckets and objects on any S3-compatible endpoint
+- Running upload, download, copy, move, and sync workflows
+- Managing bucket-level S3 features such as versioning, policy, lifecycle, and tagging
+- Inspecting AbixIO server health, healing state, and shard layout
+- Running AbixIO-specific repair and operational workflows
 
 Built with [iced](https://iced.rs) and [aws-sdk-s3](https://docs.rs/aws-sdk-s3).
 

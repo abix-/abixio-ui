@@ -107,6 +107,46 @@ impl AdminClient {
         let resp = self.signed_post(&url).await?;
         resp.json().await.map_err(|e| e.to_string())
     }
+
+    pub async fn cluster_status(&self) -> Result<ClusterStatusResponse, String> {
+        let resp = self.signed_get(&self.url("cluster/status")).await?;
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn cluster_nodes(&self) -> Result<ClusterNodesResponse, String> {
+        let resp = self.signed_get(&self.url("cluster/nodes")).await?;
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn cluster_epochs(&self) -> Result<ClusterEpochsResponse, String> {
+        let resp = self.signed_get(&self.url("cluster/epochs")).await?;
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn cluster_topology(&self) -> Result<ClusterTopologyResponse, String> {
+        let resp = self.signed_get(&self.url("cluster/topology")).await?;
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_bucket_ftt(&self, bucket: &str) -> Result<EcConfig, String> {
+        let resp = self
+            .signed_get(&self.url(&format!("bucket/{}/ftt", bucket)))
+            .await?;
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn set_bucket_ftt(&self, bucket: &str, ftt: usize) -> Result<EcConfig, String> {
+        let url = self.url_with_query(&format!("bucket/{}/ftt", bucket), &[("ftt", &ftt.to_string())]);
+        let mut builder = self.http.put(&url);
+        if let Some((ref ak, ref sk)) = self.credentials {
+            let headers = sig_v4_headers("PUT", &url, ak, sk, &self.region);
+            for (k, v) in &headers {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+        }
+        let resp = builder.send().await.map_err(|e| e.to_string())?;
+        resp.json().await.map_err(|e| e.to_string())
+    }
 }
 
 // -- Sig V4 signing (same approach as rust-s3 signing.rs) --

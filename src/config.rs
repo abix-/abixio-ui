@@ -7,6 +7,68 @@ use crate::keychain;
 pub struct Settings {
     #[serde(default)]
     pub connections: Vec<Connection>,
+    #[serde(default)]
+    pub server: ServerConfig,
+}
+
+/// Persisted configuration for the embedded AbixIO server launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ServerConfig {
+    /// Path to abixio binary. Empty = auto-detect.
+    #[serde(default)]
+    pub binary_path: String,
+    /// Volume paths, one per entry.
+    #[serde(default)]
+    pub volumes: Vec<String>,
+    /// Listen address (e.g. ":10000").
+    #[serde(default = "default_listen")]
+    pub listen: String,
+    /// Disable authentication.
+    #[serde(default)]
+    pub no_auth: bool,
+    /// Scan interval (e.g. "10m").
+    #[serde(default = "default_scan_interval")]
+    pub scan_interval: String,
+    /// Heal interval (e.g. "24h").
+    #[serde(default = "default_heal_interval")]
+    pub heal_interval: String,
+    /// Number of MRF workers.
+    #[serde(default = "default_mrf_workers")]
+    pub mrf_workers: usize,
+    /// Auto-connect after launch.
+    #[serde(default = "default_true")]
+    pub auto_connect: bool,
+}
+
+fn default_listen() -> String {
+    ":10000".to_string()
+}
+fn default_scan_interval() -> String {
+    "10m".to_string()
+}
+fn default_heal_interval() -> String {
+    "24h".to_string()
+}
+fn default_mrf_workers() -> usize {
+    2
+}
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            binary_path: String::new(),
+            volumes: Vec::new(),
+            listen: default_listen(),
+            no_auth: false,
+            scan_interval: default_scan_interval(),
+            heal_interval: default_heal_interval(),
+            mrf_workers: default_mrf_workers(),
+            auto_connect: true,
+        }
+    }
 }
 
 /// A connection profile. Name, endpoint, and region are stored on disk.
@@ -245,6 +307,7 @@ mod tests {
                     region: "us-west-2".to_string(),
                 },
             ],
+            server: ServerConfig::default(),
         };
         let json = serde_json::to_string(&settings).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();

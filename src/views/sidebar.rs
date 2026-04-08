@@ -11,12 +11,16 @@ impl App {
 
         if self.is_abixio {
             col = col.push(self.nav_btn("D", Section::Disks));
+            if self.server_status.as_ref().is_some_and(|s| s.cluster.enabled) {
+                col = col.push(self.nav_btn("C", Section::Cluster));
+            }
             col = col.push(self.nav_btn("H", Section::Healing));
         }
 
         col = col.push(self.nav_btn("Y", Section::Sync));
         col = col.push(self.nav_btn("+", Section::Connections));
         col = col.push(self.nav_btn("T", Section::Testing));
+        col = col.push(self.nav_btn("R", Section::Server));
         col = col.push(iced::widget::space::vertical());
         col = col.push(self.nav_btn("S", Section::Settings));
 

@@ -119,15 +119,62 @@ impl App {
             );
             layout = layout.push(
                 row![
-                    text("Erasure").size(11),
+                    text("FTT").size(11),
                     text(format!(
-                        "{} data + {} parity ({} disks)",
-                        status.data_shards, status.parity_shards, status.total_disks
+                        "{} ({} disks)",
+                        status.default_ftt, status.total_disks
                     ))
                     .size(11),
                 ]
                 .spacing(8),
             );
+            if status.cluster.enabled {
+                layout = layout.push(iced::widget::rule::horizontal(1));
+                layout = layout.push(text("Cluster").size(14));
+                layout = layout.push(
+                    row![
+                        text("State").size(11),
+                        text(format!("{}", status.cluster.state)).size(11),
+                    ]
+                    .spacing(8),
+                );
+                layout = layout.push(
+                    row![
+                        text("Nodes").size(11),
+                        text(format!(
+                            "{} ({} voters, {} reachable)",
+                            status.cluster.node_count,
+                            status.cluster.voter_count,
+                            status.cluster.reachable_voters
+                        ))
+                        .size(11),
+                    ]
+                    .spacing(8),
+                );
+                layout = layout.push(
+                    row![
+                        text("Epoch").size(11),
+                        text(format!("{}", status.cluster.epoch_id)).size(11),
+                    ]
+                    .spacing(8),
+                );
+                layout = layout.push(
+                    row![
+                        text("Leader").size(11),
+                        text(&status.cluster.leader_id).size(11),
+                    ]
+                    .spacing(8),
+                );
+                if let Some(reason) = &status.cluster.fenced_reason {
+                    layout = layout.push(
+                        row![
+                            text("Fenced").size(11),
+                            text(reason).size(11),
+                        ]
+                        .spacing(8),
+                    );
+                }
+            }
         }
 
         layout.into()

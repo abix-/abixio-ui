@@ -1,9 +1,11 @@
 pub mod buckets;
+pub mod cluster;
 pub mod connections;
 pub mod detail;
 pub mod disks;
 pub mod healing;
 pub mod objects;
+pub mod server;
 pub mod settings;
 pub mod sidebar;
 pub mod sync;

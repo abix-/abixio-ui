@@ -13,8 +13,10 @@ use iced::{Element, Length, Subscription, Task, Theme};
 
 use crate::abixio::client::AdminClient;
 use crate::abixio::types::{
-    DisksResponse, HealResponse, HealStatusResponse, ObjectInspectResponse, StatusResponse,
+    ClusterNodesResponse, DisksResponse, EcConfig, HealResponse, HealStatusResponse,
+    ObjectInspectResponse, StatusResponse,
 };
+use crate::config::ServerConfig;
 use crate::config::{self, Settings};
 use crate::s3::client::{
     BucketInfo, ListObjectsResult, ObjectDetail, ObjectInfo, S3Client, VersionInfo,
@@ -184,6 +186,9 @@ pub enum Message {
         key: String,
         result: Result<HealResponse, String>,
     },
+    RefreshClusterNodes,
+    ClusterNodesLoaded(Result<ClusterNodesResponse, String>),
+    BucketFttLoaded(Result<EcConfig, String>),
 
     // object filter / find
     ObjectFilterChanged(String),
@@ -257,6 +262,26 @@ pub enum Message {
     TestsComplete(Vec<TestResult>),
     AutoStartTests,
     TestReportWritten(Result<PathBuf, String>),
+
+    // server launcher
+    ServerBinaryPathChanged(String),
+    ServerListenChanged(String),
+    ServerNoAuthToggled(bool),
+    ServerScanIntervalChanged(String),
+    ServerHealIntervalChanged(String),
+    ServerMrfWorkersChanged(String),
+    ServerAutoConnectToggled(bool),
+    ServerAddVolume,
+    ServerRemoveVolume(usize),
+    ServerVolumeChanged(usize, String),
+    ServerPickVolume(usize),
+    ServerVolumePathPicked(usize, Option<PathBuf>),
+    StartServer,
+    StopServer,
+    ServerLogLine(String),
+    ServerExited(Option<i32>),
+    ServerSaveConfig,
+    ServerAutoConnect(String, bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -264,9 +289,11 @@ pub enum Section {
     Browse,
     Sync,
     Disks,
+    Cluster,
     Config,
     Healing,
     Connections,
+    Server,
     Settings,
     Testing,
 }
@@ -328,6 +355,8 @@ pub struct App {
     pub healing_object: bool,
     pub healing_target: Option<(String, String)>,
     pub heal_result: Option<String>,
+    pub cluster_nodes: Option<Result<ClusterNodesResponse, String>>,
+    pub bucket_ftt: Option<Result<usize, String>>,
     pub transfer: Option<TransferState>,
     pub bucket_delete: Option<BucketDeleteState>,
 
@@ -383,11 +412,20 @@ pub struct App {
     pub auto_test_started: bool,
     pub test_report_path: Option<PathBuf>,
     pub test_started_at: Option<String>,
+
+    // server launcher
+    pub server_config: ServerConfig,
+    pub server_running: bool,
+    pub server_child: Option<tokio::process::Child>,
+    pub server_log: Vec<String>,
+    pub server_binary_found: Option<PathBuf>,
 }
 
 impl App {
     pub fn new(startup: StartupOptions) -> (Self, Task<Message>) {
         let settings = config::load().unwrap_or_default();
+        let server_config = settings.server.clone();
+        let server_binary_found = crate::server::find_binary(&server_config.binary_path);
         let endpoint = startup.endpoint;
         let creds = startup.creds;
 
@@ -463,6 +501,8 @@ impl App {
             healing_object: false,
             healing_target: None,
             heal_result: None,
+            cluster_nodes: None,
+            bucket_ftt: None,
             transfer: None,
             bucket_delete: None,
             new_conn_name: String::new(),
@@ -500,6 +540,11 @@ impl App {
             auto_test_started: false,
             test_report_path: startup.test_report_path,
             test_started_at: None,
+            server_config,
+            server_running: false,
+            server_child: None,
+            server_log: Vec::new(),
+            server_binary_found,
         };
 
         let task = if loading_buckets {
@@ -673,6 +718,9 @@ impl App {
                 key,
                 result,
             } => self.handle_heal_object_finished(bucket, key, result),
+            Message::RefreshClusterNodes => self.handle_refresh_cluster_nodes(),
+            Message::ClusterNodesLoaded(r) => self.handle_cluster_nodes_loaded(r),
+            Message::BucketFttLoaded(r) => self.handle_bucket_ftt_loaded(r),
 
             // -- detail panel --
             Message::OpenShareModal => self.handle_open_share_modal(),
@@ -839,6 +887,30 @@ impl App {
             Message::TestsComplete(r) => self.handle_tests_complete(r),
             Message::AutoStartTests => self.handle_auto_start_tests(),
             Message::TestReportWritten(r) => self.handle_test_report_written(r),
+
+            // -- server launcher --
+            Message::ServerBinaryPathChanged(v) => self.handle_server_binary_path_changed(v),
+            Message::ServerListenChanged(v) => self.handle_server_listen_changed(v),
+            Message::ServerNoAuthToggled(v) => self.handle_server_no_auth_toggled(v),
+            Message::ServerScanIntervalChanged(v) => self.handle_server_scan_interval_changed(v),
+            Message::ServerHealIntervalChanged(v) => self.handle_server_heal_interval_changed(v),
+            Message::ServerMrfWorkersChanged(v) => self.handle_server_mrf_workers_changed(v),
+            Message::ServerAutoConnectToggled(v) => self.handle_server_auto_connect_toggled(v),
+            Message::ServerAddVolume => self.handle_server_add_volume(),
+            Message::ServerRemoveVolume(i) => self.handle_server_remove_volume(i),
+            Message::ServerVolumeChanged(i, v) => self.handle_server_volume_changed(i, v),
+            Message::ServerPickVolume(i) => self.handle_server_pick_volume(i),
+            Message::ServerVolumePathPicked(i, path) => {
+                self.handle_server_volume_path_picked(i, path)
+            }
+            Message::StartServer => self.handle_start_server(),
+            Message::StopServer => self.handle_stop_server(),
+            Message::ServerLogLine(line) => self.handle_server_log_line(line),
+            Message::ServerExited(code) => self.handle_server_exited(code),
+            Message::ServerSaveConfig => self.handle_server_save_config(),
+            Message::ServerAutoConnect(endpoint, no_auth) => {
+                self.handle_server_auto_connect(endpoint, no_auth)
+            }
         }
     }
 
@@ -849,8 +921,10 @@ impl App {
             Section::Sync => self.sync_view(),
             Section::Connections => self.connections_view(),
             Section::Disks if self.is_abixio => self.disks_view(),
+            Section::Cluster if self.is_abixio => self.cluster_view(),
             Section::Healing if self.is_abixio => self.healing_view(),
             Section::Testing => self.testing_view(),
+            Section::Server => self.server_view(),
             Section::Settings => self.settings_view(),
             _ => container(text("Coming soon").size(14)).padding(20).into(),
         };
@@ -1043,11 +1117,17 @@ mod tests {
             erasure: ErasureInfo {
                 data: 2,
                 parity: 1,
+                epoch_id: 0,
+                set_id: String::new(),
                 distribution: vec![0, 1, 2],
+                node_ids: Vec::new(),
+                volume_ids: Vec::new(),
             },
             shards: vec![ShardInfo {
                 index: 0,
                 disk: 0,
+                node_id: String::new(),
+                volume_id: String::new(),
                 status: "ok".to_string(),
                 checksum: Some("abc".to_string()),
             }],

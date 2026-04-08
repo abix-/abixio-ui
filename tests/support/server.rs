@@ -62,6 +62,13 @@ impl AbixioServer {
         )
     }
 
+    pub fn s3_client_anonymous(&self) -> Arc<S3Client> {
+        Arc::new(
+            S3Client::anonymous(&self.endpoint())
+                .expect("create anonymous S3 client"),
+        )
+    }
+
     pub fn admin_client(&self) -> Arc<AdminClient> {
         Arc::new(AdminClient::new(&self.endpoint(), None, "us-east-1"))
     }

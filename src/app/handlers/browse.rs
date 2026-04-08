@@ -17,13 +17,18 @@ impl App {
         self.loading_objects = true;
         self.reset_bucket_document_states();
         self.bucket_tags = None;
-        Task::batch(vec![
+        self.bucket_ftt = None;
+        let mut tasks = vec![
             self.cmd_fetch_objects(),
             self.cmd_fetch_versioning_status(&name),
             self.cmd_fetch_bucket_document(BucketDocumentKind::Policy, &name),
             self.cmd_fetch_bucket_document(BucketDocumentKind::Lifecycle, &name),
             self.cmd_fetch_bucket_tags(&name),
-        ])
+        ];
+        if self.is_abixio && self.admin_client.is_some() {
+            tasks.push(self.cmd_fetch_bucket_ftt(&name));
+        }
+        Task::batch(tasks)
     }
 
     pub(crate) fn handle_navigate_prefix(&mut self, prefix: String) -> Task<Message> {

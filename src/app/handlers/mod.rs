@@ -3,6 +3,7 @@ pub(crate) mod browse;
 pub(crate) mod connection;
 pub(crate) mod delete;
 pub(crate) mod detail;
+pub(crate) mod server;
 pub(crate) mod sync;
 pub(crate) mod testing;
 pub(crate) mod transfer;

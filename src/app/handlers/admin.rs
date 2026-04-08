@@ -1,7 +1,8 @@
 use iced::Task;
 
 use crate::abixio::types::{
-    DisksResponse, HealResponse, HealStatusResponse, ObjectInspectResponse, StatusResponse,
+    ClusterNodesResponse, DisksResponse, EcConfig, HealResponse, HealStatusResponse,
+    ObjectInspectResponse, StatusResponse,
 };
 
 use super::super::{App, Message};
@@ -13,6 +14,7 @@ impl App {
     ) -> Task<Message> {
         if let Some(s) = status {
             self.is_abixio = true;
+            let cluster_enabled = s.cluster.enabled;
             self.server_status = Some(s);
             // auto-fetch disks + heal status
             let admin = self.admin_client.clone();
@@ -41,6 +43,19 @@ impl App {
                     )
                 },
             ];
+            if cluster_enabled {
+                let admin = self.admin_client.clone();
+                tasks.push(Task::perform(
+                    async move {
+                        if let Some(a) = admin.as_ref() {
+                            a.cluster_nodes().await
+                        } else {
+                            Err("no admin client".to_string())
+                        }
+                    },
+                    Message::ClusterNodesLoaded,
+                ));
+            }
             if self.auto_run_tests && !self.auto_test_started {
                 tasks.push(Task::perform(async {}, |_| Message::AutoStartTests));
             }
@@ -243,6 +258,51 @@ impl App {
                 }
             },
             Message::HealStatusLoaded,
+        )
+    }
+
+    pub(crate) fn handle_refresh_cluster_nodes(&mut self) -> Task<Message> {
+        let admin = self.admin_client.clone();
+        Task::perform(
+            async move {
+                if let Some(a) = admin.as_ref() {
+                    a.cluster_nodes().await
+                } else {
+                    Err("no admin client".to_string())
+                }
+            },
+            Message::ClusterNodesLoaded,
+        )
+    }
+
+    pub(crate) fn handle_cluster_nodes_loaded(
+        &mut self,
+        result: Result<ClusterNodesResponse, String>,
+    ) -> Task<Message> {
+        self.cluster_nodes = Some(result);
+        Task::none()
+    }
+
+    pub(crate) fn handle_bucket_ftt_loaded(
+        &mut self,
+        result: Result<EcConfig, String>,
+    ) -> Task<Message> {
+        self.bucket_ftt = Some(result.map(|c| c.ftt));
+        Task::none()
+    }
+
+    pub(crate) fn cmd_fetch_bucket_ftt(&self, bucket: &str) -> Task<Message> {
+        let admin = self.admin_client.clone();
+        let bucket = bucket.to_string();
+        Task::perform(
+            async move {
+                if let Some(a) = admin.as_ref() {
+                    a.get_bucket_ftt(&bucket).await
+                } else {
+                    Err("no admin client".to_string())
+                }
+            },
+            Message::BucketFttLoaded,
         )
     }
 

@@ -110,6 +110,21 @@ impl App {
                     &self.bucket_lifecycle,
                 ));
 
+                if self.is_abixio {
+                    col = col.push(section("AbixIO"));
+                    match &self.bucket_ftt {
+                        Some(Ok(ftt)) => {
+                            col = col.push(meta_row("FTT", &ftt.to_string()));
+                        }
+                        Some(Err(e)) => {
+                            col = col.push(text(format!("FTT error: {}", e)).size(10));
+                        }
+                        None => {
+                            col = col.push(text("Loading FTT...").size(10));
+                        }
+                    }
+                }
+
                 col = col.push(section("Actions"));
                 col = col.push(
                     row![
@@ -283,6 +298,15 @@ impl App {
                                     inspect.erasure.data, inspect.erasure.parity
                                 ),
                             ));
+                            if inspect.erasure.epoch_id > 0 {
+                                col = col.push(meta_row(
+                                    "Epoch",
+                                    &inspect.erasure.epoch_id.to_string(),
+                                ));
+                            }
+                            if !inspect.erasure.set_id.is_empty() {
+                                col = col.push(meta_row("Volume Pool", &inspect.erasure.set_id));
+                            }
                             col = col.push(meta_row(
                                 "Distribution",
                                 &inspect
@@ -296,9 +320,17 @@ impl App {
                             col = col.push(text("Shards").size(11));
 
                             for shard in &inspect.shards {
+                                let location = if !shard.node_id.is_empty() {
+                                    format!(
+                                        "disk {} / {} / {} ({})",
+                                        shard.disk, shard.node_id, shard.volume_id, shard.status
+                                    )
+                                } else {
+                                    format!("disk {} ({})", shard.disk, shard.status)
+                                };
                                 col = col.push(meta_row(
                                     &format!("Shard {}", shard.index),
-                                    &format!("disk {} ({})", shard.disk, shard.status),
+                                    &location,
                                 ));
                                 col = col.push(meta_row(
                                     "Checksum",

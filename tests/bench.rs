@@ -9,6 +9,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use support::server::AbixioServer;
@@ -452,4 +453,164 @@ async fn bench_3_disks() {
 #[ignore]
 async fn bench_4_disks() {
     run_bench(4).await;
+}
+
+// ============================================================================
+// Competitive benchmark: AbixIO vs RustFS vs MinIO (4KB + 10MB + 1GB)
+// ============================================================================
+
+use std::process::{Command, Child, Stdio};
+
+struct ExternalServer {
+    child: Child,
+    port: u16,
+    _temp: tempfile::TempDir,
+}
+
+impl ExternalServer {
+    fn start_rustfs(port: u16) -> Option<Self> {
+        let bin = std::env::var("RUSTFS_BIN").unwrap_or_else(|_| r"C:\tools\rustfs.exe".to_string());
+        if !std::path::Path::new(&bin).exists() { return None; }
+        let tmp = tempfile::TempDir::new().ok()?;
+        let console_port = port + 1;
+        let child = Command::new(&bin)
+            .args(["server", tmp.path().to_str().unwrap(),
+                   "--address", &format!(":{}", port),
+                   "--console-address", &format!(":{}", console_port)])
+            .env("RUSTFS_ROOT_USER", "benchuser")
+            .env("RUSTFS_ROOT_PASSWORD", "benchpass")
+            .stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().ok()?;
+        std::thread::sleep(Duration::from_millis(1500));
+        Some(Self { child, port, _temp: tmp })
+    }
+
+    fn start_minio(port: u16) -> Option<Self> {
+        let bin = std::env::var("MINIO_BIN").unwrap_or_else(|_| r"C:\tools\minio.exe".to_string());
+        if !std::path::Path::new(&bin).exists() { return None; }
+        let tmp = tempfile::TempDir::new().ok()?;
+        let console_port = port + 1;
+        let child = Command::new(&bin)
+            .args(["server", tmp.path().to_str().unwrap(),
+                   "--address", &format!(":{}", port),
+                   "--console-address", &format!(":{}", console_port)])
+            .env("MINIO_ROOT_USER", "benchuser")
+            .env("MINIO_ROOT_PASSWORD", "benchpass")
+            .stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().ok()?;
+        std::thread::sleep(Duration::from_millis(1500));
+        Some(Self { child, port, _temp: tmp })
+    }
+
+    fn s3_client(&self, creds: (&str, &str)) -> Arc<abixio_ui::s3::client::S3Client> {
+        Arc::new(
+            abixio_ui::s3::client::S3Client::new(
+                &format!("http://127.0.0.1:{}", self.port),
+                Some(creds),
+                "us-east-1",
+            ).expect("create S3 client"),
+        )
+    }
+}
+
+impl Drop for ExternalServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+async fn run_competitive_4kb(name: &str, client: &abixio_ui::s3::client::S3Client) {
+    let payload = vec![0x42u8; 4096];
+
+    if let Err(e) = client.create_bucket("bench4k").await {
+        eprintln!("  {} create_bucket: {}", name, e);
+        return;
+    }
+
+    // warmup
+    for i in 0..20 {
+        let _ = client.put_object("bench4k", &format!("w{}", i), payload.clone(), "application/octet-stream").await;
+    }
+
+    // PUT 4KB
+    let iters = 500;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        let _ = client.put_object("bench4k", &format!("p{}", i), payload.clone(), "application/octet-stream").await;
+        timings.push(t.elapsed());
+    }
+    let total: Duration = timings.iter().sum();
+    let put_ops = iters as f64 / total.as_secs_f64();
+    let put_avg = total / iters as u32;
+
+    // GET 4KB
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        let _ = client.get_object("bench4k", &format!("p{}", i)).await;
+        timings.push(t.elapsed());
+    }
+    let total: Duration = timings.iter().sum();
+    let get_ops = iters as f64 / total.as_secs_f64();
+    let get_avg = total / iters as u32;
+
+    // PUT 10MB
+    let payload_10m = vec![0x42u8; 10 * 1024 * 1024];
+    let iters_10m = 5;
+    let mut timings = Vec::with_capacity(iters_10m);
+    for i in 0..iters_10m {
+        let t = Instant::now();
+        let _ = client.put_object("bench4k", &format!("big{}", i), payload_10m.clone(), "application/octet-stream").await;
+        timings.push(t.elapsed());
+    }
+    let total: Duration = timings.iter().sum();
+    let put10_mbps = (10.0 * iters_10m as f64) / total.as_secs_f64();
+
+    // GET 10MB
+    let mut timings = Vec::with_capacity(iters_10m);
+    for i in 0..iters_10m {
+        let t = Instant::now();
+        let _ = client.get_object("bench4k", &format!("big{}", i)).await;
+        timings.push(t.elapsed());
+    }
+    let total: Duration = timings.iter().sum();
+    let get10_mbps = (10.0 * iters_10m as f64) / total.as_secs_f64();
+
+    eprintln!(
+        "| {:<12} | {:>6.0} obj/s {:>6.0}us | {:>6.0} obj/s {:>6.0}us | {:>6.1} MB/s | {:>6.1} MB/s |",
+        name, put_ops, put_avg.as_micros(), get_ops, get_avg.as_micros(), put10_mbps, get10_mbps,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn bench_competitive() {
+    eprintln!();
+    eprintln!("=== competitive benchmark (aws-sdk-s3, release, keep-alive) ===");
+    eprintln!("| {:12} | {:>22} | {:>22} | {:>10} | {:>10} |", "Server", "4KB PUT", "4KB GET", "10MB PUT", "10MB GET");
+    eprintln!("|{:-<14}|{:-<24}|{:-<24}|{:-<12}|{:-<12}|", "", "", "", "", "");
+
+    // AbixIO
+    let abixio = AbixioServer::builder().volume_count(1).no_auth(false).start();
+    run_competitive_4kb("AbixIO", &abixio.s3_client()).await;
+
+    // RustFS
+    if let Some(rustfs) = ExternalServer::start_rustfs(11501) {
+        let client = rustfs.s3_client(("benchuser", "benchpass"));
+        run_competitive_4kb("RustFS", &client).await;
+    } else {
+        eprintln!("| RustFS       | (binary not found)                                                           |");
+    }
+
+    // MinIO
+    if let Some(minio) = ExternalServer::start_minio(11503) {
+        let client = minio.s3_client(("benchuser", "benchpass"));
+        run_competitive_4kb("MinIO", &client).await;
+    } else {
+        eprintln!("| MinIO        | (binary not found)                                                           |");
+    }
+
+    eprintln!();
 }

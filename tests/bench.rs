@@ -614,3 +614,230 @@ async fn bench_competitive() {
 
     eprintln!();
 }
+
+// ============================================================================
+// Client comparison: same server, different S3 clients
+// ============================================================================
+
+fn find_binary(env_var: &str, default: &str) -> Option<String> {
+    if let Ok(p) = std::env::var(env_var) {
+        if std::path::Path::new(&p).exists() { return Some(p); }
+    }
+    if std::path::Path::new(default).exists() { return Some(default.to_string()); }
+    // check PATH
+    if let Ok(output) = Command::new("which").arg(default.split('\\').last().unwrap_or(default)).output() {
+        if output.status.success() {
+            return Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        }
+    }
+    None
+}
+
+fn run_cli_bench(name: &str, setup_cmd: &[&str], put_cmd_template: &[&str], get_cmd_template: &[&str], iters: usize) {
+    // run setup (alias, bucket create, etc)
+    for cmd in setup_cmd.chunks(1) {
+        let _ = Command::new("bash").arg("-c").arg(cmd[0]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+
+    // PUT benchmark
+    let start = Instant::now();
+    for i in 0..iters {
+        let cmd = put_cmd_template.join(" ").replace("{i}", &i.to_string());
+        let _ = Command::new("bash").arg("-c").arg(&cmd).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    let put_elapsed = start.elapsed();
+    let put_ops = iters as f64 / put_elapsed.as_secs_f64();
+    let put_avg_us = put_elapsed.as_micros() as f64 / iters as f64;
+
+    // GET benchmark
+    let start = Instant::now();
+    for i in 0..iters {
+        let cmd = get_cmd_template.join(" ").replace("{i}", &i.to_string());
+        let _ = Command::new("bash").arg("-c").arg(&cmd).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    let get_elapsed = start.elapsed();
+    let get_ops = iters as f64 / get_elapsed.as_secs_f64();
+    let get_avg_us = get_elapsed.as_micros() as f64 / iters as f64;
+
+    eprintln!(
+        "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
+        name, put_ops, put_avg_us, get_ops, get_avg_us,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn bench_clients() {
+    eprintln!();
+    eprintln!("=== client comparison (4KB, same AbixIO server) ===");
+    eprintln!("| {:18} | {:>28} | {:>28} |", "Client", "4KB PUT", "4KB GET");
+    eprintln!("|{:-<20}|{:-<30}|{:-<30}|", "", "", "");
+
+    let server = AbixioServer::builder().volume_count(1).no_auth(false).start();
+    let port = server.endpoint().split(':').last().unwrap().to_string();
+    let endpoint = server.endpoint();
+
+    // 1. aws-sdk-s3 (Rust, keep-alive, SigV4)
+    {
+        let client = server.s3_client();
+        client.create_bucket("clientbench").await.unwrap();
+        let payload = vec![0x42u8; 4096];
+
+        // warmup
+        for i in 0..20 {
+            let _ = client.put_object("clientbench", &format!("w{}", i), payload.clone(), "application/octet-stream").await;
+        }
+
+        let iters = 200;
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = client.put_object("clientbench", &format!("sdk{}", i), payload.clone(), "application/octet-stream").await;
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = client.get_object("clientbench", &format!("sdk{}", i)).await;
+        }
+        let get_elapsed = start.elapsed();
+
+        eprintln!(
+            "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
+            "aws-sdk-s3 (Rust)",
+            iters as f64 / put_elapsed.as_secs_f64(),
+            put_elapsed.as_micros() as f64 / iters as f64,
+            iters as f64 / get_elapsed.as_secs_f64(),
+            get_elapsed.as_micros() as f64 / iters as f64,
+        );
+    }
+
+    // 2. mc (MinIO client, per-process)
+    let mc_bin = find_binary("MC", r"C:\tools\mc.exe");
+    if let Some(ref mc) = mc_bin {
+        let _ = Command::new(mc).args(["alias", "set", "benchmc", &endpoint, "test", "testsecret", "--api", "S3v4"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new(mc).args(["mb", "benchmc/mcbench"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+
+        // create test file
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), &[0x42u8; 4096]).unwrap();
+        let tmppath = tmp.path().to_str().unwrap().to_string();
+        let sink = tempfile::NamedTempFile::new().unwrap();
+        let sinkpath = sink.path().to_str().unwrap().to_string();
+
+        let iters = 50; // mc is slow, fewer iters
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(mc).args(["cp", &tmppath, &format!("benchmc/mcbench/mc{}", i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(mc).args(["cp", &format!("benchmc/mcbench/mc{}", i), &sinkpath])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let get_elapsed = start.elapsed();
+
+        let _ = Command::new(mc).args(["alias", "rm", "benchmc"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+
+        eprintln!(
+            "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
+            "mc (per-process)",
+            iters as f64 / put_elapsed.as_secs_f64(),
+            put_elapsed.as_micros() as f64 / iters as f64,
+            iters as f64 / get_elapsed.as_secs_f64(),
+            get_elapsed.as_micros() as f64 / iters as f64,
+        );
+    } else {
+        eprintln!("| mc (per-process)   | (binary not found)                                           |");
+    }
+
+    // 3. rclone
+    let rclone_bin = find_binary("RCLONE", "rclone");
+    if let Some(ref rclone) = rclone_bin {
+        // rclone uses env vars for config
+        let iters = 50;
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), &[0x42u8; 4096]).unwrap();
+        let tmppath = tmp.path().to_str().unwrap().to_string();
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let sinkdir = tmpdir.path().to_str().unwrap().to_string();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(rclone)
+                .args(["copyto", &tmppath, &format!(":s3:rclonebench/rc{}", i),
+                       "--s3-provider", "Other",
+                       "--s3-endpoint", &endpoint,
+                       "--s3-access-key-id", "test",
+                       "--s3-secret-access-key", "testsecret",
+                       "--s3-force-path-style"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(rclone)
+                .args(["copyto", &format!(":s3:rclonebench/rc{}", i),
+                       &format!("{}/rc{}", sinkdir, i),
+                       "--s3-provider", "Other",
+                       "--s3-endpoint", &endpoint,
+                       "--s3-access-key-id", "test",
+                       "--s3-secret-access-key", "testsecret",
+                       "--s3-force-path-style"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let get_elapsed = start.elapsed();
+
+        eprintln!(
+            "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
+            "rclone (per-proc)",
+            iters as f64 / put_elapsed.as_secs_f64(),
+            put_elapsed.as_micros() as f64 / iters as f64,
+            iters as f64 / get_elapsed.as_secs_f64(),
+            get_elapsed.as_micros() as f64 / iters as f64,
+        );
+    } else {
+        eprintln!("| rclone (per-proc)  | (binary not found)                                           |");
+    }
+
+    // 4. curl (unsigned, per-process baseline)
+    {
+        let iters = 100;
+        let payload = "x".repeat(4096);
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new("curl")
+                .args(["-s", "-X", "PUT", "-H", "Content-Length: 4096",
+                       "-d", &payload, &format!("{}/clientbench/curl{}", endpoint, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new("curl")
+                .args(["-s", "-o", "/dev/null", &format!("{}/clientbench/curl{}", endpoint, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let get_elapsed = start.elapsed();
+
+        eprintln!(
+            "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
+            "curl (unsigned)",
+            iters as f64 / put_elapsed.as_secs_f64(),
+            put_elapsed.as_micros() as f64 / iters as f64,
+            iters as f64 / get_elapsed.as_secs_f64(),
+            get_elapsed.as_micros() as f64 / iters as f64,
+        );
+    }
+
+    eprintln!();
+}

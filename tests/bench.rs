@@ -619,6 +619,19 @@ async fn bench_competitive() {
 // Client comparison: same server, different S3 clients
 // ============================================================================
 
+fn measure_cli_overhead(bin: &str, args: &[&str], n: usize) -> Duration {
+    for _ in 0..3 {
+        let _ = Command::new(bin).args(args)
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    let start = Instant::now();
+    for _ in 0..n {
+        let _ = Command::new(bin).args(args)
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    start.elapsed() / n as u32
+}
+
 fn find_binary(env_var: &str, default: &str) -> Option<String> {
     if let Ok(p) = std::env::var(env_var) {
         if std::path::Path::new(&p).exists() { return Some(p); }
@@ -906,6 +919,7 @@ fn matrix_mc(
     server_name: &str,
     mc: &str,
     sizes: &[(&str, usize, usize)],
+    overhead: Duration,
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
     let bucket = server_name.to_lowercase(); // S3 bucket names must be lowercase
@@ -958,15 +972,17 @@ fn matrix_mc(
         }
         let get_elapsed = start.elapsed();
 
+        let adj_put = put_elapsed.saturating_sub(overhead * iters as u32);
+        let adj_get = get_elapsed.saturating_sub(overhead * iters as u32);
         results.push(MatrixResult {
             server: server_name.to_string(),
             client: "mc".to_string(),
             size: label.to_string(),
             size_bytes,
-            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
-            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
-            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
-            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
+            put_ops: iters as f64 / adj_put.as_secs_f64(),
+            put_avg_us: adj_put.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / adj_get.as_secs_f64(),
+            get_avg_us: adj_get.as_micros() as f64 / iters as f64,
         });
     }
     results
@@ -976,6 +992,7 @@ fn matrix_rclone(
     server_name: &str,
     rclone: &str,
     sizes: &[(&str, usize, usize)],
+    overhead: Duration,
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
     let bucket = server_name.to_lowercase();
@@ -1021,15 +1038,17 @@ fn matrix_rclone(
         }
         let get_elapsed = start.elapsed();
 
+        let adj_put = put_elapsed.saturating_sub(overhead * iters as u32);
+        let adj_get = get_elapsed.saturating_sub(overhead * iters as u32);
         results.push(MatrixResult {
             server: server_name.to_string(),
             client: "rclone".to_string(),
             size: label.to_string(),
             size_bytes,
-            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
-            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
-            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
-            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
+            put_ops: iters as f64 / adj_put.as_secs_f64(),
+            put_avg_us: adj_put.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / adj_get.as_secs_f64(),
+            get_avg_us: adj_get.as_micros() as f64 / iters as f64,
         });
     }
     results
@@ -1094,7 +1113,9 @@ async fn bench_matrix() {
             .args(["alias", "set", "mx", &abixio_endpoint, "test", "testsecret", "--api", "S3v4"])
             .stdout(Stdio::null()).stderr(Stdio::null()).status();
         let _ = Command::new(mc).args(["mb", "mx/benchabixio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-        all_results.extend(matrix_mc("AbixIO", mc, &sizes));
+        let oh = measure_cli_overhead(mc, &["ls", "mx/benchabixio"], 10);
+        eprintln!("    mc overhead: {:.1}ms", oh.as_secs_f64() * 1000.0);
+        all_results.extend(matrix_mc("AbixIO", mc, &sizes, oh));
     }
 
     if let Some(ref rclone) = rclone_bin {
@@ -1104,7 +1125,9 @@ async fn bench_matrix() {
                    "endpoint", &abixio_endpoint, "access_key_id", "test",
                    "secret_access_key", "testsecret", "env_auth", "false"])
             .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        all_results.extend(matrix_rclone("AbixIO", rclone, &sizes));
+        let oh = measure_cli_overhead(rclone, &["lsd", "mx:"], 10);
+        eprintln!("    rclone overhead: {:.1}ms", oh.as_secs_f64() * 1000.0);
+        all_results.extend(matrix_rclone("AbixIO", rclone, &sizes, oh));
     }
 
     // --- RustFS ---
@@ -1122,7 +1145,8 @@ async fn bench_matrix() {
                 .args(["alias", "set", "mx", &rustfs_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
             let _ = Command::new(mc).args(["mb", "mx/benchrustfs"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-            all_results.extend(matrix_mc("RustFS", mc, &sizes));
+            let oh = measure_cli_overhead(mc, &["ls", "mx/benchrustfs"], 10);
+            all_results.extend(matrix_mc("RustFS", mc, &sizes, oh));
         }
 
         if let Some(ref rclone) = rclone_bin {
@@ -1132,7 +1156,8 @@ async fn bench_matrix() {
                        "endpoint", &rustfs_endpoint, "access_key_id", "benchuser",
                        "secret_access_key", "benchpass", "env_auth", "false"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            all_results.extend(matrix_rclone("RustFS", rclone, &sizes));
+            let oh = measure_cli_overhead(rclone, &["lsd", "mx:"], 10);
+            all_results.extend(matrix_rclone("RustFS", rclone, &sizes, oh));
         }
     } else {
         eprintln!("\nRustFS not found, skipping");
@@ -1153,7 +1178,8 @@ async fn bench_matrix() {
                 .args(["alias", "set", "mx", &minio_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
             let _ = Command::new(mc).args(["mb", "mx/benchminio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-            all_results.extend(matrix_mc("MinIO", mc, &sizes));
+            let oh = measure_cli_overhead(mc, &["ls", "mx/benchminio"], 10);
+            all_results.extend(matrix_mc("MinIO", mc, &sizes, oh));
         }
 
         if let Some(ref rclone) = rclone_bin {
@@ -1163,7 +1189,8 @@ async fn bench_matrix() {
                        "endpoint", &minio_endpoint, "access_key_id", "benchuser",
                        "secret_access_key", "benchpass", "env_auth", "false"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            all_results.extend(matrix_rclone("MinIO", rclone, &sizes));
+            let oh = measure_cli_overhead(rclone, &["lsd", "mx:"], 10);
+            all_results.extend(matrix_rclone("MinIO", rclone, &sizes, oh));
         }
     } else {
         eprintln!("\nMinIO not found, skipping");

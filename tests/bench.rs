@@ -972,6 +972,69 @@ fn matrix_mc(
     results
 }
 
+fn matrix_rclone(
+    server_name: &str,
+    rclone: &str,
+    sizes: &[(&str, usize, usize)],
+) -> Vec<MatrixResult> {
+    let mut results = Vec::new();
+    let bucket = server_name.to_lowercase();
+
+    for &(label, size_bytes, iters) in sizes {
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let tmppath = tmpdir.path().join("payload.dat");
+        std::fs::write(&tmppath, &vec![0x42u8; size_bytes]).unwrap();
+        let tmppath = tmppath.to_str().unwrap().to_string();
+
+        let iters = if size_bytes >= 1024 * 1024 * 1024 { iters.min(3) }
+                    else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
+                    else { iters.min(30) };
+
+        // test first PUT
+        let test = Command::new(rclone)
+            .args(["copyto", &tmppath, &format!("mx:bench{}/{}/test", bucket, label)])
+            .output();
+        if let Ok(output) = &test {
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                eprintln!("    rclone {} {} error: {}", server_name, label, err.trim());
+            }
+        }
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(rclone)
+                .args(["copyto", &tmppath, &format!("mx:bench{}/{}/{}", bucket, label, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let put_elapsed = start.elapsed();
+
+        let sinkdir = tempfile::TempDir::new().unwrap();
+        let sinkpath = sinkdir.path().join("out.dat");
+        let sinkpath = sinkpath.to_str().unwrap().to_string();
+
+        let start = Instant::now();
+        for i in 0..iters {
+            let _ = Command::new(rclone)
+                .args(["copyto", &format!("mx:bench{}/{}/{}", bucket, label, i), &sinkpath])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        let get_elapsed = start.elapsed();
+
+        results.push(MatrixResult {
+            server: server_name.to_string(),
+            client: "rclone".to_string(),
+            size: label.to_string(),
+            size_bytes,
+            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
+            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
+            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
+        });
+    }
+    results
+}
+
 fn format_cell(ops: f64, avg_us: f64, size_bytes: usize) -> String {
     let mbps = ops * size_bytes as f64 / 1024.0 / 1024.0;
     if size_bytes <= 65536 {
@@ -1014,6 +1077,7 @@ async fn bench_matrix() {
     ];
 
     let mc_bin = find_binary("MC", r"C:\tools\mc.exe");
+    let rclone_bin = find_binary("RCLONE", r"C:\tools\rclone.exe");
     let mut all_results: Vec<MatrixResult> = Vec::new();
 
     // --- AbixIO ---
@@ -1033,6 +1097,16 @@ async fn bench_matrix() {
         all_results.extend(matrix_mc("AbixIO", mc, &sizes));
     }
 
+    if let Some(ref rclone) = rclone_bin {
+        eprintln!("  rclone...");
+        let _ = Command::new(rclone)
+            .args(["config", "create", "mx", "s3", "provider", "Other",
+                   "endpoint", &abixio_endpoint, "access_key_id", "test",
+                   "secret_access_key", "testsecret", "env_auth", "false"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        all_results.extend(matrix_rclone("AbixIO", rclone, &sizes));
+    }
+
     // --- RustFS ---
     if let Some(rustfs) = ExternalServer::start_rustfs(11701) {
         eprintln!("\nstarting RustFS...");
@@ -1049,6 +1123,16 @@ async fn bench_matrix() {
                 .stdout(Stdio::null()).stderr(Stdio::null()).status();
             let _ = Command::new(mc).args(["mb", "mx/benchrustfs"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
             all_results.extend(matrix_mc("RustFS", mc, &sizes));
+        }
+
+        if let Some(ref rclone) = rclone_bin {
+            eprintln!("  rclone...");
+            let _ = Command::new(rclone)
+                .args(["config", "create", "mx", "s3", "provider", "Other",
+                       "endpoint", &rustfs_endpoint, "access_key_id", "benchuser",
+                       "secret_access_key", "benchpass", "env_auth", "false"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            all_results.extend(matrix_rclone("RustFS", rclone, &sizes));
         }
     } else {
         eprintln!("\nRustFS not found, skipping");
@@ -1071,12 +1155,25 @@ async fn bench_matrix() {
             let _ = Command::new(mc).args(["mb", "mx/benchminio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
             all_results.extend(matrix_mc("MinIO", mc, &sizes));
         }
+
+        if let Some(ref rclone) = rclone_bin {
+            eprintln!("  rclone...");
+            let _ = Command::new(rclone)
+                .args(["config", "create", "mx", "s3", "provider", "Other",
+                       "endpoint", &minio_endpoint, "access_key_id", "benchuser",
+                       "secret_access_key", "benchpass", "env_auth", "false"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            all_results.extend(matrix_rclone("MinIO", rclone, &sizes));
+        }
     } else {
         eprintln!("\nMinIO not found, skipping");
     }
 
     if let Some(ref mc) = mc_bin {
         let _ = Command::new(mc).args(["alias", "rm", "mx"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    if let Some(ref rclone) = rclone_bin {
+        let _ = Command::new(rclone).args(["config", "delete", "mx"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
 
     eprintln!();

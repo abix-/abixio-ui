@@ -14,6 +14,7 @@ pub fn find_abixio_binary() -> PathBuf {
         return p;
     }
     for candidate in [
+        r"C:\code\endless\rust\target\release\abixio.exe",
         r"C:\code\endless\rust\target\debug\abixio.exe",
         r"C:\code\abixio\abixio.exe",
     ] {

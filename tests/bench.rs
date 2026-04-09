@@ -880,24 +880,33 @@ async fn matrix_sdk(
     let mut results = Vec::new();
 
     for &(label, size_bytes, iters) in sizes {
-        let payload = vec![0x42u8; size_bytes];
+        // write payload to disk (same as mc/rclone -- fairness: all clients read from disk)
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let srcpath = tmpdir.path().join("payload.dat");
+        std::fs::write(&srcpath, &vec![0x42u8; size_bytes]).unwrap();
+        let sinkpath = tmpdir.path().join("out.dat");
 
-        // warmup (unsigned)
-        for i in 0..3.min(iters) {
-            let _ = client.put_object_unsigned(bucket, &format!("w_{}_{}", label, i), payload.clone(), "application/octet-stream").await;
+        // warmup: 3 PUT + 3 GET (fairness: same warmup for all clients)
+        for i in 0..3 {
+            let data = tokio::fs::read(&srcpath).await.unwrap();
+            let _ = client.put_object_unsigned(bucket, &format!("w_{}_{}", label, i), data, "application/octet-stream").await;
+        }
+        for i in 0..3 {
+            let _ = client.download_object_to_file(bucket, &format!("w_{}_{}", label, i), &sinkpath).await;
         }
 
-        // PUT (unsigned -- same as mc, rclone, AWS CLI over HTTPS)
+        // PUT: read from disk each iteration (fairness: same as mc/rclone reading temp file)
         let start = Instant::now();
         for i in 0..iters {
-            let _ = client.put_object_unsigned(bucket, &format!("{}/{}", label, i), payload.clone(), "application/octet-stream").await;
+            let data = tokio::fs::read(&srcpath).await.unwrap();
+            let _ = client.put_object_unsigned(bucket, &format!("{}/{}", label, i), data, "application/octet-stream").await;
         }
         let put_elapsed = start.elapsed();
 
-        // GET
+        // GET: write to disk each iteration (fairness: same as mc/rclone writing to sink file)
         let start = Instant::now();
         for i in 0..iters {
-            let _ = client.get_object(bucket, &format!("{}/{}", label, i)).await;
+            let _ = client.download_object_to_file(bucket, &format!("{}/{}", label, i), &sinkpath).await;
         }
         let get_elapsed = start.elapsed();
 
@@ -919,7 +928,7 @@ fn matrix_mc(
     server_name: &str,
     mc: &str,
     sizes: &[(&str, usize, usize)],
-    overhead: Duration,
+    _overhead: Duration,
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
     let bucket = server_name.to_lowercase(); // S3 bucket names must be lowercase
@@ -941,15 +950,16 @@ fn matrix_mc(
                     else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
                     else { iters.min(30) };
 
-        // test first PUT with error capture
-        let test = Command::new(mc)
-            .args(["cp", &tmppath, &format!("mx/bench{}/{}/test", bucket, label)])
-            .output();
-        if let Ok(output) = &test {
-            if !output.status.success() {
-                let err = String::from_utf8_lossy(&output.stderr);
-                eprintln!("    mc {} {} error: {}", server_name, label, err.trim());
-            }
+        // warmup: 3 PUT + 3 GET (fairness: same as aws-sdk-s3)
+        for i in 0..3 {
+            let _ = Command::new(mc)
+                .args(["cp", &tmppath, &format!("mx/bench{}/{}/w{}", bucket, label, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        for i in 0..3 {
+            let _ = Command::new(mc)
+                .args(["cp", &format!("mx/bench{}/{}/w{}", bucket, label, i), &sinkpath])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
         }
 
         let start = Instant::now();
@@ -972,17 +982,15 @@ fn matrix_mc(
         }
         let get_elapsed = start.elapsed();
 
-        let adj_put = put_elapsed.saturating_sub(overhead * iters as u32);
-        let adj_get = get_elapsed.saturating_sub(overhead * iters as u32);
         results.push(MatrixResult {
             server: server_name.to_string(),
             client: "mc".to_string(),
             size: label.to_string(),
             size_bytes,
-            put_ops: iters as f64 / adj_put.as_secs_f64(),
-            put_avg_us: adj_put.as_micros() as f64 / iters as f64,
-            get_ops: iters as f64 / adj_get.as_secs_f64(),
-            get_avg_us: adj_get.as_micros() as f64 / iters as f64,
+            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
+            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
+            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
         });
     }
     results
@@ -992,7 +1000,7 @@ fn matrix_rclone(
     server_name: &str,
     rclone: &str,
     sizes: &[(&str, usize, usize)],
-    overhead: Duration,
+    _overhead: Duration,
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
     let bucket = server_name.to_lowercase();
@@ -1007,15 +1015,20 @@ fn matrix_rclone(
                     else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
                     else { iters.min(30) };
 
-        // test first PUT
-        let test = Command::new(rclone)
-            .args(["copyto", &tmppath, &format!("mx:bench{}/{}/test", bucket, label)])
-            .output();
-        if let Ok(output) = &test {
-            if !output.status.success() {
-                let err = String::from_utf8_lossy(&output.stderr);
-                eprintln!("    rclone {} {} error: {}", server_name, label, err.trim());
-            }
+        let sinkdir = tempfile::TempDir::new().unwrap();
+        let sinkpath = sinkdir.path().join("out.dat");
+        let sinkpath = sinkpath.to_str().unwrap().to_string();
+
+        // warmup: 3 PUT + 3 GET (fairness: same as aws-sdk-s3)
+        for i in 0..3 {
+            let _ = Command::new(rclone)
+                .args(["copyto", &tmppath, &format!("mx:bench{}/{}/w{}", bucket, label, i)])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        for i in 0..3 {
+            let _ = Command::new(rclone)
+                .args(["copyto", &format!("mx:bench{}/{}/w{}", bucket, label, i), &sinkpath])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
         }
 
         let start = Instant::now();
@@ -1026,10 +1039,6 @@ fn matrix_rclone(
         }
         let put_elapsed = start.elapsed();
 
-        let sinkdir = tempfile::TempDir::new().unwrap();
-        let sinkpath = sinkdir.path().join("out.dat");
-        let sinkpath = sinkpath.to_str().unwrap().to_string();
-
         let start = Instant::now();
         for i in 0..iters {
             let _ = Command::new(rclone)
@@ -1038,17 +1047,15 @@ fn matrix_rclone(
         }
         let get_elapsed = start.elapsed();
 
-        let adj_put = put_elapsed.saturating_sub(overhead * iters as u32);
-        let adj_get = get_elapsed.saturating_sub(overhead * iters as u32);
         results.push(MatrixResult {
             server: server_name.to_string(),
             client: "rclone".to_string(),
             size: label.to_string(),
             size_bytes,
-            put_ops: iters as f64 / adj_put.as_secs_f64(),
-            put_avg_us: adj_put.as_micros() as f64 / iters as f64,
-            get_ops: iters as f64 / adj_get.as_secs_f64(),
-            get_avg_us: adj_get.as_micros() as f64 / iters as f64,
+            put_ops: iters as f64 / put_elapsed.as_secs_f64(),
+            put_avg_us: put_elapsed.as_micros() as f64 / iters as f64,
+            get_ops: iters as f64 / get_elapsed.as_secs_f64(),
+            get_avg_us: get_elapsed.as_micros() as f64 / iters as f64,
         });
     }
     results

@@ -28,7 +28,9 @@ pub fn find_abixio_binary() -> PathBuf {
         }
     }
     panic!(
-        "abixio binary not found. Set ABIXIO_BIN or build abixio first."
+        "abixio binary not found. Set ABIXIO_BIN or build abixio first.\n\
+         Checked: ABIXIO_BIN env, C:\\code\\endless\\rust\\target\\debug\\abixio.exe, \
+         C:\\code\\abixio\\abixio.exe"
     );
 }
 
@@ -106,6 +108,27 @@ impl AbixioServer {
         )
     }
 
+    pub fn s3_client_anonymous(&self) -> Arc<S3Client> {
+        Arc::new(
+            S3Client::new_with_ca_pem(
+                &self.endpoint(),
+                None,
+                "us-east-1",
+                self.tls_ca_pem.as_deref(),
+            )
+            .expect("create anonymous S3 client"),
+        )
+    }
+
+    pub fn admin_client(&self) -> Arc<crate::abixio::client::AdminClient> {
+        Arc::new(crate::abixio::client::AdminClient::new_with_ca_pem(
+            &self.endpoint(),
+            None,
+            "us-east-1",
+            self.tls_ca_pem.as_deref(),
+        ))
+    }
+
     pub fn s3_client_with_creds(&self, creds: (&str, &str)) -> Arc<S3Client> {
         Arc::new(
             S3Client::new_with_ca_pem(
@@ -171,7 +194,7 @@ impl AbixioServerBuilder {
     pub fn start(self) -> AbixioServer {
         let binary = find_abixio_binary();
         let port = free_port();
-        let temp_dir = std::env::temp_dir().join(format!("abixio-bench-{}", port));
+        let temp_dir = std::env::temp_dir().join(format!("abixio-test-{}", port));
 
         let mut volume_paths = Vec::new();
         for i in 1..=self.volume_count {
@@ -261,6 +284,26 @@ pub struct ExternalServer {
 }
 
 impl ExternalServer {
+    pub fn start_rustfs(bin: &str, port: u16) -> Option<Self> {
+        if !Path::new(bin).exists() { return None; }
+        let tmp = tempfile::TempDir::new().ok()?;
+        let console_port = port + 1;
+        let child = Command::new(bin)
+            .args([
+                "server", tmp.path().to_str().unwrap(),
+                "--address", &format!(":{}", port),
+                "--console-address", &format!(":{}", console_port),
+            ])
+            .env("RUSTFS_ROOT_USER", "benchuser")
+            .env("RUSTFS_ROOT_PASSWORD", "benchpass")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn().ok()?;
+        let mut server = Self { child, port, _temp: tmp, ca_cert_pem: Vec::new() };
+        server.wait_for_ready_http();
+        Some(server)
+    }
+
     pub fn start_rustfs_tls(bin: &str, port: u16, tls: &TlsMaterial) -> Option<Self> {
         if !Path::new(bin).exists() { return None; }
         let tmp = tempfile::TempDir::new().ok()?;
@@ -279,6 +322,26 @@ impl ExternalServer {
             .spawn().ok()?;
         let mut server = Self { child, port, _temp: tmp, ca_cert_pem: tls.ca_cert_pem.clone() };
         server.wait_for_ready();
+        Some(server)
+    }
+
+    pub fn start_minio(bin: &str, port: u16) -> Option<Self> {
+        if !Path::new(bin).exists() { return None; }
+        let tmp = tempfile::TempDir::new().ok()?;
+        let console_port = port + 1;
+        let child = Command::new(bin)
+            .args([
+                "server", tmp.path().to_str().unwrap(),
+                "--address", &format!(":{}", port),
+                "--console-address", &format!(":{}", console_port),
+            ])
+            .env("MINIO_ROOT_USER", "benchuser")
+            .env("MINIO_ROOT_PASSWORD", "benchpass")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn().ok()?;
+        let mut server = Self { child, port, _temp: tmp, ca_cert_pem: Vec::new() };
+        server.wait_for_ready_http();
         Some(server)
     }
 
@@ -304,16 +367,21 @@ impl ExternalServer {
     }
 
     pub fn endpoint(&self) -> String {
-        format!("https://127.0.0.1:{}", self.port)
+        if self.ca_cert_pem.is_empty() {
+            format!("http://127.0.0.1:{}", self.port)
+        } else {
+            format!("https://127.0.0.1:{}", self.port)
+        }
     }
 
     pub fn s3_client(&self, creds: (&str, &str)) -> Arc<S3Client> {
+        let ca = if self.ca_cert_pem.is_empty() { None } else { Some(self.ca_cert_pem.as_slice()) };
         Arc::new(
             S3Client::new_with_ca_pem(
                 &self.endpoint(),
                 Some(creds),
                 "us-east-1",
-                Some(&self.ca_cert_pem),
+                ca,
             )
             .expect("create S3 client"),
         )
@@ -321,6 +389,34 @@ impl ExternalServer {
 
     pub fn ca_cert_pem(&self) -> &[u8] {
         &self.ca_cert_pem
+    }
+
+    fn wait_for_ready_http(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let client = reqwest::Client::builder()
+            .build()
+            .expect("build readiness client");
+        let url = self.endpoint();
+
+        while Instant::now() < deadline {
+            if let Some(status) = self.child.try_wait().ok().flatten() {
+                panic!("external server on port {} exited early: {}", self.port, status);
+            }
+            let client_ref = &client;
+            let url_ref = &url;
+            let ready = std::thread::scope(|s| {
+                s.spawn(move || {
+                    BENCH_RUNTIME.block_on(async move {
+                        client_ref.get(url_ref).send().await.is_ok()
+                    })
+                })
+                .join()
+                .unwrap()
+            });
+            if ready { return; }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("external server on port {} did not become ready", self.port);
     }
 
     fn wait_for_ready(&mut self) {

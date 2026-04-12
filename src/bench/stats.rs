@@ -87,41 +87,60 @@ pub fn print_results(results: &[BenchResult]) {
         return;
     }
 
-    eprintln!();
-    eprintln!(
-        "{:<5} {:<20} {:<6} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}",
-        "LAYER", "OP", "SIZE", "ITERS", "p50", "p95", "p99", "ops/s", "MB/s"
-    );
-    eprintln!("{}", "-".repeat(97));
-
+    // collect unique sizes in order of appearance
+    let mut sizes: Vec<usize> = Vec::new();
     for r in results {
-        let mut timings = r.timings.clone();
-        let stats = Stats::from(&mut timings, r.size);
+        if !sizes.contains(&r.size) {
+            sizes.push(r.size);
+        }
+    }
 
-        let mut label = r.op.clone();
-        if let Some(wp) = &r.write_path {
-            label = format!("{} ({}{})", label, wp,
-                if let Some(wc) = r.write_cache {
-                    if wc { "+wc" } else { "" }
-                } else { "" }
+    for &size in &sizes {
+        let group: Vec<&BenchResult> = results.iter().filter(|r| r.size == size).collect();
+        if group.is_empty() {
+            continue;
+        }
+
+        eprintln!();
+        let size_label = if size == 0 { "meta".to_string() } else { human_size(size) };
+        eprintln!("--- {} ---", size_label);
+        eprintln!(
+            "{:<5} {:<20} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "LAYER", "OP", "ITERS", "p50", "p95", "p99", "ops/s", "MB/s"
+        );
+        eprintln!("{}", "-".repeat(91));
+
+        for r in &group {
+            let mut timings = r.timings.clone();
+            let stats = Stats::from(&mut timings, r.size);
+
+            let mut label = r.op.clone();
+            if let Some(wp) = &r.write_path {
+                label = format!("{} ({}{})", label, wp,
+                    if let Some(wc) = r.write_cache {
+                        if wc { "+wc" } else { "" }
+                    } else { "" }
+                );
+            }
+            if let Some(srv) = &r.server {
+                label = format!("{} [{}]", label, srv);
+            }
+            if let Some(cli) = &r.client {
+                label = format!("{} {}", label, cli);
+            }
+
+            eprintln!(
+                "{:<5} {:<20} {:>6} {:>10} {:>10} {:>10} {:>10.0} {:>8.1}",
+                r.layer,
+                label,
+                r.iters,
+                format_latency(stats.p50_us),
+                format_latency(stats.p95_us),
+                format_latency(stats.p99_us),
+                stats.ops_per_sec,
+                stats.mbps,
             );
         }
-        if let Some(srv) = &r.server {
-            label = format!("{} [{}]", label, srv);
-        }
-
-        eprintln!(
-            "{:<5} {:<20} {:<6} {:>6} {:>10} {:>10} {:>10} {:>10.0} {:>8.1}",
-            r.layer,
-            label,
-            human_size(r.size),
-            r.iters,
-            format_latency(stats.p50_us),
-            format_latency(stats.p95_us),
-            format_latency(stats.p99_us),
-            stats.ops_per_sec,
-            stats.mbps,
-        );
     }
     eprintln!();
 }

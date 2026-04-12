@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::s3::client::S3Client;
 
-use super::clients::{AwsCliHarness, rclone_args, rclone_mkdir, run_status};
+use super::clients::{AwsCliHarness, measure_cli_overhead, rclone_args, rclone_mkdir, run_status};
 use super::servers::{self, AbixioServer, ExternalServer};
 use super::stats::{human_size, iters_for_size, BenchResult};
 use super::tls::TlsMaterial;
@@ -21,7 +21,6 @@ struct ServerConfig {
 
 pub async fn run(sizes: &[usize], args: &BenchArgs) -> Vec<BenchResult> {
     let mut results = Vec::new();
-    let tls = TlsMaterial::generate();
 
     let aws_path = servers::find_binary("AWS", r"C:\Program Files\Amazon\AWSCLIV2\aws.exe");
     let rclone_bin = servers::find_binary("RCLONE", r"C:\tools\rclone.exe");
@@ -30,89 +29,115 @@ pub async fn run(sizes: &[usize], args: &BenchArgs) -> Vec<BenchResult> {
 
     let has = |list: &[String], val: &str| list.iter().any(|s| s.eq_ignore_ascii_case(val));
 
-    // -- AbixIO configs --
-    if has(&args.servers, "abixio") {
-        let cache_states: Vec<bool> = match args.write_cache.to_lowercase().as_str() {
-            "on" => vec![true],
-            "off" => vec![false],
-            _ => vec![false, true],
-        };
+    let tls_modes: Vec<bool> = match args.tls.to_lowercase().as_str() {
+        "off" => vec![false],
+        "both" => vec![true, false],
+        _ => vec![true], // "on" or default
+    };
 
-        for wp in &args.write_paths {
-            for &wc in &cache_states {
-                let label = if wc {
-                    format!("AbixIO-{}+wc", wp)
-                } else {
-                    format!("AbixIO-{}", wp)
-                };
-                eprintln!("--- L7: {} ---", label);
+    for use_tls in &tls_modes {
+        let tls = if *use_tls { Some(TlsMaterial::generate()) } else { None };
+        let tls_label = if *use_tls { "" } else { " (HTTP)" };
 
-                let abixio = AbixioServer::builder()
-                    .volume_count(1)
-                    .no_auth(false)
-                    .tls(&tls)
-                    .write_tier(wp)
-                    .write_cache(if wc { 256 } else { 0 })
-                    .start();
+        // -- AbixIO configs --
+        if has(&args.servers, "abixio") {
+            let cache_states: Vec<bool> = match args.write_cache.to_lowercase().as_str() {
+                "on" => vec![true],
+                "off" => vec![false],
+                _ => vec![false, true],
+            };
 
-                let cfg = ServerConfig {
-                    name: label,
-                    client: abixio.s3_client(),
-                    endpoint: abixio.endpoint(),
-                    ca_cert_pem: tls.ca_cert_pem.clone(),
-                    access_key: "test".into(),
-                    secret_key: "testsecret".into(),
-                };
+            for wp in &args.write_paths {
+                for &wc in &cache_states {
+                    let label = if wc {
+                        format!("AbixIO-{}+wc{}", wp, tls_label)
+                    } else {
+                        format!("AbixIO-{}{}", wp, tls_label)
+                    };
+                    eprintln!("--- L7: {} ---", label);
 
-                results.extend(
-                    run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
-                );
-                // abixio dropped here, child killed, temp reclaimed
+                    let mut builder = AbixioServer::builder()
+                        .volume_count(1)
+                        .no_auth(false)
+                        .write_tier(wp)
+                        .write_cache(if wc { 256 } else { 0 });
+                    if let Some(t) = &tls {
+                        builder = builder.tls(t);
+                    }
+                    let abixio = builder.start();
+
+                    let cfg = ServerConfig {
+                        name: label,
+                        client: abixio.s3_client(),
+                        endpoint: abixio.endpoint(),
+                        ca_cert_pem: tls.as_ref().map(|t| t.ca_cert_pem.clone()).unwrap_or_default(),
+                        access_key: "test".into(),
+                        secret_key: "testsecret".into(),
+                    };
+
+                    results.extend(
+                        run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
+                    );
+                }
             }
         }
-    }
 
-    // -- RustFS --
-    if has(&args.servers, "rustfs") {
-        if let Some(bin) = &rustfs_bin {
-            eprintln!("--- L7: RustFS ---");
-            let rustfs = ExternalServer::start_rustfs_tls(bin, 11701, &tls)
-                .unwrap_or_else(|| panic!("failed to start RustFS"));
-            let cfg = ServerConfig {
-                name: "RustFS".into(),
-                client: rustfs.s3_client(("benchuser", "benchpass")),
-                endpoint: rustfs.endpoint(),
-                ca_cert_pem: tls.ca_cert_pem.clone(),
-                access_key: "benchuser".into(),
-                secret_key: "benchpass".into(),
-            };
-            results.extend(
-                run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
-            );
-        } else {
-            eprintln!("--- L7: RustFS (skipped, binary not found) ---");
+        // -- RustFS --
+        if has(&args.servers, "rustfs") {
+            if let Some(bin) = &rustfs_bin {
+                eprintln!("--- L7: RustFS{} ---", tls_label);
+                let rustfs = if let Some(t) = &tls {
+                    ExternalServer::start_rustfs_tls(bin, 11701, t)
+                } else {
+                    ExternalServer::start_rustfs(bin, 11701)
+                };
+                if let Some(rustfs) = rustfs {
+                    let cfg = ServerConfig {
+                        name: format!("RustFS{}", tls_label),
+                        client: rustfs.s3_client(("benchuser", "benchpass")),
+                        endpoint: rustfs.endpoint(),
+                        ca_cert_pem: tls.as_ref().map(|t| t.ca_cert_pem.clone()).unwrap_or_default(),
+                        access_key: "benchuser".into(),
+                        secret_key: "benchpass".into(),
+                    };
+                    results.extend(
+                        run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
+                    );
+                } else {
+                    eprintln!("  failed to start RustFS, skipping");
+                }
+            } else {
+                eprintln!("--- L7: RustFS (skipped, binary not found) ---");
+            }
         }
-    }
 
-    // -- MinIO --
-    if has(&args.servers, "minio") {
-        if let Some(bin) = &minio_bin {
-            eprintln!("--- L7: MinIO ---");
-            let minio = ExternalServer::start_minio_tls(bin, 11703, &tls)
-                .unwrap_or_else(|| panic!("failed to start MinIO"));
-            let cfg = ServerConfig {
-                name: "MinIO".into(),
-                client: minio.s3_client(("benchuser", "benchpass")),
-                endpoint: minio.endpoint(),
-                ca_cert_pem: tls.ca_cert_pem.clone(),
-                access_key: "benchuser".into(),
-                secret_key: "benchpass".into(),
-            };
-            results.extend(
-                run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
-            );
-        } else {
-            eprintln!("--- L7: MinIO (skipped, binary not found) ---");
+        // -- MinIO --
+        if has(&args.servers, "minio") {
+            if let Some(bin) = &minio_bin {
+                eprintln!("--- L7: MinIO{} ---", tls_label);
+                let minio = if let Some(t) = &tls {
+                    ExternalServer::start_minio_tls(bin, 11703, t)
+                } else {
+                    ExternalServer::start_minio(bin, 11703)
+                };
+                if let Some(minio) = minio {
+                    let cfg = ServerConfig {
+                        name: format!("MinIO{}", tls_label),
+                        client: minio.s3_client(("benchuser", "benchpass")),
+                        endpoint: minio.endpoint(),
+                        ca_cert_pem: tls.as_ref().map(|t| t.ca_cert_pem.clone()).unwrap_or_default(),
+                        access_key: "benchuser".into(),
+                        secret_key: "benchpass".into(),
+                    };
+                    results.extend(
+                        run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
+                    );
+                } else {
+                    eprintln!("  failed to start MinIO, skipping");
+                }
+            } else {
+                eprintln!("--- L7: MinIO (skipped, binary not found) ---");
+            }
         }
     }
 
@@ -138,26 +163,38 @@ async fn run_server(
         let _ = cfg.client.create_bucket(bucket).await;
 
         for &size in sizes {
-            let data = vec![0x42u8; size];
             let iters = args.iters.unwrap_or_else(|| iters_for_size(size));
             let label = human_size(size);
 
-            // warmup
-            for i in 0..3 {
+            // write payload to disk (fairness: all clients read from disk)
+            let tmpdir = tempfile::TempDir::new().unwrap();
+            let srcpath = tmpdir.path().join("payload.dat");
+            let sinkpath = tmpdir.path().join("out.dat");
+            std::fs::write(&srcpath, vec![0x42u8; size]).unwrap();
+
+            // warmup: 20 PUT + 3 GET (read from disk each time)
+            for i in 0..20 {
+                let data = tokio::fs::read(&srcpath).await.unwrap();
                 let _ = cfg.client.put_object_unsigned(
                     bucket, &format!("w_{}_{}", label, i),
-                    data.clone(), "application/octet-stream",
+                    data, "application/octet-stream",
+                ).await;
+            }
+            for i in 0..3 {
+                let _ = cfg.client.download_object_to_file(
+                    bucket, &format!("w_{}_{}", label, i), &sinkpath,
                 ).await;
             }
 
-            // PUT
+            // PUT (unsigned payload, canonical benchmark mode)
             if has(&args.ops, "PUT") {
                 let mut timings = Vec::with_capacity(iters);
                 for i in 0..iters {
+                    let data = tokio::fs::read(&srcpath).await.unwrap();
                     let t = Instant::now();
                     let _ = cfg.client.put_object_unsigned(
                         bucket, &format!("sdk_{}_{}", label, i),
-                        data.clone(), "application/octet-stream",
+                        data, "application/octet-stream",
                     ).await;
                     timings.push(t.elapsed());
                 }
@@ -167,14 +204,34 @@ async fn run_server(
                     server: Some(cfg.name.clone()), client: Some("sdk".into()),
                     timings,
                 });
+
+                // PUT (signed payload, for comparison)
+                let mut timings = Vec::with_capacity(iters);
+                for i in 0..iters {
+                    let data = tokio::fs::read(&srcpath).await.unwrap();
+                    let t = Instant::now();
+                    let _ = cfg.client.put_object(
+                        bucket, &format!("sdk_signed_{}_{}", label, i),
+                        data, "application/octet-stream",
+                    ).await;
+                    timings.push(t.elapsed());
+                }
+                results.push(BenchResult {
+                    layer: "L7".into(), op: "put_signed".into(), size, iters,
+                    write_path: None, write_cache: None,
+                    server: Some(cfg.name.clone()), client: Some("sdk".into()),
+                    timings,
+                });
             }
 
-            // GET
+            // GET (download to disk file each iter, fairness)
             if has(&args.ops, "GET") {
                 let mut timings = Vec::with_capacity(iters);
                 for i in 0..iters {
                     let t = Instant::now();
-                    let _ = cfg.client.get_object(bucket, &format!("sdk_{}_{}", label, i)).await;
+                    let _ = cfg.client.download_object_to_file(
+                        bucket, &format!("sdk_{}_{}", label, i), &sinkpath,
+                    ).await;
                     timings.push(t.elapsed());
                 }
                 results.push(BenchResult {
@@ -188,13 +245,30 @@ async fn run_server(
             eprintln!("  sdk {} done ({} iters)", label, iters);
         }
 
+        // seed 100 objects for HEAD/LIST/DELETE
+        let meta_bucket = "bench-meta";
+        let _ = cfg.client.create_bucket(meta_bucket).await;
+        let meta_payload = vec![0x42u8; 4096];
+        for i in 0..100 {
+            let _ = cfg.client.put_object_unsigned(
+                meta_bucket, &format!("meta/{}", i),
+                meta_payload.clone(), "application/octet-stream",
+            ).await;
+        }
+
+        // warmup for meta ops
+        for i in 0..3 {
+            let _ = cfg.client.head_object(meta_bucket, &format!("meta/{}", i)).await;
+            let _ = cfg.client.list_objects(meta_bucket, "meta/", "").await;
+        }
+
         // HEAD
         if has(&args.ops, "HEAD") {
             let iters = args.iters.unwrap_or(100);
             let mut timings = Vec::with_capacity(iters);
             for i in 0..iters {
                 let t = Instant::now();
-                let _ = cfg.client.head_object(bucket, &format!("sdk_4KB_{}", i % 50)).await;
+                let _ = cfg.client.head_object(meta_bucket, &format!("meta/{}", i)).await;
                 timings.push(t.elapsed());
             }
             results.push(BenchResult {
@@ -212,7 +286,7 @@ async fn run_server(
             let mut timings = Vec::with_capacity(iters);
             for _ in 0..iters {
                 let t = Instant::now();
-                let _ = cfg.client.list_objects(bucket, "sdk_4KB_", "").await;
+                let _ = cfg.client.list_objects(meta_bucket, "meta/", "").await;
                 timings.push(t.elapsed());
             }
             results.push(BenchResult {
@@ -230,7 +304,7 @@ async fn run_server(
             let mut timings = Vec::with_capacity(iters);
             for i in 0..iters {
                 let t = Instant::now();
-                let _ = cfg.client.delete_object(bucket, &format!("sdk_4KB_{}", i)).await;
+                let _ = cfg.client.delete_object(meta_bucket, &format!("meta/{}", i)).await;
                 timings.push(t.elapsed());
             }
             results.push(BenchResult {
@@ -251,6 +325,7 @@ async fn run_server(
             );
             harness.create_bucket(&cfg.endpoint, "bench-aws");
 
+            // warmup + measure per-process spawn overhead
             let overhead = harness.measure_overhead(&cfg.endpoint, 10);
             eprintln!("  aws-cli overhead: {:.1}ms", overhead.as_secs_f64() * 1000.0);
 
@@ -314,6 +389,23 @@ async fn run_server(
                 rclone, &cfg.endpoint, ca_path.path(),
                 &cfg.access_key, &cfg.secret_key, "bench-rclone",
             );
+
+            // warmup + measure per-process spawn overhead
+            let rclone_overhead = measure_cli_overhead(
+                rclone,
+                &[
+                    "lsd", ":s3:",
+                    "--s3-provider", "Other",
+                    "--s3-endpoint", &cfg.endpoint,
+                    "--s3-access-key-id", &cfg.access_key,
+                    "--s3-secret-access-key", &cfg.secret_key,
+                    "--s3-force-path-style",
+                    "--s3-use-unsigned-payload", "true",
+                    "--ca-cert", ca_path.path().to_str().unwrap(),
+                ],
+                10,
+            );
+            eprintln!("  rclone overhead: {:.1}ms", rclone_overhead.as_secs_f64() * 1000.0);
 
             for &size in sizes {
                 if !has(&args.ops, "PUT") && !has(&args.ops, "GET") { continue; }

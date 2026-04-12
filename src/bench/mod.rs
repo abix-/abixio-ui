@@ -46,6 +46,10 @@ pub struct BenchArgs {
     /// Override iteration count (default: auto-scaled by size)
     #[arg(long)]
     pub iters: Option<usize>,
+
+    /// TLS mode: on (HTTPS), off (plain HTTP), or both
+    #[arg(long, default_value = "on")]
+    pub tls: String,
 }
 
 fn has(list: &[String], val: &str) -> bool {

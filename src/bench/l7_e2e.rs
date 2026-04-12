@@ -186,6 +186,24 @@ async fn run_server(
                 ).await;
             }
 
+            // roundtrip verification: PUT then GET, compare sizes
+            let verify_key = format!("verify_{}", label);
+            let verify_data = tokio::fs::read(&srcpath).await.unwrap();
+            let orig_size = verify_data.len();
+            cfg.client.put_object_unsigned(
+                bucket, &verify_key, verify_data, "application/octet-stream",
+            ).await.unwrap_or_else(|e| panic!("roundtrip PUT failed for {}: {}", label, e));
+            let verify_sink = tmpdir.path().join("verify.dat");
+            cfg.client.download_object_to_file(
+                bucket, &verify_key, &verify_sink,
+            ).await.unwrap_or_else(|e| panic!("roundtrip GET failed for {}: {}", label, e));
+            let got_size = std::fs::metadata(&verify_sink).map(|m| m.len() as usize).unwrap_or(0);
+            assert_eq!(
+                orig_size, got_size,
+                "roundtrip size mismatch for {} on {}: put {} bytes, got {} bytes",
+                label, cfg.name, orig_size, got_size,
+            );
+
             // PUT (unsigned payload, canonical benchmark mode)
             if has(&args.ops, "PUT") {
                 let mut timings = Vec::with_capacity(iters);

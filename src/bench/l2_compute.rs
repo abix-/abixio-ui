@@ -50,6 +50,25 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
             timings,
         });
 
+        // sha256
+        let mut timings = Vec::with_capacity(iters);
+        for _ in 0..iters {
+            let t = Instant::now();
+            let _ = abixio::storage::bitrot::sha256_hex(&data);
+            timings.push(t.elapsed());
+        }
+        results.push(BenchResult {
+            layer: "L2".into(),
+            op: "sha256".into(),
+            size,
+            iters,
+            write_path: None,
+            write_cache: None,
+            server: None,
+            client: None,
+            timings,
+        });
+
         // reed-solomon encode 3+1
         let rs = reed_solomon_erasure::galois_8::ReedSolomon::new(3, 1).unwrap();
         let mut timings = Vec::with_capacity(iters);

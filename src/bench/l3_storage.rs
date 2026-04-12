@@ -4,6 +4,7 @@ use abixio::storage::local_volume::LocalVolume;
 use abixio::storage::metadata::PutOptions;
 use abixio::storage::volume_pool::VolumePool;
 use abixio::storage::{Backend, Store};
+use futures::StreamExt;
 
 use super::stats::{human_size, iters_for_size, BenchResult};
 
@@ -21,30 +22,50 @@ pub async fn run(
     iters_override: Option<usize>,
 ) -> Vec<BenchResult> {
     let mut results = Vec::new();
+
+    for disk_count in [1, 4] {
+        results.extend(
+            run_disks(sizes, write_path, write_cache, iters_override, disk_count).await,
+        );
+    }
+
+    results
+}
+
+async fn run_disks(
+    sizes: &[usize],
+    write_path: &str,
+    write_cache: bool,
+    iters_override: Option<usize>,
+    disk_count: usize,
+) -> Vec<BenchResult> {
+    let mut results = Vec::new();
     let tmp = tempfile::TempDir::new().unwrap();
-    let disk_path = tmp.path().join("d0");
-    std::fs::create_dir_all(&disk_path).unwrap();
+    let mut disk_paths = Vec::new();
+    for i in 0..disk_count {
+        let p = tmp.path().join(format!("d{}", i));
+        std::fs::create_dir_all(&p).unwrap();
+        disk_paths.push(p);
+    }
 
     let wp_label = if write_cache {
-        format!("{}+wc", write_path)
+        format!("{}+wc {}disk", write_path, disk_count)
     } else {
-        write_path.to_string()
+        format!("{} {}disk", write_path, disk_count)
     };
     eprintln!("--- L3: Storage pipeline ({}) ---", wp_label);
 
-    // build LocalVolume with the requested tier
-    let mut volume = LocalVolume::new(&disk_path).unwrap();
-    match write_path {
-        "log" => {
-            volume.enable_log_store().unwrap();
+    // build LocalVolumes with the requested tier
+    let mut backends: Vec<Box<dyn Backend>> = Vec::new();
+    for path in &disk_paths {
+        let mut volume = LocalVolume::new(path).unwrap();
+        match write_path {
+            "log" => { volume.enable_log_store().unwrap(); }
+            "pool" => { volume.enable_write_pool(32).await.unwrap(); }
+            _ => {}
         }
-        "pool" => {
-            volume.enable_write_pool(32).await.unwrap();
-        }
-        _ => {} // "file" = baseline
+        backends.push(Box::new(volume));
     }
-
-    let backends: Vec<Box<dyn Backend>> = vec![Box::new(volume)];
     let mut pool = VolumePool::new(backends).unwrap();
     if write_cache {
         pool.enable_write_cache(256 * 1024 * 1024);
@@ -109,6 +130,67 @@ pub async fn run(
         results.push(BenchResult {
             layer: "L3".into(),
             op: "get".into(),
+            size,
+            iters,
+            write_path: Some(write_path.into()),
+            write_cache: Some(write_cache),
+            server: None,
+            client: None,
+            timings,
+        });
+
+        // streaming PUT
+        let mut timings = Vec::with_capacity(iters);
+        for i in 0..iters {
+            let chunks: Vec<Result<bytes::Bytes, std::io::Error>> = data
+                .chunks(64 * 1024)
+                .map(|c| Ok(bytes::Bytes::copy_from_slice(c)))
+                .collect();
+            let stream = futures::stream::iter(chunks);
+            let t = Instant::now();
+            pool.put_object_stream("bench", &format!("s/{}/{}", label, i), stream, opts(), None, None)
+                .await
+                .unwrap();
+            timings.push(t.elapsed());
+        }
+        results.push(BenchResult {
+            layer: "L3".into(),
+            op: "put_stream".into(),
+            size,
+            iters,
+            write_path: Some(write_path.into()),
+            write_cache: Some(write_cache),
+            server: None,
+            client: None,
+            timings,
+        });
+
+        // drain + flush before streaming GET
+        if write_path == "pool" {
+            for backend in pool.disks() {
+                backend.drain_pending_writes().await;
+            }
+        }
+        if write_cache {
+            let _ = pool.flush_write_cache().await;
+        }
+
+        // streaming GET
+        let mut timings = Vec::with_capacity(iters);
+        for i in 0..iters {
+            let t = Instant::now();
+            let (_info, stream) = pool.get_object_stream("bench", &format!("s/{}/{}", label, i))
+                .await
+                .unwrap();
+            let mut stream = std::pin::pin!(stream);
+            while let Some(chunk) = stream.next().await {
+                let _ = chunk.unwrap();
+            }
+            timings.push(t.elapsed());
+        }
+        results.push(BenchResult {
+            layer: "L3".into(),
+            op: "get_stream".into(),
             size,
             iters,
             write_path: Some(write_path.into()),

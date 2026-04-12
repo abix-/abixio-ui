@@ -21,6 +21,7 @@ serde_json = "1"
 quick-xml = { version = "0.38", features = ["serialize"] }
 rfd = "0.17"
 clap = { version = "4", features = ["derive"] }
+abixio = { path = "../abixio" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1"

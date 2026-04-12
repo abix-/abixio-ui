@@ -95,16 +95,16 @@ pub async fn run(args: BenchArgs) {
     }
 
     if has(&args.layers, "L4") {
-        results.extend(l4_http::run(&sizes).await);
+        results.extend(l4_http::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L5") {
-        results.extend(l5_s3proto::run(&sizes).await);
+        results.extend(l5_s3proto::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L6") {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
-            results.extend(l6_s3storage::run(&sizes, &wp, wc).await);
+            results.extend(l6_s3storage::run(&sizes, &wp, wc, args.iters).await);
         }
     }
 

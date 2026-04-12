@@ -39,6 +39,10 @@ pub struct BenchArgs {
     /// Operations to test (comma-separated)
     #[arg(long, default_value = "PUT,GET,HEAD,LIST,DELETE", value_delimiter = ',')]
     pub ops: Vec<String>,
+
+    /// Override iteration count (default: auto-scaled by size)
+    #[arg(long)]
+    pub iters: Option<usize>,
 }
 
 fn has(list: &[String], val: &str) -> bool {
@@ -77,11 +81,11 @@ pub async fn run(args: BenchArgs) {
     eprintln!();
 
     if has(&args.layers, "L1") {
-        results.extend(l1_disk::run(&sizes).await);
+        results.extend(l1_disk::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L2") {
-        results.extend(l2_compute::run(&sizes).await);
+        results.extend(l2_compute::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L3") {

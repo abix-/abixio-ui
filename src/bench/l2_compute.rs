@@ -2,14 +2,14 @@ use std::time::Instant;
 
 use super::stats::{human_size, iters_for_size, BenchResult};
 
-pub async fn run(sizes: &[usize]) -> Vec<BenchResult> {
+pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchResult> {
     let mut results = Vec::new();
 
     eprintln!("--- L2: Hashing + erasure coding ---");
 
     for &size in sizes {
         let data = vec![0x42u8; size];
-        let iters = iters_for_size(size);
+        let iters = iters_override.unwrap_or_else(|| iters_for_size(size));
         let label = human_size(size);
 
         // blake3

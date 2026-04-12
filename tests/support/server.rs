@@ -55,6 +55,7 @@ impl AbixioServer {
             mrf_workers: 2,
             tls: None,
             write_tier: None,
+            write_cache: None,
         }
     }
 
@@ -117,6 +118,7 @@ pub struct AbixioServerBuilder {
     mrf_workers: usize,
     tls: Option<(String, String, Vec<u8>)>,
     write_tier: Option<String>,
+    write_cache: Option<u64>,
 }
 
 impl AbixioServerBuilder {
@@ -168,6 +170,13 @@ impl AbixioServerBuilder {
         self
     }
 
+    /// Set the RAM write cache size in MB. 0 disables the cache.
+    #[allow(dead_code)]
+    pub fn write_cache(mut self, mb: u64) -> Self {
+        self.write_cache = Some(mb);
+        self
+    }
+
     pub fn start(self) -> AbixioServer {
         let binary = find_abixio_binary();
         let port = free_port();
@@ -209,6 +218,10 @@ impl AbixioServerBuilder {
 
         if let Some(tier) = &self.write_tier {
             cmd.arg("--write-tier").arg(tier);
+        }
+
+        if let Some(mb) = self.write_cache {
+            cmd.arg("--write-cache").arg(mb.to_string());
         }
 
         let child = cmd

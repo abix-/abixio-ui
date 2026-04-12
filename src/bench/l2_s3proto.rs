@@ -12,7 +12,7 @@ use super::stats::{human_size, iters_for_size, BenchResult};
 pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchResult> {
     let mut results = Vec::new();
 
-    eprintln!("--- L2: S3 protocol (NullBackend) ---");
+    eprintln!("--- L2: S3 protocol (isolated, in-memory pipe, NullBackend) ---");
 
     let backends: Vec<Box<dyn Backend>> = vec![Box::new(NullBackend::new())];
     let pool = Arc::new(VolumePool::new(backends).unwrap());
@@ -38,35 +38,6 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
     let s3_service = builder.build();
     let dispatch = Arc::new(AbixioDispatch::new(s3_service, None, None));
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let d = dispatch.clone();
-    let server_task = tokio::spawn(async move {
-        loop {
-            let (stream, _) = match listener.accept().await {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            stream.set_nodelay(true).ok();
-            let io = hyper_util::rt::TokioIo::new(stream);
-            let d = d.clone();
-            tokio::spawn(async move {
-                let svc = hyper::service::service_fn(move |req| {
-                    let d = d.clone();
-                    async move { Ok::<_, hyper::Error>(d.dispatch(req).await) }
-                });
-                let _ = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(io, svc)
-                    .await;
-            });
-        }
-    });
-
-    let client = reqwest::Client::builder()
-        .pool_idle_timeout(std::time::Duration::from_secs(60))
-        .build()
-        .unwrap();
-
     for &size in sizes {
         let data = vec![0x42u8; size];
         let iters = iters_override.unwrap_or_else(|| iters_for_size(size));
@@ -74,18 +45,17 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
 
         // warmup
         for i in 0..3 {
-            let url = format!("http://{}/bench/warmup_{}", addr, i);
-            client.put(&url).body(data.clone()).send().await.unwrap();
+            let uri = format!("/bench/warmup_{}", i);
+            duplex_put(&dispatch, &uri, &data).await;
         }
 
         // PUT
         let mut timings = Vec::with_capacity(iters);
         for i in 0..iters {
-            let url = format!("http://{}/bench/s2_{}_{}", addr, label, i);
+            let uri = format!("/bench/s2_{}_{}", label, i);
             let t = Instant::now();
-            let resp = client.put(&url).body(data.clone()).send().await.unwrap();
+            duplex_put(&dispatch, &uri, &data).await;
             timings.push(t.elapsed());
-            assert!(resp.status().is_success(), "PUT failed: {}", resp.status());
         }
         results.push(BenchResult {
             layer: "L2".into(),
@@ -99,13 +69,12 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
             timings,
         });
 
-        // GET (NullBackend returns empty, but s3s still parses/routes)
+        // GET
         let mut timings = Vec::with_capacity(iters);
         for i in 0..iters {
-            let url = format!("http://{}/bench/s2_{}_{}", addr, label, i);
+            let uri = format!("/bench/s2_{}_{}", label, i);
             let t = Instant::now();
-            let resp = client.get(&url).send().await.unwrap();
-            let _ = resp.bytes().await.unwrap();
+            duplex_get(&dispatch, &uri).await;
             timings.push(t.elapsed());
         }
         results.push(BenchResult {
@@ -123,8 +92,76 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
         eprintln!("  {} done ({} iters)", label, iters);
     }
 
-    server_task.abort();
     results
+}
+
+/// PUT via in-memory duplex pipe: hyper client -> duplex -> hyper server -> s3s
+async fn duplex_put(dispatch: &Arc<AbixioDispatch>, uri: &str, data: &[u8]) {
+    use http_body_util::BodyExt;
+
+    let (client_io, server_io) = tokio::io::duplex(1024 * 1024);
+
+    let d = dispatch.clone();
+    let server = tokio::spawn(async move {
+        let io = hyper_util::rt::TokioIo::new(server_io);
+        let svc = hyper::service::service_fn(move |req| {
+            let d = d.clone();
+            async move { Ok::<_, hyper::Error>(d.dispatch(req).await) }
+        });
+        let _ = hyper::server::conn::http1::Builder::new()
+            .serve_connection(io, svc)
+            .await;
+    });
+
+    let io = hyper_util::rt::TokioIo::new(client_io);
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
+    tokio::spawn(conn);
+
+    let req = hyper::Request::builder()
+        .method(hyper::Method::PUT)
+        .uri(uri)
+        .body(http_body_util::Full::new(bytes::Bytes::from(data.to_vec())))
+        .unwrap();
+
+    let resp = sender.send_request(req).await.unwrap();
+    assert!(resp.status().is_success(), "PUT failed: {}", resp.status());
+    let _ = resp.into_body().collect().await;
+
+    server.abort();
+}
+
+/// GET via in-memory duplex pipe: hyper client -> duplex -> hyper server -> s3s
+async fn duplex_get(dispatch: &Arc<AbixioDispatch>, uri: &str) {
+    use http_body_util::BodyExt;
+
+    let (client_io, server_io) = tokio::io::duplex(1024 * 1024);
+
+    let d = dispatch.clone();
+    let server = tokio::spawn(async move {
+        let io = hyper_util::rt::TokioIo::new(server_io);
+        let svc = hyper::service::service_fn(move |req| {
+            let d = d.clone();
+            async move { Ok::<_, hyper::Error>(d.dispatch(req).await) }
+        });
+        let _ = hyper::server::conn::http1::Builder::new()
+            .serve_connection(io, svc)
+            .await;
+    });
+
+    let io = hyper_util::rt::TokioIo::new(client_io);
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
+    tokio::spawn(conn);
+
+    let req = hyper::Request::builder()
+        .method(hyper::Method::GET)
+        .uri(uri)
+        .body(http_body_util::Full::new(bytes::Bytes::new()))
+        .unwrap();
+
+    let resp = sender.send_request(req).await.unwrap();
+    let _ = resp.into_body().collect().await;
+
+    server.abort();
 }
 
 // NullBackend: zero-cost Backend that returns Ok() for everything.

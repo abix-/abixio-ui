@@ -1,6 +1,7 @@
 mod l1_disk;
 mod l2_compute;
 mod l3_storage;
+mod l3_pool_internals;
 mod l4_http;
 mod l5_s3proto;
 mod l6_s3storage;
@@ -98,6 +99,9 @@ pub async fn run(args: BenchArgs) {
     if has(&args.layers, "L3") {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
             results.extend(l3_storage::run(&sizes, &wp, wc, args.iters).await);
+        }
+        if has(&args.write_paths, "pool") {
+            results.extend(l3_pool_internals::run(args.iters).await);
         }
     }
 

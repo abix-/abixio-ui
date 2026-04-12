@@ -39,6 +39,9 @@ futures = "0.3"
 s3s = "0.13"
 async-trait = "0.1"
 rcgen = "0.13"
+simd-json = "0.14"
+sonic-rs = "0.3"
+dashmap = "6"
 
 [dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }

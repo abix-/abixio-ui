@@ -19,9 +19,24 @@ pub struct AdminClient {
 
 impl AdminClient {
     pub fn new(endpoint: &str, credentials: Option<(&str, &str)>, region: &str) -> Self {
+        Self::new_with_ca_pem(endpoint, credentials, region, None)
+    }
+
+    pub fn new_with_ca_pem(
+        endpoint: &str,
+        credentials: Option<(&str, &str)>,
+        region: &str,
+        ca_pem: Option<&[u8]>,
+    ) -> Self {
+        let mut http = Client::builder();
+        if let Some(ca_pem) = ca_pem
+            && let Ok(cert) = reqwest::Certificate::from_pem(ca_pem)
+        {
+            http = http.add_root_certificate(cert);
+        }
         Self {
             endpoint: endpoint.trim_end_matches('/').to_string(),
-            http: Client::new(),
+            http: http.build().expect("build admin http client"),
             credentials: credentials.map(|(a, s)| (a.to_string(), s.to_string())),
             region: region.to_string(),
         }
@@ -136,7 +151,10 @@ impl AdminClient {
     }
 
     pub async fn set_bucket_ftt(&self, bucket: &str, ftt: usize) -> Result<EcConfig, String> {
-        let url = self.url_with_query(&format!("bucket/{}/ftt", bucket), &[("ftt", &ftt.to_string())]);
+        let url = self.url_with_query(
+            &format!("bucket/{}/ftt", bucket),
+            &[("ftt", &ftt.to_string())],
+        );
         let mut builder = self.http.put(&url);
         if let Some((ref ak, ref sk)) = self.credentials {
             let headers = sig_v4_headers("PUT", &url, ak, sk, &self.region);

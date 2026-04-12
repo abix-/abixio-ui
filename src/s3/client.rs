@@ -15,6 +15,7 @@ use aws_sdk_s3::types::{
     BucketVersioningStatus, CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier, Tag,
     Tagging, VersioningConfiguration,
 };
+use aws_smithy_http_client::{Builder as SmithyHttpClientBuilder, tls as smithy_tls};
 
 use crate::s3::lifecycle_xml;
 
@@ -41,6 +42,15 @@ impl S3Client {
         creds: Option<(&str, &str)>,
         region_name: &str,
     ) -> Result<Self, String> {
+        Self::new_with_ca_pem(endpoint, creds, region_name, None)
+    }
+
+    pub fn new_with_ca_pem(
+        endpoint: &str,
+        creds: Option<(&str, &str)>,
+        region_name: &str,
+        ca_pem: Option<&[u8]>,
+    ) -> Result<Self, String> {
         let endpoint = endpoint.trim_end_matches('/').to_string();
 
         let timeout = TimeoutConfig::builder()
@@ -55,6 +65,23 @@ impl S3Client {
             .force_path_style(true)
             .timeout_config(timeout)
             .app_name(AppName::new("abixio-ui").expect("valid app name"));
+
+        if let Some(ca_pem) = ca_pem {
+            let mut trust_store = smithy_tls::TrustStore::default();
+            trust_store.add_pem_certificate(ca_pem);
+            let tls_context = smithy_tls::TlsContext::builder()
+                .with_trust_store(trust_store)
+                .build()
+                .map_err(|e| e.to_string())?;
+            builder = builder.http_client(
+                SmithyHttpClientBuilder::new()
+                    .tls_provider(smithy_tls::Provider::rustls(
+                        smithy_tls::rustls_provider::CryptoMode::AwsLc,
+                    ))
+                    .tls_context(tls_context)
+                    .build_https(),
+            );
+        }
 
         builder = match creds {
             Some((access_key, secret_key)) => builder.credentials_provider(Credentials::new(

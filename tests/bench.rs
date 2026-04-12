@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use support::server::AbixioServer;
+use support::tls::TlsMaterial;
 
 // -- result types --
 
@@ -28,8 +29,7 @@ struct BenchResult {
 
 fn percentile(timings: &mut [Duration], p: f64) -> Duration {
     timings.sort();
-    let idx = ((timings.len() as f64 * p / 100.0) - 1.0)
-        .max(0.0) as usize;
+    let idx = ((timings.len() as f64 * p / 100.0) - 1.0).max(0.0) as usize;
     timings[idx.min(timings.len() - 1)]
 }
 
@@ -113,7 +113,10 @@ async fn run_bench(disks: usize) {
     let config_name = format!("{} disk(s) ({})", disks, ec_desc);
     eprintln!("\nstarting abixio with {} disks...", disks);
 
-    let server = AbixioServer::builder().volume_count(disks).no_auth(false).start();
+    let server = AbixioServer::builder()
+        .volume_count(disks)
+        .no_auth(false)
+        .start();
     let client = server.s3_client();
 
     eprintln!("server ready at {}", server.endpoint());
@@ -133,7 +136,12 @@ async fn run_bench(disks: usize) {
     // -- warmup (3 puts, not timed) --
     for i in 0..3 {
         client
-            .put_object("bench", &format!("warmup/{}", i), payload_1k.clone(), "application/octet-stream")
+            .put_object(
+                "bench",
+                &format!("warmup/{}", i),
+                payload_1k.clone(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
     }
@@ -144,12 +152,23 @@ async fn run_bench(disks: usize) {
     for i in 0..iters {
         let t = Instant::now();
         client
-            .put_object("bench", &format!("tiny/{}", i), payload_4k.clone(), "application/octet-stream")
+            .put_object(
+                "bench",
+                &format!("tiny/{}", i),
+                payload_4k.clone(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "PUT", size: "4KB", size_bytes: 4096, iters, timings });
+    results.push(BenchResult {
+        op: "PUT",
+        size: "4KB",
+        size_bytes: 4096,
+        iters,
+        timings,
+    });
 
     // -- GET 4KB --
     let iters = 500;
@@ -162,7 +181,13 @@ async fn run_bench(disks: usize) {
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "GET", size: "4KB", size_bytes: 4096, iters, timings });
+    results.push(BenchResult {
+        op: "GET",
+        size: "4KB",
+        size_bytes: 4096,
+        iters,
+        timings,
+    });
 
     // -- HEAD 4KB --
     let iters = 500;
@@ -175,7 +200,13 @@ async fn run_bench(disks: usize) {
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "HEAD", size: "4KB", size_bytes: 0, iters, timings });
+    results.push(BenchResult {
+        op: "HEAD",
+        size: "4KB",
+        size_bytes: 0,
+        iters,
+        timings,
+    });
 
     // -- DELETE 4KB --
     let iters = 500;
@@ -188,7 +219,13 @@ async fn run_bench(disks: usize) {
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "DELETE", size: "4KB", size_bytes: 0, iters, timings });
+    results.push(BenchResult {
+        op: "DELETE",
+        size: "4KB",
+        size_bytes: 0,
+        iters,
+        timings,
+    });
 
     // -- PUT 1KB --
     let iters = 100;
@@ -196,12 +233,23 @@ async fn run_bench(disks: usize) {
     for i in 0..iters {
         let t = Instant::now();
         client
-            .put_object("bench", &format!("small/{}", i), payload_1k.clone(), "application/octet-stream")
+            .put_object(
+                "bench",
+                &format!("small/{}", i),
+                payload_1k.clone(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "PUT", size: "1KB", size_bytes: 1024, iters, timings });
+    results.push(BenchResult {
+        op: "PUT",
+        size: "1KB",
+        size_bytes: 1024,
+        iters,
+        timings,
+    });
 
     // -- PUT 1MB --
     let iters = 20;
@@ -209,12 +257,23 @@ async fn run_bench(disks: usize) {
     for i in 0..iters {
         let t = Instant::now();
         client
-            .put_object("bench", &format!("medium/{}", i), payload_1m.clone(), "application/octet-stream")
+            .put_object(
+                "bench",
+                &format!("medium/{}", i),
+                payload_1m.clone(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "PUT", size: "1MB", size_bytes: 1024 * 1024, iters, timings });
+    results.push(BenchResult {
+        op: "PUT",
+        size: "1MB",
+        size_bytes: 1024 * 1024,
+        iters,
+        timings,
+    });
 
     // -- PUT 10MB --
     let iters = 5;
@@ -222,12 +281,23 @@ async fn run_bench(disks: usize) {
     for i in 0..iters {
         let t = Instant::now();
         client
-            .put_object("bench", &format!("large/{}", i), payload_10m.clone(), "application/octet-stream")
+            .put_object(
+                "bench",
+                &format!("large/{}", i),
+                payload_10m.clone(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "PUT", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings });
+    results.push(BenchResult {
+        op: "PUT",
+        size: "10MB",
+        size_bytes: 10 * 1024 * 1024,
+        iters,
+        timings,
+    });
 
     // -- PUT 10MB UNSIGNED (skip client-side SHA256) --
     let iters = 5;
@@ -235,52 +305,99 @@ async fn run_bench(disks: usize) {
     for i in 0..iters {
         let t = Instant::now();
         client
-            .put_object_unsigned("bench", &format!("unsigned/{}", i), payload_10m.clone(), "application/octet-stream")
+            .put_object_unsigned(
+                "bench",
+                &format!("unsigned/{}", i),
+                payload_10m.clone(),
+                "application/octet-stream",
+            )
             .await
             .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "PUT*", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings });
+    results.push(BenchResult {
+        op: "PUT*",
+        size: "10MB",
+        size_bytes: 10 * 1024 * 1024,
+        iters,
+        timings,
+    });
 
     // -- GET 1KB --
     let iters = 100;
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
         let t = Instant::now();
-        let _ = client.get_object("bench", &format!("small/{}", i)).await.unwrap();
+        let _ = client
+            .get_object("bench", &format!("small/{}", i))
+            .await
+            .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "GET", size: "1KB", size_bytes: 1024, iters, timings });
+    results.push(BenchResult {
+        op: "GET",
+        size: "1KB",
+        size_bytes: 1024,
+        iters,
+        timings,
+    });
 
     // -- GET 1MB --
     let iters = 20;
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
         let t = Instant::now();
-        let _ = client.get_object("bench", &format!("medium/{}", i)).await.unwrap();
+        let _ = client
+            .get_object("bench", &format!("medium/{}", i))
+            .await
+            .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "GET", size: "1MB", size_bytes: 1024 * 1024, iters, timings });
+    results.push(BenchResult {
+        op: "GET",
+        size: "1MB",
+        size_bytes: 1024 * 1024,
+        iters,
+        timings,
+    });
 
     // -- GET 10MB --
     let iters = 5;
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
         let t = Instant::now();
-        let _ = client.get_object("bench", &format!("large/{}", i)).await.unwrap();
+        let _ = client
+            .get_object("bench", &format!("large/{}", i))
+            .await
+            .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "GET", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings });
+    results.push(BenchResult {
+        op: "GET",
+        size: "10MB",
+        size_bytes: 10 * 1024 * 1024,
+        iters,
+        timings,
+    });
 
     // -- HEAD --
     let iters = 100;
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
         let t = Instant::now();
-        let _ = client.head_object("bench", &format!("small/{}", i)).await.unwrap();
+        let _ = client
+            .head_object("bench", &format!("small/{}", i))
+            .await
+            .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "HEAD", size: "-", size_bytes: 0, iters, timings });
+    results.push(BenchResult {
+        op: "HEAD",
+        size: "-",
+        size_bytes: 0,
+        iters,
+        timings,
+    });
 
     // -- LIST (100 objects already in small/) --
     let iters = 50;
@@ -290,17 +407,32 @@ async fn run_bench(disks: usize) {
         let _ = client.list_objects("bench", "small/", "").await.unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "LIST", size: "100obj", size_bytes: 0, iters, timings });
+    results.push(BenchResult {
+        op: "LIST",
+        size: "100obj",
+        size_bytes: 0,
+        iters,
+        timings,
+    });
 
     // -- DELETE --
     let iters = 100;
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
         let t = Instant::now();
-        client.delete_object("bench", &format!("small/{}", i)).await.unwrap();
+        client
+            .delete_object("bench", &format!("small/{}", i))
+            .await
+            .unwrap();
         timings.push(t.elapsed());
     }
-    results.push(BenchResult { op: "DELETE", size: "1KB", size_bytes: 0, iters, timings });
+    results.push(BenchResult {
+        op: "DELETE",
+        size: "1KB",
+        size_bytes: 0,
+        iters,
+        timings,
+    });
 
     print_results(&config_name, &mut results);
 }
@@ -330,7 +462,13 @@ async fn run_raw_disk() {
         tokio::fs::write(&path, &payload_1k).await.unwrap();
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "WRITE", size: "1KB", size_bytes: 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "WRITE",
+        size: "1KB",
+        size_bytes: 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 
     // raw write 1MB
@@ -342,7 +480,13 @@ async fn run_raw_disk() {
         tokio::fs::write(&path, &payload_1m).await.unwrap();
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "WRITE", size: "1MB", size_bytes: 1024 * 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "WRITE",
+        size: "1MB",
+        size_bytes: 1024 * 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 
     // raw write 10MB (cached)
@@ -354,7 +498,13 @@ async fn run_raw_disk() {
         tokio::fs::write(&path, &payload_10m).await.unwrap();
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "WRITE", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "WRITE",
+        size: "10MB",
+        size_bytes: 10 * 1024 * 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 
     // raw write 10MB + fsync (real disk speed)
@@ -371,7 +521,13 @@ async fn run_raw_disk() {
         }
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "FSYNC", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "FSYNC",
+        size: "10MB",
+        size_bytes: 10 * 1024 * 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 
     // raw read 1KB
@@ -383,7 +539,13 @@ async fn run_raw_disk() {
         let _ = tokio::fs::read(&path).await.unwrap();
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "READ", size: "1KB", size_bytes: 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "READ",
+        size: "1KB",
+        size_bytes: 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 
     // raw read 1MB
@@ -395,7 +557,13 @@ async fn run_raw_disk() {
         let _ = tokio::fs::read(&path).await.unwrap();
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "READ", size: "1MB", size_bytes: 1024 * 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "READ",
+        size: "1MB",
+        size_bytes: 1024 * 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 
     // raw read 10MB
@@ -407,7 +575,13 @@ async fn run_raw_disk() {
         let _ = tokio::fs::read(&path).await.unwrap();
         timings.push(t.elapsed());
     }
-    let mut r = BenchResult { op: "READ", size: "10MB", size_bytes: 10 * 1024 * 1024, iters, timings };
+    let mut r = BenchResult {
+        op: "READ",
+        size: "10MB",
+        size_bytes: 10 * 1024 * 1024,
+        iters,
+        timings,
+    };
     print_one(&mut r);
 }
 
@@ -419,8 +593,13 @@ fn print_one(r: &mut BenchResult) {
     let tp = format_throughput(r.size_bytes, r.iters, total);
     eprintln!(
         "{:<8} {:<6} {:>6} ops  {:>10}  {:>10}  {:>10}  {:>12}",
-        r.op, r.size, r.iters,
-        format_duration(a), format_duration(p50), format_duration(p99), tp,
+        r.op,
+        r.size,
+        r.iters,
+        format_duration(a),
+        format_duration(p50),
+        format_duration(p99),
+        tp,
     );
 }
 
@@ -459,57 +638,139 @@ async fn bench_4_disks() {
 // Competitive benchmark: AbixIO vs RustFS vs MinIO (4KB + 10MB + 1GB)
 // ============================================================================
 
-use std::process::{Command, Child, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 
 struct ExternalServer {
     child: Child,
     port: u16,
     _temp: tempfile::TempDir,
+    ca_cert_pem: Vec<u8>,
 }
 
 impl ExternalServer {
-    fn start_rustfs(port: u16) -> Option<Self> {
-        let bin = std::env::var("RUSTFS_BIN").unwrap_or_else(|_| r"C:\tools\rustfs.exe".to_string());
-        if !std::path::Path::new(&bin).exists() { return None; }
+    fn start_rustfs_tls(bin: &str, port: u16, tls: &TlsMaterial) -> Option<Self> {
+        if !std::path::Path::new(bin).exists() {
+            return None;
+        }
         let tmp = tempfile::TempDir::new().ok()?;
         let console_port = port + 1;
-        let child = Command::new(&bin)
-            .args(["server", tmp.path().to_str().unwrap(),
-                   "--address", &format!(":{}", port),
-                   "--console-address", &format!(":{}", console_port)])
+        let child = Command::new(bin)
+            .args([
+                "server",
+                tmp.path().to_str().unwrap(),
+                "--address",
+                &format!(":{}", port),
+                "--console-address",
+                &format!(":{}", console_port),
+                "--tls-path",
+                tls.rustfs_tls_dir.to_str().unwrap(),
+            ])
             .env("RUSTFS_ROOT_USER", "benchuser")
             .env("RUSTFS_ROOT_PASSWORD", "benchpass")
-            .stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn().ok()?;
-        std::thread::sleep(Duration::from_millis(1500));
-        Some(Self { child, port, _temp: tmp })
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut server = Self {
+            child,
+            port,
+            _temp: tmp,
+            ca_cert_pem: tls.ca_cert_pem.clone(),
+        };
+        server.wait_for_ready();
+        Some(server)
     }
 
-    fn start_minio(port: u16) -> Option<Self> {
-        let bin = std::env::var("MINIO_BIN").unwrap_or_else(|_| r"C:\tools\minio.exe".to_string());
-        if !std::path::Path::new(&bin).exists() { return None; }
+    fn start_minio_tls(bin: &str, port: u16, tls: &TlsMaterial) -> Option<Self> {
+        if !std::path::Path::new(bin).exists() {
+            return None;
+        }
         let tmp = tempfile::TempDir::new().ok()?;
         let console_port = port + 1;
-        let child = Command::new(&bin)
-            .args(["server", tmp.path().to_str().unwrap(),
-                   "--address", &format!(":{}", port),
-                   "--console-address", &format!(":{}", console_port)])
+        let child = Command::new(bin)
+            .args([
+                "server",
+                tmp.path().to_str().unwrap(),
+                "--address",
+                &format!(":{}", port),
+                "--console-address",
+                &format!(":{}", console_port),
+                "--certs-dir",
+                tls.minio_certs_dir.to_str().unwrap(),
+            ])
             .env("MINIO_ROOT_USER", "benchuser")
             .env("MINIO_ROOT_PASSWORD", "benchpass")
-            .stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn().ok()?;
-        std::thread::sleep(Duration::from_millis(1500));
-        Some(Self { child, port, _temp: tmp })
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut server = Self {
+            child,
+            port,
+            _temp: tmp,
+            ca_cert_pem: tls.ca_cert_pem.clone(),
+        };
+        server.wait_for_ready();
+        Some(server)
+    }
+
+    fn endpoint(&self) -> String {
+        format!("https://127.0.0.1:{}", self.port)
     }
 
     fn s3_client(&self, creds: (&str, &str)) -> Arc<abixio_ui::s3::client::S3Client> {
         Arc::new(
-            abixio_ui::s3::client::S3Client::new(
-                &format!("http://127.0.0.1:{}", self.port),
+            abixio_ui::s3::client::S3Client::new_with_ca_pem(
+                &self.endpoint(),
                 Some(creds),
                 "us-east-1",
-            ).expect("create S3 client"),
+                Some(&self.ca_cert_pem),
+            )
+            .expect("create S3 client"),
         )
+    }
+
+    fn wait_for_ready(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let cert = reqwest::Certificate::from_pem(&self.ca_cert_pem).expect("parse benchmark CA");
+        let client = reqwest::Client::builder()
+            .add_root_certificate(cert)
+            .build()
+            .expect("build external readiness client");
+        let url = self.endpoint();
+
+        while Instant::now() < deadline {
+            if let Some(status) = self.child.try_wait().ok().flatten() {
+                panic!(
+                    "external server on port {} exited early: {}",
+                    self.port, status
+                );
+            }
+
+            // see note in support::server::wait_for_ready — run block_on from
+            // an OS thread so this works inside `#[tokio::test]` workers too.
+            let client_ref = &client;
+            let url_ref = &url;
+            let ready = std::thread::scope(|s| {
+                s.spawn(move || {
+                    support::RUNTIME.block_on(async move {
+                        client_ref.get(url_ref).send().await.is_ok()
+                    })
+                })
+                .join()
+                .unwrap()
+            });
+            if ready {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        panic!(
+            "external server on port {} did not become ready over TLS",
+            self.port
+        );
     }
 }
 
@@ -530,7 +791,14 @@ async fn run_competitive_4kb(name: &str, client: &abixio_ui::s3::client::S3Clien
 
     // warmup
     for i in 0..20 {
-        let _ = client.put_object("bench4k", &format!("w{}", i), payload.clone(), "application/octet-stream").await;
+        let _ = client
+            .put_object(
+                "bench4k",
+                &format!("w{}", i),
+                payload.clone(),
+                "application/octet-stream",
+            )
+            .await;
     }
 
     // PUT 4KB
@@ -538,7 +806,14 @@ async fn run_competitive_4kb(name: &str, client: &abixio_ui::s3::client::S3Clien
     let mut timings = Vec::with_capacity(iters);
     for i in 0..iters {
         let t = Instant::now();
-        let _ = client.put_object("bench4k", &format!("p{}", i), payload.clone(), "application/octet-stream").await;
+        let _ = client
+            .put_object_unsigned(
+                "bench4k",
+                &format!("p{}", i),
+                payload.clone(),
+                "application/octet-stream",
+            )
+            .await;
         timings.push(t.elapsed());
     }
     let total: Duration = timings.iter().sum();
@@ -562,7 +837,14 @@ async fn run_competitive_4kb(name: &str, client: &abixio_ui::s3::client::S3Clien
     let mut timings = Vec::with_capacity(iters_10m);
     for i in 0..iters_10m {
         let t = Instant::now();
-        let _ = client.put_object("bench4k", &format!("big{}", i), payload_10m.clone(), "application/octet-stream").await;
+        let _ = client
+            .put_object_unsigned(
+                "bench4k",
+                &format!("big{}", i),
+                payload_10m.clone(),
+                "application/octet-stream",
+            )
+            .await;
         timings.push(t.elapsed());
     }
     let total: Duration = timings.iter().sum();
@@ -580,7 +862,13 @@ async fn run_competitive_4kb(name: &str, client: &abixio_ui::s3::client::S3Clien
 
     eprintln!(
         "| {:<12} | {:>6.0} obj/s {:>6.0}us | {:>6.0} obj/s {:>6.0}us | {:>6.1} MB/s | {:>6.1} MB/s |",
-        name, put_ops, put_avg.as_micros(), get_ops, get_avg.as_micros(), put10_mbps, get10_mbps,
+        name,
+        put_ops,
+        put_avg.as_micros(),
+        get_ops,
+        get_avg.as_micros(),
+        put10_mbps,
+        get10_mbps,
     );
 }
 
@@ -589,27 +877,50 @@ async fn run_competitive_4kb(name: &str, client: &abixio_ui::s3::client::S3Clien
 async fn bench_competitive() {
     eprintln!();
     eprintln!("=== competitive benchmark (aws-sdk-s3, release, keep-alive) ===");
-    eprintln!("| {:12} | {:>22} | {:>22} | {:>10} | {:>10} |", "Server", "4KB PUT", "4KB GET", "10MB PUT", "10MB GET");
-    eprintln!("|{:-<14}|{:-<24}|{:-<24}|{:-<12}|{:-<12}|", "", "", "", "", "");
+    eprintln!(
+        "| {:12} | {:>22} | {:>22} | {:>10} | {:>10} |",
+        "Server", "4KB PUT", "4KB GET", "10MB PUT", "10MB GET"
+    );
+    eprintln!(
+        "|{:-<14}|{:-<24}|{:-<24}|{:-<12}|{:-<12}|",
+        "", "", "", "", ""
+    );
 
     // AbixIO
-    let abixio = AbixioServer::builder().volume_count(1).no_auth(false).start();
+    let tls = TlsMaterial::generate();
+    let abixio = AbixioServer::builder()
+        .volume_count(1)
+        .no_auth(false)
+        .tls(&tls)
+        .start();
     run_competitive_4kb("AbixIO", &abixio.s3_client()).await;
 
     // RustFS
-    if let Some(rustfs) = ExternalServer::start_rustfs(11501) {
+    if let Some(rustfs) = ExternalServer::start_rustfs_tls(
+        &expect_binary("RUSTFS_BIN", r"C:\tools\rustfs.exe", "RustFS"),
+        11501,
+        &tls,
+    ) {
         let client = rustfs.s3_client(("benchuser", "benchpass"));
         run_competitive_4kb("RustFS", &client).await;
     } else {
-        eprintln!("| RustFS       | (binary not found)                                                           |");
+        eprintln!(
+            "| RustFS       | (binary not found)                                                           |"
+        );
     }
 
     // MinIO
-    if let Some(minio) = ExternalServer::start_minio(11503) {
+    if let Some(minio) = ExternalServer::start_minio_tls(
+        &expect_binary("MINIO_BIN", r"C:\tools\minio.exe", "MinIO"),
+        11503,
+        &tls,
+    ) {
         let client = minio.s3_client(("benchuser", "benchpass"));
         run_competitive_4kb("MinIO", &client).await;
     } else {
-        eprintln!("| MinIO        | (binary not found)                                                           |");
+        eprintln!(
+            "| MinIO        | (binary not found)                                                           |"
+        );
     }
 
     eprintln!();
@@ -621,24 +932,36 @@ async fn bench_competitive() {
 
 fn measure_cli_overhead(bin: &str, args: &[&str], n: usize) -> Duration {
     for _ in 0..3 {
-        let _ = Command::new(bin).args(args)
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new(bin)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     let start = Instant::now();
     for _ in 0..n {
-        let _ = Command::new(bin).args(args)
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new(bin)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     start.elapsed() / n as u32
 }
 
 fn find_binary(env_var: &str, default: &str) -> Option<String> {
     if let Ok(p) = std::env::var(env_var) {
-        if std::path::Path::new(&p).exists() { return Some(p); }
+        if std::path::Path::new(&p).exists() {
+            return Some(p);
+        }
     }
-    if std::path::Path::new(default).exists() { return Some(default.to_string()); }
-    // check PATH
-    if let Ok(output) = Command::new("which").arg(default.split('\\').last().unwrap_or(default)).output() {
+    if std::path::Path::new(default).exists() {
+        return Some(default.to_string());
+    }
+    if let Ok(output) = Command::new("where.exe")
+        .arg(default.split('\\').last().unwrap_or(default))
+        .output()
+    {
         if output.status.success() {
             return Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
         }
@@ -646,71 +969,241 @@ fn find_binary(env_var: &str, default: &str) -> Option<String> {
     None
 }
 
-fn run_cli_bench(name: &str, setup_cmd: &[&str], put_cmd_template: &[&str], get_cmd_template: &[&str], iters: usize) {
-    // run setup (alias, bucket create, etc)
-    for cmd in setup_cmd.chunks(1) {
-        let _ = Command::new("bash").arg("-c").arg(cmd[0]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
+fn expect_binary(env_var: &str, default: &str, display: &str) -> String {
+    find_binary(env_var, default).unwrap_or_else(|| {
+        panic!(
+            "{} binary not found. Set {} or install it in PATH.",
+            display, env_var
+        )
+    })
+}
 
-    // PUT benchmark
-    let start = Instant::now();
-    for i in 0..iters {
-        let cmd = put_cmd_template.join(" ").replace("{i}", &i.to_string());
-        let _ = Command::new("bash").arg("-c").arg(&cmd).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
-    let put_elapsed = start.elapsed();
-    let put_ops = iters as f64 / put_elapsed.as_secs_f64();
-    let put_avg_us = put_elapsed.as_micros() as f64 / iters as f64;
-
-    // GET benchmark
-    let start = Instant::now();
-    for i in 0..iters {
-        let cmd = get_cmd_template.join(" ").replace("{i}", &i.to_string());
-        let _ = Command::new("bash").arg("-c").arg(&cmd).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
-    let get_elapsed = start.elapsed();
-    let get_ops = iters as f64 / get_elapsed.as_secs_f64();
-    let get_avg_us = get_elapsed.as_micros() as f64 / iters as f64;
-
-    eprintln!(
-        "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
-        name, put_ops, put_avg_us, get_ops, get_avg_us,
+fn run_status(mut cmd: Command, purpose: &str) {
+    let status = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("failed to run {}: {}", purpose, e));
+    assert!(
+        status.success(),
+        "{} failed with status {}",
+        purpose,
+        status
     );
+}
+
+struct AwsCliHarness {
+    aws: String,
+    _temp: tempfile::TempDir,
+    config_path: PathBuf,
+    credentials_path: PathBuf,
+    ca_bundle_path: PathBuf,
+}
+
+impl AwsCliHarness {
+    fn new(aws: String, ca_bundle_path: &Path, access_key: &str, secret_key: &str) -> Self {
+        let temp = tempfile::TempDir::new().expect("create aws cli tempdir");
+        let config_path = temp.path().join("config");
+        let credentials_path = temp.path().join("credentials");
+        let ca_bundle_copy = temp.path().join("ca.pem");
+        std::fs::copy(ca_bundle_path, &ca_bundle_copy).expect("copy CA bundle");
+
+        let config = format!(
+            "[profile bench]\nregion = us-east-1\nca_bundle = {}\ns3 =\n    addressing_style = path\n    payload_signing_enabled = false\n",
+            ca_bundle_copy.display()
+        );
+        let credentials = format!(
+            "[bench]\naws_access_key_id = {}\naws_secret_access_key = {}\n",
+            access_key, secret_key
+        );
+        std::fs::write(&config_path, config).expect("write aws config");
+        std::fs::write(&credentials_path, credentials).expect("write aws credentials");
+
+        Self {
+            aws,
+            _temp: temp,
+            config_path,
+            credentials_path,
+            ca_bundle_path: ca_bundle_copy,
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut cmd = Command::new(&self.aws);
+        cmd.env("AWS_CONFIG_FILE", &self.config_path)
+            .env("AWS_SHARED_CREDENTIALS_FILE", &self.credentials_path)
+            .env("AWS_PROFILE", "bench")
+            .env("AWS_EC2_METADATA_DISABLED", "true")
+            .arg("--no-cli-pager");
+        cmd
+    }
+
+    fn create_bucket(&self, endpoint: &str, bucket: &str) {
+        let mut cmd = self.command();
+        cmd.args(["--endpoint-url", endpoint, "--ca-bundle"])
+            .arg(&self.ca_bundle_path)
+            .args(["s3api", "create-bucket", "--bucket", bucket]);
+        run_status(cmd, "aws create-bucket");
+    }
+
+    fn measure_overhead(&self, endpoint: &str, n: usize) -> Duration {
+        measure_cli_overhead(
+            &self.aws,
+            &[
+                "--no-cli-pager",
+                "--endpoint-url",
+                endpoint,
+                "--ca-bundle",
+                self.ca_bundle_path.to_str().expect("ca path utf8"),
+                "s3api",
+                "list-buckets",
+            ],
+            n,
+        )
+    }
+
+    fn put_object(&self, endpoint: &str, bucket: &str, key: &str, body_path: &Path) {
+        let mut cmd = self.command();
+        cmd.args(["--endpoint-url", endpoint, "--ca-bundle"])
+            .arg(&self.ca_bundle_path)
+            .args([
+                "s3api",
+                "put-object",
+                "--bucket",
+                bucket,
+                "--key",
+                key,
+                "--body",
+            ])
+            .arg(body_path);
+        run_status(cmd, "aws put-object");
+    }
+
+    fn get_object(&self, endpoint: &str, bucket: &str, key: &str, out_path: &Path) {
+        let mut cmd = self.command();
+        cmd.args(["--endpoint-url", endpoint, "--ca-bundle"])
+            .arg(&self.ca_bundle_path)
+            .args(["s3api", "get-object", "--bucket", bucket, "--key", key])
+            .arg(out_path);
+        run_status(cmd, "aws get-object");
+    }
+}
+
+fn rclone_args(
+    endpoint: &str,
+    ca_bundle_path: &Path,
+    access_key: &str,
+    secret_key: &str,
+) -> Vec<String> {
+    vec![
+        "--s3-provider".to_string(),
+        "Other".to_string(),
+        "--s3-endpoint".to_string(),
+        endpoint.to_string(),
+        "--s3-access-key-id".to_string(),
+        access_key.to_string(),
+        "--s3-secret-access-key".to_string(),
+        secret_key.to_string(),
+        "--s3-force-path-style".to_string(),
+        "--s3-use-unsigned-payload".to_string(),
+        "true".to_string(),
+        "--ca-cert".to_string(),
+        ca_bundle_path.to_string_lossy().to_string(),
+    ]
+}
+
+fn rclone_mkdir(
+    rclone: &str,
+    endpoint: &str,
+    ca_bundle_path: &Path,
+    access_key: &str,
+    secret_key: &str,
+    bucket: &str,
+) {
+    let mut cmd = Command::new(rclone);
+    cmd.arg("mkdir")
+        .arg(format!(":s3:{}", bucket))
+        .args(rclone_args(
+            endpoint,
+            ca_bundle_path,
+            access_key,
+            secret_key,
+        ))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    run_status(cmd, "rclone mkdir");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn bench_clients() {
     eprintln!();
-    eprintln!("=== client comparison (4KB, same AbixIO server) ===");
-    eprintln!("| {:18} | {:>28} | {:>28} |", "Client", "4KB PUT", "4KB GET");
+    eprintln!("=== client comparison (4KB, HTTPS + SigV4 + UNSIGNED-PAYLOAD) ===");
+    eprintln!(
+        "| {:18} | {:>28} | {:>28} |",
+        "Client", "4KB PUT", "4KB GET"
+    );
     eprintln!("|{:-<20}|{:-<30}|{:-<30}|", "", "", "");
 
-    let server = AbixioServer::builder().volume_count(1).no_auth(false).start();
-    let port = server.endpoint().split(':').last().unwrap().to_string();
+    let tls = TlsMaterial::generate();
+    let server = AbixioServer::builder()
+        .volume_count(1)
+        .no_auth(false)
+        .tls(&tls)
+        .start();
     let endpoint = server.endpoint();
+    let aws = AwsCliHarness::new(
+        expect_binary(
+            "AWS",
+            r"C:\Program Files\Amazon\AWSCLIV2\aws.exe",
+            "AWS CLI",
+        ),
+        &tls.ca_cert_path,
+        "test",
+        "testsecret",
+    );
+    let rclone = expect_binary("RCLONE", r"C:\tools\rclone.exe", "rclone");
 
-    // 1. aws-sdk-s3 (Rust, keep-alive, SigV4)
+    // 1. aws-sdk-s3 (Rust, keep-alive, unsigned payload)
     {
         let client = server.s3_client();
         client.create_bucket("clientbench").await.unwrap();
-        let payload = vec![0x42u8; 4096];
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let srcpath = tmpdir.path().join("payload.dat");
+        let sinkpath = tmpdir.path().join("sink.dat");
+        std::fs::write(&srcpath, vec![0x42u8; 4096]).unwrap();
 
         // warmup
         for i in 0..20 {
-            let _ = client.put_object("clientbench", &format!("w{}", i), payload.clone(), "application/octet-stream").await;
+            let data = tokio::fs::read(&srcpath).await.unwrap();
+            let _ = client
+                .put_object_unsigned(
+                    "clientbench",
+                    &format!("w{}", i),
+                    data,
+                    "application/octet-stream",
+                )
+                .await;
         }
 
         let iters = 200;
         let start = Instant::now();
         for i in 0..iters {
-            let _ = client.put_object("clientbench", &format!("sdk{}", i), payload.clone(), "application/octet-stream").await;
+            let data = tokio::fs::read(&srcpath).await.unwrap();
+            let _ = client
+                .put_object_unsigned(
+                    "clientbench",
+                    &format!("sdk{}", i),
+                    data,
+                    "application/octet-stream",
+                )
+                .await;
         }
         let put_elapsed = start.elapsed();
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = client.get_object("clientbench", &format!("sdk{}", i)).await;
+            let _ = client
+                .download_object_to_file("clientbench", &format!("sdk{}", i), &sinkpath)
+                .await;
         }
         let get_elapsed = start.elapsed();
 
@@ -724,127 +1217,99 @@ async fn bench_clients() {
         );
     }
 
-    // 2. mc (MinIO client, per-process)
-    let mc_bin = find_binary("MC", r"C:\tools\mc.exe");
-    if let Some(ref mc) = mc_bin {
-        let _ = Command::new(mc).args(["alias", "set", "benchmc", &endpoint, "test", "testsecret", "--api", "S3v4"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        let _ = Command::new(mc).args(["mb", "benchmc/mcbench"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+    // 2. AWS CLI
+    {
+        aws.create_bucket(&endpoint, "clientbench-aws");
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let srcpath = tmpdir.path().join("payload.dat");
+        let sinkdir = tempfile::TempDir::new().unwrap();
+        std::fs::write(&srcpath, vec![0x42u8; 4096]).unwrap();
 
-        // create test file
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), &[0x42u8; 4096]).unwrap();
-        let tmppath = tmp.path().to_str().unwrap().to_string();
-        let sink = tempfile::NamedTempFile::new().unwrap();
-        let sinkpath = sink.path().to_str().unwrap().to_string();
-
-        let iters = 50; // mc is slow, fewer iters
-
+        let iters = 50;
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new(mc).args(["cp", &tmppath, &format!("benchmc/mcbench/mc{}", i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            aws.put_object(&endpoint, "clientbench-aws", &format!("aws{}", i), &srcpath);
         }
         let put_elapsed = start.elapsed();
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new(mc).args(["cp", &format!("benchmc/mcbench/mc{}", i), &sinkpath])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let sinkpath = sinkdir.path().join(format!("aws{}.dat", i));
+            aws.get_object(
+                &endpoint,
+                "clientbench-aws",
+                &format!("aws{}", i),
+                &sinkpath,
+            );
         }
         let get_elapsed = start.elapsed();
 
-        let _ = Command::new(mc).args(["alias", "rm", "benchmc"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-
         eprintln!(
             "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
-            "mc (per-process)",
+            "aws cli",
             iters as f64 / put_elapsed.as_secs_f64(),
             put_elapsed.as_micros() as f64 / iters as f64,
             iters as f64 / get_elapsed.as_secs_f64(),
             get_elapsed.as_micros() as f64 / iters as f64,
         );
-    } else {
-        eprintln!("| mc (per-process)   | (binary not found)                                           |");
     }
 
     // 3. rclone
-    let rclone_bin = find_binary("RCLONE", "rclone");
-    if let Some(ref rclone) = rclone_bin {
-        // rclone uses env vars for config
-        let iters = 50;
-
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), &[0x42u8; 4096]).unwrap();
-        let tmppath = tmp.path().to_str().unwrap().to_string();
-        let tmpdir = tempfile::TempDir::new().unwrap();
-        let sinkdir = tmpdir.path().to_str().unwrap().to_string();
-
-        let start = Instant::now();
-        for i in 0..iters {
-            let _ = Command::new(rclone)
-                .args(["copyto", &tmppath, &format!(":s3:rclonebench/rc{}", i),
-                       "--s3-provider", "Other",
-                       "--s3-endpoint", &endpoint,
-                       "--s3-access-key-id", "test",
-                       "--s3-secret-access-key", "testsecret",
-                       "--s3-force-path-style"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        }
-        let put_elapsed = start.elapsed();
-
-        let start = Instant::now();
-        for i in 0..iters {
-            let _ = Command::new(rclone)
-                .args(["copyto", &format!(":s3:rclonebench/rc{}", i),
-                       &format!("{}/rc{}", sinkdir, i),
-                       "--s3-provider", "Other",
-                       "--s3-endpoint", &endpoint,
-                       "--s3-access-key-id", "test",
-                       "--s3-secret-access-key", "testsecret",
-                       "--s3-force-path-style"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        }
-        let get_elapsed = start.elapsed();
-
-        eprintln!(
-            "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
-            "rclone (per-proc)",
-            iters as f64 / put_elapsed.as_secs_f64(),
-            put_elapsed.as_micros() as f64 / iters as f64,
-            iters as f64 / get_elapsed.as_secs_f64(),
-            get_elapsed.as_micros() as f64 / iters as f64,
-        );
-    } else {
-        eprintln!("| rclone (per-proc)  | (binary not found)                                           |");
-    }
-
-    // 4. curl (unsigned, per-process baseline)
     {
-        let iters = 100;
-        let payload = "x".repeat(4096);
+        rclone_mkdir(
+            &rclone,
+            &endpoint,
+            &tls.ca_cert_path,
+            "test",
+            "testsecret",
+            "rclonebench",
+        );
+        let iters = 50;
+        let tmpdir = tempfile::TempDir::new().unwrap();
+        let srcpath = tmpdir.path().join("payload.dat");
+        let sinkdir = tempfile::TempDir::new().unwrap();
+        std::fs::write(&srcpath, vec![0x42u8; 4096]).unwrap();
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new("curl")
-                .args(["-s", "-X", "PUT", "-H", "Content-Length: 4096",
-                       "-d", &payload, &format!("{}/clientbench/curl{}", endpoint, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let mut cmd = Command::new(&rclone);
+            cmd.arg("copyto")
+                .arg(&srcpath)
+                .arg(format!(":s3:rclonebench/rc{}", i))
+                .args(rclone_args(
+                    &endpoint,
+                    &tls.ca_cert_path,
+                    "test",
+                    "testsecret",
+                ))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            run_status(cmd, "rclone put");
         }
         let put_elapsed = start.elapsed();
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new("curl")
-                .args(["-s", "-o", "/dev/null", &format!("{}/clientbench/curl{}", endpoint, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let sinkpath = sinkdir.path().join(format!("rc{}.dat", i));
+            let mut cmd = Command::new(&rclone);
+            cmd.arg("copyto")
+                .arg(format!(":s3:rclonebench/rc{}", i))
+                .arg(&sinkpath)
+                .args(rclone_args(
+                    &endpoint,
+                    &tls.ca_cert_path,
+                    "test",
+                    "testsecret",
+                ))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            run_status(cmd, "rclone get");
         }
         let get_elapsed = start.elapsed();
 
         eprintln!(
             "| {:<18} | {:>6.0} obj/s {:>8.0}us | {:>6.0} obj/s {:>8.0}us |",
-            "curl (unsigned)",
+            "rclone",
             iters as f64 / put_elapsed.as_secs_f64(),
             put_elapsed.as_micros() as f64 / iters as f64,
             iters as f64 / get_elapsed.as_secs_f64(),
@@ -870,6 +1335,130 @@ struct MatrixResult {
     get_avg_us: f64,
 }
 
+struct MetaResult {
+    server: String,
+    op: &'static str,
+    iters: usize,
+    avg_us: f64,
+    p50_us: f64,
+    p99_us: f64,
+    ops_per_sec: f64,
+}
+
+async fn matrix_sdk_meta(
+    name: &str,
+    client: &abixio_ui::s3::client::S3Client,
+    bucket: &str,
+) -> Vec<MetaResult> {
+    let _ = client.create_bucket(bucket).await;
+    let mut results = Vec::new();
+
+    // seed 100 objects for HEAD/LIST/DELETE
+    let payload = vec![0x42u8; 4096];
+    for i in 0..100 {
+        let _ = client
+            .put_object_unsigned(
+                bucket,
+                &format!("meta/{}", i),
+                payload.clone(),
+                "application/octet-stream",
+            )
+            .await;
+    }
+
+    // warmup
+    for i in 0..3 {
+        let _ = client.head_object(bucket, &format!("meta/{}", i)).await;
+        let _ = client.list_objects(bucket, "meta/", "").await;
+    }
+
+    // HEAD (100 iters)
+    let iters = 100;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        let _ = client
+            .head_object(bucket, &format!("meta/{}", i))
+            .await;
+        timings.push(t.elapsed());
+    }
+    timings.sort();
+    let total: Duration = timings.iter().sum();
+    results.push(MetaResult {
+        server: name.to_string(),
+        op: "HEAD",
+        iters,
+        avg_us: total.as_micros() as f64 / iters as f64,
+        p50_us: timings[iters / 2].as_micros() as f64,
+        p99_us: timings[(iters * 99) / 100].as_micros() as f64,
+        ops_per_sec: iters as f64 / total.as_secs_f64(),
+    });
+
+    // LIST 100 objects (50 iters)
+    let iters = 50;
+    let mut timings = Vec::with_capacity(iters);
+    for _ in 0..iters {
+        let t = Instant::now();
+        let _ = client.list_objects(bucket, "meta/", "").await;
+        timings.push(t.elapsed());
+    }
+    timings.sort();
+    let total: Duration = timings.iter().sum();
+    results.push(MetaResult {
+        server: name.to_string(),
+        op: "LIST",
+        iters,
+        avg_us: total.as_micros() as f64 / iters as f64,
+        p50_us: timings[iters / 2].as_micros() as f64,
+        p99_us: timings[(iters * 99) / 100].as_micros() as f64,
+        ops_per_sec: iters as f64 / total.as_secs_f64(),
+    });
+
+    // DELETE (100 iters)
+    let iters = 100;
+    let mut timings = Vec::with_capacity(iters);
+    for i in 0..iters {
+        let t = Instant::now();
+        let _ = client
+            .delete_object(bucket, &format!("meta/{}", i))
+            .await;
+        timings.push(t.elapsed());
+    }
+    timings.sort();
+    let total: Duration = timings.iter().sum();
+    results.push(MetaResult {
+        server: name.to_string(),
+        op: "DELETE",
+        iters,
+        avg_us: total.as_micros() as f64 / iters as f64,
+        p50_us: timings[iters / 2].as_micros() as f64,
+        p99_us: timings[(iters * 99) / 100].as_micros() as f64,
+        ops_per_sec: iters as f64 / total.as_secs_f64(),
+    });
+
+    results
+}
+
+fn print_meta_matrix(results: &[MetaResult]) {
+    eprintln!();
+    eprintln!("--- Metadata ops (aws-sdk-s3, 4KB objects) ---");
+    eprintln!(
+        "| {:12} | {:6} | {:>6} ops | {:>10} | {:>10} | {:>10} | {:>10} |",
+        "Server", "OP", "", "avg", "p50", "p99", "obj/sec"
+    );
+    eprintln!(
+        "|{:-<14}|{:-<8}|{:-<10}|{:-<12}|{:-<12}|{:-<12}|{:-<12}|",
+        "", "", "", "", "", "", ""
+    );
+
+    for r in results {
+        eprintln!(
+            "| {:<12} | {:<6} | {:>6} ops | {:>8.0}us | {:>8.0}us | {:>8.0}us | {:>8.0}    |",
+            r.server, r.op, r.iters, r.avg_us, r.p50_us, r.p99_us, r.ops_per_sec,
+        );
+    }
+}
+
 async fn matrix_sdk(
     name: &str,
     client: &abixio_ui::s3::client::S3Client,
@@ -889,24 +1478,42 @@ async fn matrix_sdk(
         // warmup: 3 PUT + 3 GET (fairness: same warmup for all clients)
         for i in 0..3 {
             let data = tokio::fs::read(&srcpath).await.unwrap();
-            let _ = client.put_object_unsigned(bucket, &format!("w_{}_{}", label, i), data, "application/octet-stream").await;
+            let _ = client
+                .put_object_unsigned(
+                    bucket,
+                    &format!("w_{}_{}", label, i),
+                    data,
+                    "application/octet-stream",
+                )
+                .await;
         }
         for i in 0..3 {
-            let _ = client.download_object_to_file(bucket, &format!("w_{}_{}", label, i), &sinkpath).await;
+            let _ = client
+                .download_object_to_file(bucket, &format!("w_{}_{}", label, i), &sinkpath)
+                .await;
         }
 
         // PUT: read from disk each iteration (fairness: same as mc/rclone reading temp file)
         let start = Instant::now();
         for i in 0..iters {
             let data = tokio::fs::read(&srcpath).await.unwrap();
-            let _ = client.put_object_unsigned(bucket, &format!("{}/{}", label, i), data, "application/octet-stream").await;
+            let _ = client
+                .put_object_unsigned(
+                    bucket,
+                    &format!("{}/{}", label, i),
+                    data,
+                    "application/octet-stream",
+                )
+                .await;
         }
         let put_elapsed = start.elapsed();
 
         // GET: write to disk each iteration (fairness: same as mc/rclone writing to sink file)
         let start = Instant::now();
         for i in 0..iters {
-            let _ = client.download_object_to_file(bucket, &format!("{}/{}", label, i), &sinkpath).await;
+            let _ = client
+                .download_object_to_file(bucket, &format!("{}/{}", label, i), &sinkpath)
+                .await;
         }
         let get_elapsed = start.elapsed();
 
@@ -924,67 +1531,54 @@ async fn matrix_sdk(
     results
 }
 
-fn matrix_mc(
+fn matrix_aws_cli(
     server_name: &str,
-    mc: &str,
+    aws: &AwsCliHarness,
+    endpoint: &str,
+    bucket: &str,
     sizes: &[(&str, usize, usize)],
-    _overhead: Duration,
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
-    let bucket = server_name.to_lowercase(); // S3 bucket names must be lowercase
+    aws.create_bucket(endpoint, bucket);
 
     for &(label, size_bytes, iters) in sizes {
-        // write payload to a persistent temp file (NamedTempFile can get deleted too early on Windows)
         let tmpdir = tempfile::TempDir::new().unwrap();
-        let tmppath = tmpdir.path().join("payload.dat");
-        std::fs::write(&tmppath, &vec![0x42u8; size_bytes]).unwrap();
-        let tmppath = tmppath.to_str().unwrap().to_string();
+        let srcpath = tmpdir.path().join("payload.dat");
+        std::fs::write(&srcpath, vec![0x42u8; size_bytes]).unwrap();
+        let sinkdir = tempfile::TempDir::new().unwrap();
 
-        // verify file exists and has right size
-        let meta = std::fs::metadata(&tmppath).unwrap();
-        assert_eq!(meta.len(), size_bytes as u64, "temp file wrong size");
-        let sink = tempfile::NamedTempFile::new().unwrap();
-        let sinkpath = sink.path().to_str().unwrap().to_string();
+        let iters = if size_bytes >= 1024 * 1024 * 1024 {
+            iters.min(3)
+        } else if size_bytes >= 10 * 1024 * 1024 {
+            iters.min(5)
+        } else {
+            iters.min(30)
+        };
 
-        let iters = if size_bytes >= 1024 * 1024 * 1024 { iters.min(3) }
-                    else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
-                    else { iters.min(30) };
-
-        // warmup: 3 PUT + 3 GET (fairness: same as aws-sdk-s3)
         for i in 0..3 {
-            let _ = Command::new(mc)
-                .args(["cp", &tmppath, &format!("mx/bench{}/{}/w{}", bucket, label, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            aws.put_object(endpoint, bucket, &format!("{}/w{}", label, i), &srcpath);
         }
         for i in 0..3 {
-            let _ = Command::new(mc)
-                .args(["cp", &format!("mx/bench{}/{}/w{}", bucket, label, i), &sinkpath])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let sinkpath = sinkdir.path().join(format!("warmup-{}.dat", i));
+            aws.get_object(endpoint, bucket, &format!("{}/w{}", label, i), &sinkpath);
         }
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new(mc)
-                .args(["cp", &tmppath, &format!("mx/bench{}/{}/{}", bucket, label, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            aws.put_object(endpoint, bucket, &format!("{}/{}", label, i), &srcpath);
         }
         let put_elapsed = start.elapsed();
 
-        let sinkdir = tempfile::TempDir::new().unwrap();
-        let sinkpath = sinkdir.path().join("out.dat");
-        let sinkpath = sinkpath.to_str().unwrap().to_string();
-
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new(mc)
-                .args(["cp", &format!("mx/bench{}/{}/{}", bucket, label, i), &sinkpath])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let sinkpath = sinkdir.path().join(format!("{}.dat", i));
+            aws.get_object(endpoint, bucket, &format!("{}/{}", label, i), &sinkpath);
         }
         let get_elapsed = start.elapsed();
 
         results.push(MatrixResult {
             server: server_name.to_string(),
-            client: "mc".to_string(),
+            client: "aws-cli".to_string(),
             size: label.to_string(),
             size_bytes,
             put_ops: iters as f64 / put_elapsed.as_secs_f64(),
@@ -999,51 +1593,104 @@ fn matrix_mc(
 fn matrix_rclone(
     server_name: &str,
     rclone: &str,
+    endpoint: &str,
+    ca_bundle_path: &Path,
+    access_key: &str,
+    secret_key: &str,
+    bucket: &str,
     sizes: &[(&str, usize, usize)],
-    _overhead: Duration,
 ) -> Vec<MatrixResult> {
     let mut results = Vec::new();
-    let bucket = server_name.to_lowercase();
+    rclone_mkdir(
+        rclone,
+        endpoint,
+        ca_bundle_path,
+        access_key,
+        secret_key,
+        bucket,
+    );
 
     for &(label, size_bytes, iters) in sizes {
         let tmpdir = tempfile::TempDir::new().unwrap();
-        let tmppath = tmpdir.path().join("payload.dat");
-        std::fs::write(&tmppath, &vec![0x42u8; size_bytes]).unwrap();
-        let tmppath = tmppath.to_str().unwrap().to_string();
+        let srcpath = tmpdir.path().join("payload.dat");
+        std::fs::write(&srcpath, vec![0x42u8; size_bytes]).unwrap();
 
-        let iters = if size_bytes >= 1024 * 1024 * 1024 { iters.min(3) }
-                    else if size_bytes >= 10 * 1024 * 1024 { iters.min(5) }
-                    else { iters.min(30) };
+        let iters = if size_bytes >= 1024 * 1024 * 1024 {
+            iters.min(3)
+        } else if size_bytes >= 10 * 1024 * 1024 {
+            iters.min(5)
+        } else {
+            iters.min(30)
+        };
 
         let sinkdir = tempfile::TempDir::new().unwrap();
-        let sinkpath = sinkdir.path().join("out.dat");
-        let sinkpath = sinkpath.to_str().unwrap().to_string();
 
-        // warmup: 3 PUT + 3 GET (fairness: same as aws-sdk-s3)
         for i in 0..3 {
-            let _ = Command::new(rclone)
-                .args(["copyto", &tmppath, &format!("mx:bench{}/{}/w{}", bucket, label, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let mut cmd = Command::new(rclone);
+            cmd.arg("copyto")
+                .arg(&srcpath)
+                .arg(format!(":s3:{}/{}/w{}", bucket, label, i))
+                .args(rclone_args(
+                    endpoint,
+                    ca_bundle_path,
+                    access_key,
+                    secret_key,
+                ))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            run_status(cmd, "rclone warmup put");
         }
         for i in 0..3 {
-            let _ = Command::new(rclone)
-                .args(["copyto", &format!("mx:bench{}/{}/w{}", bucket, label, i), &sinkpath])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let sinkpath = sinkdir.path().join(format!("warmup-{}.dat", i));
+            let mut cmd = Command::new(rclone);
+            cmd.arg("copyto")
+                .arg(format!(":s3:{}/{}/w{}", bucket, label, i))
+                .arg(&sinkpath)
+                .args(rclone_args(
+                    endpoint,
+                    ca_bundle_path,
+                    access_key,
+                    secret_key,
+                ))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            run_status(cmd, "rclone warmup get");
         }
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new(rclone)
-                .args(["copyto", &tmppath, &format!("mx:bench{}/{}/{}", bucket, label, i)])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let mut cmd = Command::new(rclone);
+            cmd.arg("copyto")
+                .arg(&srcpath)
+                .arg(format!(":s3:{}/{}/{}", bucket, label, i))
+                .args(rclone_args(
+                    endpoint,
+                    ca_bundle_path,
+                    access_key,
+                    secret_key,
+                ))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            run_status(cmd, "rclone put");
         }
         let put_elapsed = start.elapsed();
 
         let start = Instant::now();
         for i in 0..iters {
-            let _ = Command::new(rclone)
-                .args(["copyto", &format!("mx:bench{}/{}/{}", bucket, label, i), &sinkpath])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let sinkpath = sinkdir.path().join(format!("{}.dat", i));
+            let mut cmd = Command::new(rclone);
+            cmd.arg("copyto")
+                .arg(format!(":s3:{}/{}/{}", bucket, label, i))
+                .arg(&sinkpath)
+                .args(rclone_args(
+                    endpoint,
+                    ca_bundle_path,
+                    access_key,
+                    secret_key,
+                ))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            run_status(cmd, "rclone get");
         }
         let get_elapsed = start.elapsed();
 
@@ -1074,12 +1721,17 @@ fn print_matrix(results: &[MatrixResult]) {
     for size_label in &["4KB", "10MB", "1GB"] {
         eprintln!();
         eprintln!("--- {} ---", size_label);
-        eprintln!("| {:12} | {:10} | {:>24} | {:>24} |", "Server", "Client", "PUT", "GET");
+        eprintln!(
+            "| {:12} | {:10} | {:>24} | {:>24} |",
+            "Server", "Client", "PUT", "GET"
+        );
         eprintln!("|{:-<14}|{:-<12}|{:-<26}|{:-<26}|", "", "", "", "");
 
         for r in results.iter().filter(|r| r.size == *size_label) {
-            eprintln!("| {:<12} | {:<10} | {} | {} |",
-                r.server, r.client,
+            eprintln!(
+                "| {:<12} | {:<10} | {} | {} |",
+                r.server,
+                r.client,
                 format_cell(r.put_ops, r.put_avg_us, r.size_bytes),
                 format_cell(r.get_ops, r.get_avg_us, r.size_bytes),
             );
@@ -1093,7 +1745,8 @@ async fn bench_matrix() {
     eprintln!();
     eprintln!("=============================================================");
     eprintln!("  COMPREHENSIVE BENCHMARK MATRIX");
-    eprintln!("  3 servers x 2 clients x 3 sizes x 2 ops");
+    eprintln!("  3 servers x 3 clients x 3 sizes x 2 ops");
+    eprintln!("  Canonical mode: HTTPS + SigV4 + UNSIGNED-PAYLOAD");
     eprintln!("=============================================================");
 
     let sizes: Vec<(&str, usize, usize)> = vec![
@@ -1102,118 +1755,187 @@ async fn bench_matrix() {
         ("1GB", 1024 * 1024 * 1024, 3),
     ];
 
-    let mc_bin = find_binary("MC", r"C:\tools\mc.exe");
-    let rclone_bin = find_binary("RCLONE", r"C:\tools\rclone.exe");
+    let tls = TlsMaterial::generate();
+    let aws_path = expect_binary(
+        "AWS",
+        r"C:\Program Files\Amazon\AWSCLIV2\aws.exe",
+        "AWS CLI",
+    );
+    let rclone_bin = expect_binary("RCLONE", r"C:\tools\rclone.exe", "rclone");
+    let rustfs_bin = expect_binary("RUSTFS_BIN", r"C:\tools\rustfs.exe", "RustFS");
+    let minio_bin = expect_binary("MINIO_BIN", r"C:\tools\minio.exe", "MinIO");
+    let aws = AwsCliHarness::new(aws_path.clone(), &tls.ca_cert_path, "test", "testsecret");
     let mut all_results: Vec<MatrixResult> = Vec::new();
+    let mut all_meta: Vec<MetaResult> = Vec::new();
 
-    // --- AbixIO ---
-    eprintln!("\nstarting AbixIO...");
-    let abixio = AbixioServer::builder().volume_count(1).no_auth(false).start();
-    let abixio_endpoint = abixio.endpoint();
+    // --- AbixIO (file, log, pool tiers) ---
+    // Each server is wrapped in its own block so the previous one is dropped
+    // (child killed, TempDir reclaimed) before the next one starts. Without
+    // this, three servers' worth of 1GB PUTs (~55GB) live on disk at once and
+    // the run hits ENOSPC during the MinIO 1GB stage. Sequential anyway, so
+    // dropping early is purely a disk-budget fix and changes no measurements.
+    //
+    // AbixIO is benched three times -- once per write tier -- because the
+    // matrix should show what each storage path actually delivers end-to-end.
+    // RustFS and MinIO are benched once each, after.
+    for tier in ["file", "log", "pool"] {
+        let label_owned = format!("AbixIO-{}", tier);
+        let label: &str = &label_owned;
+        eprintln!("\nstarting {} ({})...", label, tier);
+        let abixio = AbixioServer::builder()
+            .volume_count(1)
+            .no_auth(false)
+            .tls(&tls)
+            .write_tier(tier)
+            .start();
+        let abixio_endpoint = abixio.endpoint();
 
-    eprintln!("  aws-sdk-s3...");
-    all_results.extend(matrix_sdk("AbixIO", &abixio.s3_client(), "matrix", &sizes).await);
-
-    if let Some(ref mc) = mc_bin {
-        eprintln!("  mc...");
-        let _ = Command::new(mc)
-            .args(["alias", "set", "mx", &abixio_endpoint, "test", "testsecret", "--api", "S3v4"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        let _ = Command::new(mc).args(["mb", "mx/benchabixio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-        let oh = measure_cli_overhead(mc, &["ls", "mx/benchabixio"], 10);
-        eprintln!("    mc overhead: {:.1}ms", oh.as_secs_f64() * 1000.0);
-        all_results.extend(matrix_mc("AbixIO", mc, &sizes, oh));
-    }
-
-    if let Some(ref rclone) = rclone_bin {
+        eprintln!("  aws-sdk-s3...");
+        all_results.extend(matrix_sdk(label, &abixio.s3_client(), "matrix", &sizes).await);
+        eprintln!("  aws-cli...");
+        eprintln!(
+            "    overhead: {:.1}ms",
+            aws.measure_overhead(&abixio_endpoint, 10).as_secs_f64() * 1000.0
+        );
+        all_results.extend(matrix_aws_cli(
+            label,
+            &aws,
+            &abixio_endpoint,
+            "matrix-aws",
+            &sizes,
+        ));
         eprintln!("  rclone...");
-        let _ = Command::new(rclone)
-            .args(["config", "create", "mx", "s3", "provider", "Other",
-                   "endpoint", &abixio_endpoint, "access_key_id", "test",
-                   "secret_access_key", "testsecret", "env_auth", "false"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
-        let oh = measure_cli_overhead(rclone, &["lsd", "mx:"], 10);
-        eprintln!("    rclone overhead: {:.1}ms", oh.as_secs_f64() * 1000.0);
-        all_results.extend(matrix_rclone("AbixIO", rclone, &sizes, oh));
-    }
+        let rclone_overhead = measure_cli_overhead(
+            &rclone_bin,
+            &[
+                "lsd",
+                ":s3:",
+                "--s3-provider",
+                "Other",
+                "--s3-endpoint",
+                &abixio_endpoint,
+                "--s3-access-key-id",
+                "test",
+                "--s3-secret-access-key",
+                "testsecret",
+                "--s3-force-path-style",
+                "--s3-use-unsigned-payload",
+                "true",
+                "--ca-cert",
+                tls.ca_cert_path.to_str().unwrap(),
+            ],
+            10,
+        );
+        eprintln!(
+            "    overhead: {:.1}ms",
+            rclone_overhead.as_secs_f64() * 1000.0
+        );
+        all_results.extend(matrix_rclone(
+            label,
+            &rclone_bin,
+            &abixio_endpoint,
+            &tls.ca_cert_path,
+            "test",
+            "testsecret",
+            "matrix-rclone",
+            &sizes,
+        ));
+        eprintln!("  metadata ops...");
+        all_meta.extend(matrix_sdk_meta(label, &abixio.s3_client(), "matrix-meta").await);
+    } // <-- each abixio dropped here at end of iteration, TempDir removed
 
     // --- RustFS ---
-    if let Some(rustfs) = ExternalServer::start_rustfs(11701) {
+    {
         eprintln!("\nstarting RustFS...");
-        let rustfs_endpoint = format!("http://127.0.0.1:{}", rustfs.port);
-        let client = rustfs.s3_client(("benchuser", "benchpass"));
+        let rustfs = ExternalServer::start_rustfs_tls(&rustfs_bin, 11701, &tls)
+            .unwrap_or_else(|| panic!("failed to start RustFS with TLS"));
+        let rustfs_endpoint = rustfs.endpoint();
+        let rustfs_client = rustfs.s3_client(("benchuser", "benchpass"));
+        let rustfs_aws = AwsCliHarness::new(
+            aws_path.clone(),
+            &tls.ca_cert_path,
+            "benchuser",
+            "benchpass",
+        );
 
         eprintln!("  aws-sdk-s3...");
-        all_results.extend(matrix_sdk("RustFS", &client, "matrix", &sizes).await);
-
-        if let Some(ref mc) = mc_bin {
-            eprintln!("  mc...");
-            let _ = Command::new(mc)
-                .args(["alias", "set", "mx", &rustfs_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let _ = Command::new(mc).args(["mb", "mx/benchrustfs"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let oh = measure_cli_overhead(mc, &["ls", "mx/benchrustfs"], 10);
-            all_results.extend(matrix_mc("RustFS", mc, &sizes, oh));
-        }
-
-        if let Some(ref rclone) = rclone_bin {
-            eprintln!("  rclone...");
-            let _ = Command::new(rclone)
-                .args(["config", "create", "mx", "s3", "provider", "Other",
-                       "endpoint", &rustfs_endpoint, "access_key_id", "benchuser",
-                       "secret_access_key", "benchpass", "env_auth", "false"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let oh = measure_cli_overhead(rclone, &["lsd", "mx:"], 10);
-            all_results.extend(matrix_rclone("RustFS", rclone, &sizes, oh));
-        }
-    } else {
-        eprintln!("\nRustFS not found, skipping");
-    }
+        all_results.extend(matrix_sdk("RustFS", &rustfs_client, "matrix", &sizes).await);
+        eprintln!("  aws-cli...");
+        eprintln!(
+            "    overhead: {:.1}ms",
+            rustfs_aws
+                .measure_overhead(&rustfs_endpoint, 10)
+                .as_secs_f64()
+                * 1000.0
+        );
+        all_results.extend(matrix_aws_cli(
+            "RustFS",
+            &rustfs_aws,
+            &rustfs_endpoint,
+            "matrix-aws",
+            &sizes,
+        ));
+        eprintln!("  rclone...");
+        all_results.extend(matrix_rclone(
+            "RustFS",
+            &rclone_bin,
+            &rustfs_endpoint,
+            &tls.ca_cert_path,
+            "benchuser",
+            "benchpass",
+            "matrix-rclone",
+            &sizes,
+        ));
+        eprintln!("  metadata ops...");
+        all_meta.extend(matrix_sdk_meta("RustFS", &rustfs_client, "matrix-meta").await);
+    } // <-- rustfs dropped here
 
     // --- MinIO ---
-    if let Some(minio) = ExternalServer::start_minio(11703) {
+    {
         eprintln!("\nstarting MinIO...");
-        let minio_endpoint = format!("http://127.0.0.1:{}", minio.port);
-        let client = minio.s3_client(("benchuser", "benchpass"));
+        let minio = ExternalServer::start_minio_tls(&minio_bin, 11703, &tls)
+            .unwrap_or_else(|| panic!("failed to start MinIO with TLS"));
+        let minio_endpoint = minio.endpoint();
+        let minio_client = minio.s3_client(("benchuser", "benchpass"));
+        let minio_aws = AwsCliHarness::new(aws_path, &tls.ca_cert_path, "benchuser", "benchpass");
 
         eprintln!("  aws-sdk-s3...");
-        all_results.extend(matrix_sdk("MinIO", &client, "matrix", &sizes).await);
-
-        if let Some(ref mc) = mc_bin {
-            eprintln!("  mc...");
-            let _ = Command::new(mc)
-                .args(["alias", "set", "mx", &minio_endpoint, "benchuser", "benchpass", "--api", "S3v4"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let _ = Command::new(mc).args(["mb", "mx/benchminio"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let oh = measure_cli_overhead(mc, &["ls", "mx/benchminio"], 10);
-            all_results.extend(matrix_mc("MinIO", mc, &sizes, oh));
-        }
-
-        if let Some(ref rclone) = rclone_bin {
-            eprintln!("  rclone...");
-            let _ = Command::new(rclone)
-                .args(["config", "create", "mx", "s3", "provider", "Other",
-                       "endpoint", &minio_endpoint, "access_key_id", "benchuser",
-                       "secret_access_key", "benchpass", "env_auth", "false"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let oh = measure_cli_overhead(rclone, &["lsd", "mx:"], 10);
-            all_results.extend(matrix_rclone("MinIO", rclone, &sizes, oh));
-        }
-    } else {
-        eprintln!("\nMinIO not found, skipping");
-    }
-
-    if let Some(ref mc) = mc_bin {
-        let _ = Command::new(mc).args(["alias", "rm", "mx"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
-    if let Some(ref rclone) = rclone_bin {
-        let _ = Command::new(rclone).args(["config", "delete", "mx"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
+        all_results.extend(matrix_sdk("MinIO", &minio_client, "matrix", &sizes).await);
+        eprintln!("  aws-cli...");
+        eprintln!(
+            "    overhead: {:.1}ms",
+            minio_aws
+                .measure_overhead(&minio_endpoint, 10)
+                .as_secs_f64()
+                * 1000.0
+        );
+        all_results.extend(matrix_aws_cli(
+            "MinIO",
+            &minio_aws,
+            &minio_endpoint,
+            "matrix-aws",
+            &sizes,
+        ));
+        eprintln!("  rclone...");
+        all_results.extend(matrix_rclone(
+            "MinIO",
+            &rclone_bin,
+            &minio_endpoint,
+            &tls.ca_cert_path,
+            "benchuser",
+            "benchpass",
+            "matrix-rclone",
+            &sizes,
+        ));
+        eprintln!("  metadata ops...");
+        all_meta.extend(matrix_sdk_meta("MinIO", &minio_client, "matrix-meta").await);
+    } // <-- minio dropped here
 
     eprintln!();
     eprintln!("=============================================================");
     eprintln!("  RESULTS");
     eprintln!("=============================================================");
     print_matrix(&all_results);
+    print_meta_matrix(&all_meta);
     eprintln!();
 }

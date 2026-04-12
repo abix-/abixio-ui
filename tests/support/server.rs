@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 use abixio_ui::abixio::client::AdminClient;
 use abixio_ui::s3::client::S3Client;
 
+use super::RUNTIME;
+use super::tls::TlsMaterial;
+
 pub fn find_abixio_binary() -> PathBuf {
     if let Ok(path) = std::env::var("ABIXIO_BIN") {
         let p = PathBuf::from(&path);
@@ -39,6 +42,7 @@ pub struct AbixioServer {
     child: Child,
     port: u16,
     temp_dir: PathBuf,
+    tls_ca_pem: Option<Vec<u8>>,
 }
 
 impl AbixioServer {
@@ -49,29 +53,51 @@ impl AbixioServer {
             scan_interval: "10m".to_string(),
             heal_interval: "24h".to_string(),
             mrf_workers: 2,
+            tls: None,
+            write_tier: None,
         }
     }
 
     pub fn endpoint(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+        let scheme = if self.tls_ca_pem.is_some() {
+            "https"
+        } else {
+            "http"
+        };
+        format!("{}://127.0.0.1:{}", scheme, self.port)
     }
 
     pub fn s3_client(&self) -> Arc<S3Client> {
         Arc::new(
-            S3Client::new(&self.endpoint(), Some(("test", "testsecret")), "us-east-1")
-                .expect("create S3 client"),
+            S3Client::new_with_ca_pem(
+                &self.endpoint(),
+                Some(("test", "testsecret")),
+                "us-east-1",
+                self.tls_ca_pem.as_deref(),
+            )
+            .expect("create S3 client"),
         )
     }
 
     pub fn s3_client_anonymous(&self) -> Arc<S3Client> {
         Arc::new(
-            S3Client::anonymous(&self.endpoint())
-                .expect("create anonymous S3 client"),
+            S3Client::new_with_ca_pem(
+                &self.endpoint(),
+                None,
+                "us-east-1",
+                self.tls_ca_pem.as_deref(),
+            )
+            .expect("create anonymous S3 client"),
         )
     }
 
     pub fn admin_client(&self) -> Arc<AdminClient> {
-        Arc::new(AdminClient::new(&self.endpoint(), None, "us-east-1"))
+        Arc::new(AdminClient::new_with_ca_pem(
+            &self.endpoint(),
+            None,
+            "us-east-1",
+            self.tls_ca_pem.as_deref(),
+        ))
     }
 }
 
@@ -89,6 +115,8 @@ pub struct AbixioServerBuilder {
     scan_interval: String,
     heal_interval: String,
     mrf_workers: usize,
+    tls: Option<(String, String, Vec<u8>)>,
+    write_tier: Option<String>,
 }
 
 impl AbixioServerBuilder {
@@ -118,6 +146,25 @@ impl AbixioServerBuilder {
     #[allow(dead_code)]
     pub fn mrf_workers(mut self, n: usize) -> Self {
         self.mrf_workers = n;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn tls(mut self, tls: &TlsMaterial) -> Self {
+        self.tls = Some((
+            tls.leaf_cert_path.to_string_lossy().to_string(),
+            tls.leaf_key_path.to_string_lossy().to_string(),
+            tls.ca_cert_pem.clone(),
+        ));
+        self
+    }
+
+    /// Set the write tier the abixio binary will use: `file` (default
+    /// in the binary), `log`, or `pool`. Passes `--write-tier <tier>` to
+    /// the abixio process.
+    #[allow(dead_code)]
+    pub fn write_tier(mut self, tier: &str) -> Self {
+        self.write_tier = Some(tier.to_string());
         self
     }
 
@@ -156,57 +203,72 @@ impl AbixioServerBuilder {
             cmd.arg("--no-auth");
         }
 
-        let child = cmd.spawn().unwrap_or_else(|e| {
-            panic!("failed to spawn abixio at {}: {}", binary.display(), e)
-        });
+        if let Some((cert, key, _)) = &self.tls {
+            cmd.arg("--tls-cert").arg(cert).arg("--tls-key").arg(key);
+        }
+
+        if let Some(tier) = &self.write_tier {
+            cmd.arg("--write-tier").arg(tier);
+        }
+
+        let child = cmd
+            .spawn()
+            .unwrap_or_else(|e| panic!("failed to spawn abixio at {}: {}", binary.display(), e));
 
         let mut server = AbixioServer {
             child,
             port,
             temp_dir,
+            tls_ca_pem: self.tls.map(|(_, _, ca_pem)| ca_pem),
         };
 
-        wait_for_ready(port, &mut server);
+        wait_for_ready(&mut server);
         server
     }
 }
 
-fn wait_for_ready(port: u16, server: &mut AbixioServer) {
+fn wait_for_ready(server: &mut AbixioServer) {
     let deadline = Instant::now() + Duration::from_secs(15);
-    let addr = format!("127.0.0.1:{}", port);
-    let request = format!(
-        "GET /_admin/status HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        addr
-    );
+    let url = format!("{}/_admin/status", server.endpoint());
+    let mut client_builder = reqwest::Client::builder();
+    if let Some(ca_pem) = server.tls_ca_pem.as_deref() {
+        let cert = reqwest::Certificate::from_pem(ca_pem).expect("parse CA cert");
+        client_builder = client_builder.add_root_certificate(cert);
+    }
+    let client = client_builder.build().expect("build readiness client");
 
     while Instant::now() < deadline {
         if let Some(status) = server.child.try_wait().ok().flatten() {
             panic!(
                 "abixio on port {} exited early with status: {}",
-                port, status
+                server.port, status
             );
         }
 
-        if let Ok(mut stream) =
-            std::net::TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(1))
-        {
-            use std::io::{Read, Write};
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-            if stream.write_all(request.as_bytes()).is_ok() {
-                let mut buf = [0u8; 256];
-                if let Ok(n) = stream.read(&mut buf) {
-                    let response = String::from_utf8_lossy(&buf[..n]);
-                    if response.contains("200") {
-                        return;
+        // block_on on a fresh OS thread so this works from both sync callers
+        // and `#[tokio::test]` workers (can't nest block_on inside a runtime).
+        let client_ref = &client;
+        let url_ref = &url;
+        let ready = std::thread::scope(|s| {
+            s.spawn(move || {
+                RUNTIME.block_on(async move {
+                    match client_ref.get(url_ref).send().await {
+                        Ok(resp) => resp.status().is_success(),
+                        Err(_) => false,
                     }
-                }
-            }
+                })
+            })
+            .join()
+            .unwrap()
+        });
+        if ready {
+            return;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
 
     panic!(
         "abixio on port {} did not become ready within 15 seconds",
-        port
+        server.port
     );
 }

@@ -1,8 +1,30 @@
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 const MB: f64 = 1024.0 * 1024.0;
+
+static BENCH_TMP_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_tmp_dir(dir: &str) {
+    let _ = BENCH_TMP_DIR.set(PathBuf::from(dir));
+}
+
+pub fn make_tmp_dir() -> tempfile::TempDir {
+    match BENCH_TMP_DIR.get() {
+        Some(dir) => tempfile::TempDir::new_in(dir).unwrap(),
+        None => tempfile::TempDir::new().unwrap(),
+    }
+}
+
+pub fn make_tmp_dir_opt() -> Option<tempfile::TempDir> {
+    match BENCH_TMP_DIR.get() {
+        Some(dir) => tempfile::TempDir::new_in(dir).ok(),
+        None => tempfile::TempDir::new().ok(),
+    }
+}
 
 pub struct BenchResult {
     pub layer: String,

@@ -286,7 +286,7 @@ pub struct ExternalServer {
 impl ExternalServer {
     pub fn start_rustfs(bin: &str, port: u16) -> Option<Self> {
         if !Path::new(bin).exists() { return None; }
-        let tmp = tempfile::TempDir::new().ok()?;
+        let tmp = crate::bench::stats::make_tmp_dir_opt()?;
         let console_port = port + 1;
         let child = Command::new(bin)
             .args([
@@ -306,7 +306,7 @@ impl ExternalServer {
 
     pub fn start_rustfs_tls(bin: &str, port: u16, tls: &TlsMaterial) -> Option<Self> {
         if !Path::new(bin).exists() { return None; }
-        let tmp = tempfile::TempDir::new().ok()?;
+        let tmp = crate::bench::stats::make_tmp_dir_opt()?;
         let console_port = port + 1;
         let child = Command::new(bin)
             .args([
@@ -327,7 +327,7 @@ impl ExternalServer {
 
     pub fn start_minio(bin: &str, port: u16) -> Option<Self> {
         if !Path::new(bin).exists() { return None; }
-        let tmp = tempfile::TempDir::new().ok()?;
+        let tmp = crate::bench::stats::make_tmp_dir_opt()?;
         let console_port = port + 1;
         let child = Command::new(bin)
             .args([
@@ -347,7 +347,7 @@ impl ExternalServer {
 
     pub fn start_minio_tls(bin: &str, port: u16, tls: &TlsMaterial) -> Option<Self> {
         if !Path::new(bin).exists() { return None; }
-        let tmp = tempfile::TempDir::new().ok()?;
+        let tmp = crate::bench::stats::make_tmp_dir_opt()?;
         let console_port = port + 1;
         let child = Command::new(bin)
             .args([

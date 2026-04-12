@@ -19,7 +19,7 @@ use super::stats::{human_size, iters_for_size, BenchResult};
 
 pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchResult> {
     let mut results = Vec::new();
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = super::stats::make_tmp_dir();
 
     eprintln!("--- L5: Raw disk I/O ---");
 

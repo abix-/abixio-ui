@@ -61,7 +61,7 @@ fn print_row(name: &str, samples: &[Duration], size: usize) -> SimpleStats {
 }
 
 fn setup(n: usize) -> (tempfile::TempDir, Vec<std::path::PathBuf>) {
-    let base = tempfile::TempDir::new().unwrap();
+    let base = super::stats::make_tmp_dir();
     let mut paths = Vec::new();
     for i in 0..n {
         let p = base.path().join(format!("d{}", i));

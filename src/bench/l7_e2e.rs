@@ -185,7 +185,7 @@ async fn run_server(
             let label = human_size(size);
 
             // write payload to disk (fairness: all clients read from disk)
-            let tmpdir = tempfile::TempDir::new().unwrap();
+            let tmpdir = super::stats::make_tmp_dir();
             let srcpath = tmpdir.path().join("payload.dat");
             let sinkpath = tmpdir.path().join("out.dat");
             std::fs::write(&srcpath, vec![0x42u8; size]).unwrap();
@@ -369,7 +369,7 @@ async fn run_server(
                 if !has(&args.ops, "PUT") && !has(&args.ops, "GET") { continue; }
                 let iters = args.iters.unwrap_or_else(|| iters_for_size(size));
                 let label = human_size(size);
-                let tmpdir = tempfile::TempDir::new().unwrap();
+                let tmpdir = super::stats::make_tmp_dir();
                 let srcpath = tmpdir.path().join("payload.dat");
                 std::fs::write(&srcpath, vec![0x42u8; size]).unwrap();
 
@@ -392,7 +392,7 @@ async fn run_server(
                 }
 
                 if has(&args.ops, "GET") {
-                    let sinkdir = tempfile::TempDir::new().unwrap();
+                    let sinkdir = super::stats::make_tmp_dir();
                     let mut timings = Vec::with_capacity(iters);
                     for i in 0..iters {
                         let sinkpath = sinkdir.path().join(format!("{}.dat", i));
@@ -447,7 +447,7 @@ async fn run_server(
                 if !has(&args.ops, "PUT") && !has(&args.ops, "GET") { continue; }
                 let iters = args.iters.unwrap_or_else(|| iters_for_size(size));
                 let label = human_size(size);
-                let tmpdir = tempfile::TempDir::new().unwrap();
+                let tmpdir = super::stats::make_tmp_dir();
                 let srcpath = tmpdir.path().join("payload.dat");
                 std::fs::write(&srcpath, vec![0x42u8; size]).unwrap();
 
@@ -477,7 +477,7 @@ async fn run_server(
                 }
 
                 if has(&args.ops, "GET") {
-                    let sinkdir = tempfile::TempDir::new().unwrap();
+                    let sinkdir = super::stats::make_tmp_dir();
                     let mut timings = Vec::with_capacity(iters);
                     for i in 0..iters {
                         let sinkpath = sinkdir.path().join(format!("{}.dat", i));

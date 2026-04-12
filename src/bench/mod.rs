@@ -60,6 +60,10 @@ pub struct BenchArgs {
     /// Compare against a baseline JSON file
     #[arg(long)]
     pub baseline: Option<String>,
+
+    /// Temp directory for benchmark files (exclude from antivirus for accurate results)
+    #[arg(long)]
+    pub tmp_dir: Option<String>,
 }
 
 fn has(list: &[String], val: &str) -> bool {
@@ -84,10 +88,18 @@ fn write_configs(write_paths: &[String], write_cache: &str) -> Vec<(String, bool
 }
 
 pub async fn run(args: BenchArgs) {
+    if let Some(dir) = &args.tmp_dir {
+        std::fs::create_dir_all(dir).ok();
+        stats::set_tmp_dir(dir);
+    }
+
     let sizes: Vec<usize> = args.sizes.iter().map(|s| parse_size(s)).collect();
     let mut results = Vec::new();
 
     eprintln!("abixio-ui bench");
+    if let Some(dir) = &args.tmp_dir {
+        eprintln!("  tmp-dir:     {}", dir);
+    }
     eprintln!("  sizes:       {:?}", args.sizes);
     eprintln!("  layers:      {:?}", args.layers);
     eprintln!("  write-paths: {:?}", args.write_paths);

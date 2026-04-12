@@ -31,7 +31,7 @@ pub async fn run(
     iters_override: Option<usize>,
 ) -> Vec<BenchResult> {
     let mut results = Vec::new();
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = super::stats::make_tmp_dir();
     let disk_path = tmp.path().join("d0");
     std::fs::create_dir_all(&disk_path).unwrap();
 

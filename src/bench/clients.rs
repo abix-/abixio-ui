@@ -40,7 +40,7 @@ pub struct AwsCliHarness {
 
 impl AwsCliHarness {
     pub fn new(aws: String, ca_bundle_path: &Path, access_key: &str, secret_key: &str) -> Self {
-        let temp = tempfile::TempDir::new().expect("create aws cli tempdir");
+        let temp = crate::bench::stats::make_tmp_dir();
         let config_path = temp.path().join("config");
         let credentials_path = temp.path().join("credentials");
         let ca_bundle_copy = temp.path().join("ca.pem");

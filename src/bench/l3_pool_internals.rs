@@ -121,7 +121,7 @@ pub async fn run(_iters_override: Option<usize>) -> Vec<BenchResult> {
 // ========================================================================
 
 async fn bench_l0_primitive() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = super::stats::make_tmp_dir();
     let pool_dir = tmp.path().join("preopen");
     let depth = 32u32;
 
@@ -216,7 +216,7 @@ async fn bench_l1_slot_write() {
 
     for &(size, iters) in sizes {
         let data = vec![0x42u8; size];
-        let base = tempfile::TempDir::new().unwrap();
+        let base = super::stats::make_tmp_dir();
         eprintln!();
 
         // A: file_tier_full
@@ -396,7 +396,7 @@ async fn bench_l2_worker_drain() {
     // Scenario 1: cold drain
     eprintln!("  -- Scenario 1: cold drain --");
     for &n in &[32usize, 256, 1024] {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = super::stats::make_tmp_dir();
         let pool = WriteSlotPool::new(&tmp.path().join("pool"), n as u32).await.unwrap();
         let requests = fill_pool_and_build_requests(&pool, n, &tmp.path().join("dest"), false).await;
         let (tx, rx) = tokio::sync::mpsc::channel::<RenameRequest>(n + 16);
@@ -417,7 +417,7 @@ async fn bench_l2_worker_drain() {
     eprintln!("  -- Scenario 2: pre-created dest dirs --");
     {
         let n = 256usize;
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = super::stats::make_tmp_dir();
         let pool = WriteSlotPool::new(&tmp.path().join("pool"), n as u32).await.unwrap();
         let requests = fill_pool_and_build_requests(&pool, n, &tmp.path().join("dest"), true).await;
         let (tx, rx) = tokio::sync::mpsc::channel::<RenameRequest>(n + 16);
@@ -438,7 +438,7 @@ async fn bench_l2_worker_drain() {
     eprintln!("  -- Scenario 3: steady state --");
     for &target_rate in &[500u64, 1000, 1500, 5000] {
         let n_total = 1000usize;
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = super::stats::make_tmp_dir();
         let pool = WriteSlotPool::new(&tmp.path().join("pool"), 64).await.unwrap();
         let (tx, rx) = tokio::sync::mpsc::channel::<RenameRequest>(2048);
         let (_stx, srx) = tokio::sync::watch::channel(false);
@@ -479,7 +479,7 @@ async fn bench_l2_worker_drain() {
     eprintln!("  -- Scenario 4: parallel workers --");
     for &n_workers in &[1usize, 2, 4] {
         let n = 256usize;
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = super::stats::make_tmp_dir();
         let pool = WriteSlotPool::new(&tmp.path().join("pool"), n as u32).await.unwrap();
         let requests = fill_pool_and_build_requests(&pool, n, &tmp.path().join("dest"), false).await;
         let (tx, rx) = tokio::sync::mpsc::channel::<RenameRequest>(n + 16);
@@ -525,7 +525,7 @@ async fn bench_l3_integrated_put() {
 
         // file tier baseline
         {
-            let tmp = tempfile::TempDir::new().unwrap();
+            let tmp = super::stats::make_tmp_dir();
             let disk = LocalVolume::new(tmp.path()).unwrap();
             let mut timings = Vec::with_capacity(iters);
             for i in 0..iters {
@@ -538,7 +538,7 @@ async fn bench_l3_integrated_put() {
 
         // pool
         {
-            let tmp = tempfile::TempDir::new().unwrap();
+            let tmp = super::stats::make_tmp_dir();
             let mut disk = LocalVolume::new(tmp.path()).unwrap();
             disk.enable_write_pool(64).await.unwrap();
             for i in 0..4 { disk.write_shard("bench", &format!("warm_{}", i), &data, &meta).await.unwrap(); }
@@ -604,7 +604,7 @@ async fn bench_l3_5_integration_breakdown() {
     }
     report_breakdown("3. simd_json::serde::to_vec(&mf)", samples);
 
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = super::stats::make_tmp_dir();
     let pool_dir = tmp.path().join("pool_step4");
     let pool = WriteSlotPool::new(&pool_dir, 32).await.unwrap();
     let mut samples = Vec::with_capacity(iters);
@@ -666,7 +666,7 @@ async fn bench_l3_5_integration_breakdown() {
 // ========================================================================
 
 async fn bench_l3_6_write_shard_breakdown() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = super::stats::make_tmp_dir();
     let mut disk_owned = LocalVolume::new(tmp.path()).unwrap();
     disk_owned.enable_write_pool(64).await.unwrap();
     disk_owned.make_bucket("bench").await.unwrap();

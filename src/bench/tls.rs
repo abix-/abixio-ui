@@ -19,7 +19,7 @@ pub struct TlsMaterial {
 
 impl TlsMaterial {
     pub fn generate() -> Self {
-        let temp = TempDir::new().expect("create tls tempdir");
+        let temp = crate::bench::stats::make_tmp_dir();
 
         let mut ca_params = CertificateParams::default();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);

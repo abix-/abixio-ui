@@ -55,7 +55,7 @@ async fn run_disks(
     disk_count: usize,
 ) -> Vec<BenchResult> {
     let mut results = Vec::new();
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = super::stats::make_tmp_dir();
     let mut disk_paths = Vec::new();
     for i in 0..disk_count {
         let p = tmp.path().join(format!("d{}", i));

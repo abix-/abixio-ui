@@ -90,7 +90,7 @@ pub async fn run(args: BenchArgs) {
 
     if has(&args.layers, "L3") {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
-            results.extend(l3_storage::run(&sizes, &wp, wc).await);
+            results.extend(l3_storage::run(&sizes, &wp, wc, args.iters).await);
         }
     }
 

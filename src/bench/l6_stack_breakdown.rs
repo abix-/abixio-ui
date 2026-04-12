@@ -207,7 +207,7 @@ async fn stage_b(size: usize, iters: usize) -> Vec<Duration> {
 // -- Stage C: full s3s stack + NullBackend --
 
 async fn stage_c(size: usize, iters: usize) -> Vec<Duration> {
-    let backends: Vec<Box<dyn Backend>> = vec![Box::new(super::l5_s3proto::NullBackend::new())];
+    let backends: Vec<Box<dyn Backend>> = vec![Box::new(super::l2_s3proto::NullBackend::new())];
     let pool = Arc::new(VolumePool::new(backends).unwrap());
     pool.make_bucket("bench").await.unwrap();
     let (addr, handle) = spawn_stack(Arc::clone(&pool)).await;

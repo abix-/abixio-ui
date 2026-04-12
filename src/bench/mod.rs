@@ -1,9 +1,9 @@
-mod l1_disk;
-mod l2_compute;
+mod l1_http;
+mod l2_s3proto;
 mod l3_storage;
 mod l3_pool_internals;
-mod l4_http;
-mod l5_s3proto;
+mod l4_compute;
+mod l5_disk;
 mod l6_s3storage;
 mod l6_stack_breakdown;
 mod l7_e2e;
@@ -98,11 +98,11 @@ pub async fn run(args: BenchArgs) {
     eprintln!();
 
     if has(&args.layers, "L1") {
-        results.extend(l1_disk::run(&sizes, args.iters).await);
+        results.extend(l1_http::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L2") {
-        results.extend(l2_compute::run(&sizes, args.iters).await);
+        results.extend(l2_s3proto::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L3") {
@@ -115,11 +115,11 @@ pub async fn run(args: BenchArgs) {
     }
 
     if has(&args.layers, "L4") {
-        results.extend(l4_http::run(&sizes, args.iters).await);
+        results.extend(l4_compute::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L5") {
-        results.extend(l5_s3proto::run(&sizes, args.iters).await);
+        results.extend(l5_disk::run(&sizes, args.iters).await);
     }
 
     if has(&args.layers, "L6") {

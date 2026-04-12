@@ -5,7 +5,7 @@ use super::stats::{human_size, iters_for_size, BenchResult};
 pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchResult> {
     let mut results = Vec::new();
 
-    eprintln!("--- L4: HTTP transport ---");
+    eprintln!("--- L1: HTTP transport ---");
 
     // PUT server: reads body, returns 200
     let put_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -56,7 +56,7 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
             timings.push(t.elapsed());
         }
         results.push(BenchResult {
-            layer: "L4".into(),
+            layer: "L1".into(),
             op: "http_put".into(),
             size,
             iters,
@@ -116,7 +116,7 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
             timings.push(t.elapsed());
         }
         results.push(BenchResult {
-            layer: "L4".into(),
+            layer: "L1".into(),
             op: "http_get".into(),
             size,
             iters,

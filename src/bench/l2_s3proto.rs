@@ -12,7 +12,7 @@ use super::stats::{human_size, iters_for_size, BenchResult};
 pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchResult> {
     let mut results = Vec::new();
 
-    eprintln!("--- L5: S3 protocol (NullBackend) ---");
+    eprintln!("--- L2: S3 protocol (NullBackend) ---");
 
     let backends: Vec<Box<dyn Backend>> = vec![Box::new(NullBackend::new())];
     let pool = Arc::new(VolumePool::new(backends).unwrap());
@@ -81,14 +81,14 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
         // PUT
         let mut timings = Vec::with_capacity(iters);
         for i in 0..iters {
-            let url = format!("http://{}/bench/s5_{}_{}", addr, label, i);
+            let url = format!("http://{}/bench/s2_{}_{}", addr, label, i);
             let t = Instant::now();
             let resp = client.put(&url).body(data.clone()).send().await.unwrap();
             timings.push(t.elapsed());
             assert!(resp.status().is_success(), "PUT failed: {}", resp.status());
         }
         results.push(BenchResult {
-            layer: "L5".into(),
+            layer: "L2".into(),
             op: "s3s_put".into(),
             size,
             iters,
@@ -102,14 +102,14 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
         // GET (NullBackend returns empty, but s3s still parses/routes)
         let mut timings = Vec::with_capacity(iters);
         for i in 0..iters {
-            let url = format!("http://{}/bench/s5_{}_{}", addr, label, i);
+            let url = format!("http://{}/bench/s2_{}_{}", addr, label, i);
             let t = Instant::now();
             let resp = client.get(&url).send().await.unwrap();
             let _ = resp.bytes().await.unwrap();
             timings.push(t.elapsed());
         }
         results.push(BenchResult {
-            layer: "L5".into(),
+            layer: "L2".into(),
             op: "s3s_get".into(),
             size,
             iters,

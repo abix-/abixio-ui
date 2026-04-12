@@ -1,3 +1,18 @@
+//! L1: HTTP transport (isolated)
+//!
+//! Measures ONLY the cost of HTTP round-trips over TCP loopback.
+//! No S3 protocol, no storage, no compute.
+//!
+//! How it works:
+//! - Spins up a bare hyper server that consumes PUT bodies and returns 200
+//! - Spins up a second hyper server that returns a sized GET response
+//! - reqwest client sends requests over real TCP (127.0.0.1)
+//! - Times each request round-trip
+//!
+//! What this number means: the floor cost of accepting a TCP connection,
+//! parsing HTTP/1.1, transferring the body, and returning a response.
+//! Nothing in the full stack can be faster than this.
+
 use std::time::Instant;
 
 use super::stats::{human_size, iters_for_size, BenchResult};

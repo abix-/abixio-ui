@@ -1,3 +1,18 @@
+//! L3: Storage pipeline (isolated)
+//!
+//! Measures ONLY the cost of VolumePool put/get. No HTTP, no s3s,
+//! no TCP. Calls the VolumePool API directly in-process.
+//!
+//! How it works:
+//! - Creates a VolumePool with real LocalVolume backends on tmpdir
+//! - Calls put_object / get_object / put_object_stream / get_object_stream
+//!   directly as Rust function calls
+//! - Tests each write path (file/log/pool) and cache state (on/off)
+//!
+//! What this number means: the cost of storage routing, EC encoding,
+//! hashing, placement, and the actual disk write/read. This is the
+//! storage work that sits underneath the S3 protocol layer.
+
 use std::time::Instant;
 
 use abixio::storage::local_volume::LocalVolume;

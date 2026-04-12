@@ -1,3 +1,18 @@
+//! L5: Raw disk I/O (isolated)
+//!
+//! Measures ONLY the cost of filesystem read/write. No storage
+//! pipeline, no HTTP, no hashing, no erasure coding.
+//!
+//! How it works:
+//! - tokio::fs::write to a temp file (page cache, no fsync)
+//! - tokio::fs::write + sync_all to a temp file (forces to physical disk)
+//! - tokio::fs::read from the files written above
+//!
+//! What this number means: the ceiling for any storage tier. No
+//! write path in AbixIO can be faster than the raw filesystem.
+//! The gap between L5 and L3 is the overhead of the storage pipeline
+//! (hashing, EC, metadata, placement).
+
 use std::time::Instant;
 
 use super::stats::{human_size, iters_for_size, BenchResult};

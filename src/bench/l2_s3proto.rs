@@ -1,3 +1,23 @@
+//! L2: S3 protocol (isolated)
+//!
+//! Measures ONLY the cost of s3s header parsing, SigV4 verification,
+//! AbixioS3 dispatch, and VolumePool routing. No TCP, no real storage.
+//!
+//! How it works:
+//! - Creates an s3s service with NullBackend (all writes discarded,
+//!   all reads return empty)
+//! - Each request creates a tokio::io::duplex in-memory pipe
+//! - hyper client and server connect over the pipe (no TCP socket)
+//! - Times each request through s3s dispatch
+//!
+//! Why in-memory pipe instead of TCP: TCP adds ~0.2ms on Windows
+//! loopback. That would contaminate L2 with L1 overhead. The duplex
+//! pipe removes TCP entirely so we measure only s3s.
+//!
+//! What this number means: the per-request cost of S3 protocol
+//! handling. This is overhead that every S3 request pays on top of
+//! whatever storage work the request does.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;

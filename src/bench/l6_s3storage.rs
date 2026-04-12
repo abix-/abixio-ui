@@ -1,3 +1,18 @@
+//! L6: S3 + real storage (integration, NOT isolated)
+//!
+//! This is NOT an isolated layer test. It combines L1 (HTTP) + L2
+//! (S3 protocol) + L3 (storage) into a single in-process stack.
+//!
+//! How it works:
+//! - Creates a full s3s service with real VolumePool backends
+//! - Spins up a hyper server on TCP loopback
+//! - reqwest client sends real S3 PUT/GET requests
+//! - Tests each write path (file/log/pool) and cache state (on/off)
+//!
+//! What this number means: the total in-process cost of an S3
+//! request with real storage, but without the SDK client overhead
+//! or TLS. This is what the server itself costs per request.
+
 use std::sync::Arc;
 use std::time::Instant;
 

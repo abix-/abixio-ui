@@ -1,3 +1,21 @@
+//! L7: Full end-to-end (integration, NOT isolated)
+//!
+//! This is NOT an isolated layer test. It runs the complete stack
+//! including a real server process, real S3 client, TLS, and auth.
+//!
+//! How it works:
+//! - Spawns a real abixio server as a child process (release build)
+//! - Also spawns RustFS and MinIO for competitive comparison
+//! - Uses aws-sdk-s3 (in-process), aws-cli, and rclone as clients
+//! - HTTPS + SigV4 + UNSIGNED-PAYLOAD for fair comparison
+//! - PUT payload read from disk, GET output written to disk
+//! - 20 PUT + 3 GET warmup before timing
+//!
+//! What this number means: what a real user actually sees. This is
+//! the number that matters for product claims and competitive
+//! comparison. The gap between L6 and L7 is the cost of running as
+//! a separate process with TLS and a real SDK client.
+
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Instant;

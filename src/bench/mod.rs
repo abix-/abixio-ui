@@ -6,6 +6,9 @@ mod l5_s3proto;
 mod l6_s3storage;
 mod l7_e2e;
 pub mod stats;
+pub mod tls;
+pub mod servers;
+pub mod clients;
 
 use clap::Parser;
 use stats::{parse_size, print_results};

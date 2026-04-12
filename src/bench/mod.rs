@@ -1,0 +1,112 @@
+mod l1_disk;
+mod l2_compute;
+mod l3_storage;
+mod l4_http;
+mod l5_s3proto;
+mod l6_s3storage;
+mod l7_e2e;
+pub mod stats;
+
+use clap::Parser;
+use stats::{parse_size, print_results};
+
+#[derive(Parser)]
+pub struct BenchArgs {
+    /// Object sizes to test (comma-separated)
+    #[arg(long, default_value = "4KB,64KB,10MB,100MB,1GB", value_delimiter = ',')]
+    pub sizes: Vec<String>,
+
+    /// Stack layers to test (comma-separated)
+    #[arg(long, default_value = "L1,L2,L3,L4,L5,L6,L7", value_delimiter = ',')]
+    pub layers: Vec<String>,
+
+    /// Write paths to test (comma-separated)
+    #[arg(long, default_value = "file,log,pool", value_delimiter = ',')]
+    pub write_paths: Vec<String>,
+
+    /// Write cache: on, off, or both
+    #[arg(long, default_value = "both")]
+    pub write_cache: String,
+
+    /// Servers to benchmark (comma-separated)
+    #[arg(long, default_value = "abixio,rustfs,minio", value_delimiter = ',')]
+    pub servers: Vec<String>,
+
+    /// S3 clients to use (comma-separated)
+    #[arg(long, default_value = "sdk,aws-cli,rclone", value_delimiter = ',')]
+    pub clients: Vec<String>,
+
+    /// Operations to test (comma-separated)
+    #[arg(long, default_value = "PUT,GET,HEAD,LIST,DELETE", value_delimiter = ',')]
+    pub ops: Vec<String>,
+}
+
+fn has(list: &[String], val: &str) -> bool {
+    list.iter().any(|s| s.eq_ignore_ascii_case(val))
+}
+
+/// Generate write path x write cache combinations from CLI flags.
+fn write_configs(write_paths: &[String], write_cache: &str) -> Vec<(String, bool)> {
+    let cache_states: Vec<bool> = match write_cache.to_lowercase().as_str() {
+        "on" => vec![true],
+        "off" => vec![false],
+        _ => vec![false, true], // "both" or default
+    };
+
+    let mut configs = Vec::new();
+    for wp in write_paths {
+        for &wc in &cache_states {
+            configs.push((wp.clone(), wc));
+        }
+    }
+    configs
+}
+
+pub async fn run(args: BenchArgs) {
+    let sizes: Vec<usize> = args.sizes.iter().map(|s| parse_size(s)).collect();
+    let mut results = Vec::new();
+
+    eprintln!("abixio-ui bench");
+    eprintln!("  sizes:       {:?}", args.sizes);
+    eprintln!("  layers:      {:?}", args.layers);
+    eprintln!("  write-paths: {:?}", args.write_paths);
+    eprintln!("  write-cache: {}", args.write_cache);
+    eprintln!("  servers:     {:?}", args.servers);
+    eprintln!("  clients:     {:?}", args.clients);
+    eprintln!("  ops:         {:?}", args.ops);
+    eprintln!();
+
+    if has(&args.layers, "L1") {
+        results.extend(l1_disk::run(&sizes).await);
+    }
+
+    if has(&args.layers, "L2") {
+        results.extend(l2_compute::run(&sizes).await);
+    }
+
+    if has(&args.layers, "L3") {
+        for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
+            results.extend(l3_storage::run(&sizes, &wp, wc).await);
+        }
+    }
+
+    if has(&args.layers, "L4") {
+        results.extend(l4_http::run(&sizes).await);
+    }
+
+    if has(&args.layers, "L5") {
+        results.extend(l5_s3proto::run(&sizes).await);
+    }
+
+    if has(&args.layers, "L6") {
+        for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
+            results.extend(l6_s3storage::run(&sizes, &wp, wc).await);
+        }
+    }
+
+    if has(&args.layers, "L7") {
+        results.extend(l7_e2e::run(&sizes, &args).await);
+    }
+
+    print_results(&results);
+}

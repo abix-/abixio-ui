@@ -7,4 +7,5 @@ pub mod keychain;
 pub mod perf;
 pub mod s3;
 pub mod server;
+pub mod bench;
 pub mod views;

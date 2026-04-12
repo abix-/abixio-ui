@@ -130,13 +130,13 @@ pub async fn run(sizes: &[usize], iters_override: Option<usize>) -> Vec<BenchRes
 // NullBackend: zero-cost Backend that returns Ok() for everything.
 // Isolates s3s protocol overhead from storage work.
 
-struct NullBackend {
+pub struct NullBackend {
     volume_id: std::sync::Mutex<String>,
     bucket_created: AtomicBool,
 }
 
 impl NullBackend {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             volume_id: std::sync::Mutex::new(String::new()),
             bucket_created: AtomicBool::new(false),

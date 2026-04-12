@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 const MB: f64 = 1024.0 * 1024.0;
 
 pub struct BenchResult {
@@ -12,6 +14,52 @@ pub struct BenchResult {
     pub server: Option<String>,
     pub client: Option<String>,
     pub timings: Vec<Duration>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsonResult {
+    pub layer: String,
+    pub op: String,
+    pub size: usize,
+    pub iters: usize,
+    pub write_path: Option<String>,
+    pub write_cache: Option<bool>,
+    pub server: Option<String>,
+    pub client: Option<String>,
+    pub p50_us: f64,
+    pub p95_us: f64,
+    pub p99_us: f64,
+    pub ops_per_sec: f64,
+    pub mbps: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BenchReport {
+    pub timestamp: String,
+    pub git_commit: String,
+    pub results: Vec<JsonResult>,
+}
+
+impl BenchResult {
+    pub fn to_json(&self) -> JsonResult {
+        let mut timings = self.timings.clone();
+        let stats = Stats::from(&mut timings, self.size);
+        JsonResult {
+            layer: self.layer.clone(),
+            op: self.op.clone(),
+            size: self.size,
+            iters: self.iters,
+            write_path: self.write_path.clone(),
+            write_cache: self.write_cache,
+            server: self.server.clone(),
+            client: self.client.clone(),
+            p50_us: stats.p50_us,
+            p95_us: stats.p95_us,
+            p99_us: stats.p99_us,
+            ops_per_sec: stats.ops_per_sec,
+            mbps: stats.mbps,
+        }
+    }
 }
 
 pub struct Stats {
@@ -140,6 +188,99 @@ pub fn print_results(results: &[BenchResult]) {
                 stats.ops_per_sec,
                 stats.mbps,
             );
+        }
+    }
+    eprintln!();
+}
+
+fn git_commit() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn timestamp_now() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = d.as_secs();
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+    let s = rem % 60;
+    let mut y = 1970u64;
+    let mut remaining_days = days;
+    loop {
+        let ydays = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if remaining_days < ydays { break; }
+        remaining_days -= ydays;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let mdays = [31, if leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut mo = 0u64;
+    for md in mdays {
+        if remaining_days < md { break; }
+        remaining_days -= md;
+        mo += 1;
+    }
+    format!("{:04}-{:02}-{:02}T{:02}-{:02}-{:02}Z", y, mo + 1, remaining_days + 1, h, m, s)
+}
+
+pub fn save_json(results: &[BenchResult], path: &str) {
+    let json_results: Vec<JsonResult> = results.iter().map(|r| r.to_json()).collect();
+    let report = BenchReport {
+        timestamp: timestamp_now(),
+        git_commit: git_commit(),
+        results: json_results,
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&report) {
+        if let Err(e) = std::fs::write(path, &json) {
+            eprintln!("failed to save JSON: {}", e);
+        } else {
+            eprintln!("saved: {}", path);
+        }
+    }
+}
+
+pub fn compare_baseline(results: &[BenchResult], baseline_path: &str) {
+    let baseline_json = match std::fs::read_to_string(baseline_path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("failed to read baseline {}: {}", baseline_path, e); return; }
+    };
+    let baseline: BenchReport = match serde_json::from_str(&baseline_json) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("failed to parse baseline: {}", e); return; }
+    };
+
+    eprintln!();
+    eprintln!("comparing against: {} ({})", baseline_path, baseline.git_commit);
+    eprintln!();
+    eprintln!("  {:<5} {:<20} {:>6} {:>12} {:>12} {:>8}",
+        "LAYER", "OP", "SIZE", "BASELINE", "CURRENT", "DELTA");
+    eprintln!("  {}", "-".repeat(70));
+
+    for r in results {
+        let cur = r.to_json();
+        if let Some(base) = baseline.results.iter().find(|b|
+            b.layer == cur.layer && b.op == cur.op && b.size == cur.size
+            && b.write_path == cur.write_path && b.write_cache == cur.write_cache
+            && b.server == cur.server && b.client == cur.client
+        ) {
+            if base.mbps > 0.0 && cur.mbps > 0.0 {
+                let delta = (cur.mbps - base.mbps) / base.mbps * 100.0;
+                let flag = if delta < -5.0 { " REGRESSION" }
+                    else if delta > 5.0 { " FASTER" }
+                    else { "" };
+                eprintln!("  {:<5} {:<20} {:>6} {:>9.1} MB/s {:>9.1} MB/s {:>+7.1}%{}",
+                    cur.layer, cur.op, human_size(cur.size),
+                    base.mbps, cur.mbps, delta, flag);
+            }
         }
     }
     eprintln!();

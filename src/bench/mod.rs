@@ -5,6 +5,7 @@ mod l3_pool_internals;
 mod l4_http;
 mod l5_s3proto;
 mod l6_s3storage;
+mod l6_stack_breakdown;
 mod l7_e2e;
 pub mod stats;
 pub mod tls;
@@ -12,7 +13,7 @@ pub mod servers;
 pub mod clients;
 
 use clap::Parser;
-use stats::{parse_size, print_results};
+use stats::{parse_size, print_results, save_json, compare_baseline};
 
 #[derive(Parser)]
 pub struct BenchArgs {
@@ -51,6 +52,14 @@ pub struct BenchArgs {
     /// TLS mode: on (HTTPS), off (plain HTTP), or both
     #[arg(long, default_value = "on")]
     pub tls: String,
+
+    /// Save results to JSON file
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Compare against a baseline JSON file
+    #[arg(long)]
+    pub baseline: Option<String>,
 }
 
 fn has(list: &[String], val: &str) -> bool {
@@ -117,6 +126,9 @@ pub async fn run(args: BenchArgs) {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
             results.extend(l6_s3storage::run(&sizes, &wp, wc, args.iters).await);
         }
+        if has(&args.write_paths, "pool") {
+            results.extend(l6_stack_breakdown::run(args.iters).await);
+        }
     }
 
     if has(&args.layers, "L7") {
@@ -124,4 +136,12 @@ pub async fn run(args: BenchArgs) {
     }
 
     print_results(&results);
+
+    if let Some(path) = &args.output {
+        save_json(&results, path);
+    }
+
+    if let Some(path) = &args.baseline {
+        compare_baseline(&results, path);
+    }
 }

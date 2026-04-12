@@ -61,6 +61,10 @@ pub struct BenchArgs {
     #[arg(long)]
     pub baseline: Option<String>,
 
+    /// Number of disks to test (comma-separated)
+    #[arg(long, default_value = "1", value_delimiter = ',')]
+    pub disks: Vec<usize>,
+
     /// Temp directory for benchmark files (exclude from antivirus for accurate results)
     #[arg(long)]
     pub tmp_dir: Option<String>,
@@ -100,6 +104,7 @@ pub async fn run(args: BenchArgs) {
     if let Some(dir) = &args.tmp_dir {
         eprintln!("  tmp-dir:     {}", dir);
     }
+    eprintln!("  disks:       {:?}", args.disks);
     eprintln!("  sizes:       {:?}", args.sizes);
     eprintln!("  layers:      {:?}", args.layers);
     eprintln!("  write-paths: {:?}", args.write_paths);
@@ -119,7 +124,7 @@ pub async fn run(args: BenchArgs) {
 
     if has(&args.layers, "L3") {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
-            results.extend(l3_storage::run(&sizes, &wp, wc, args.iters).await);
+            results.extend(l3_storage::run(&sizes, &wp, wc, args.iters, &args.disks).await);
         }
         if has(&args.write_paths, "pool") {
             results.extend(l3_pool_internals::run(args.iters).await);

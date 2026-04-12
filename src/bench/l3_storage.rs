@@ -35,10 +35,11 @@ pub async fn run(
     write_path: &str,
     write_cache: bool,
     iters_override: Option<usize>,
+    disks: &[usize],
 ) -> Vec<BenchResult> {
     let mut results = Vec::new();
 
-    for disk_count in [1, 4] {
+    for &disk_count in disks {
         results.extend(
             run_disks(sizes, write_path, write_cache, iters_override, disk_count).await,
         );

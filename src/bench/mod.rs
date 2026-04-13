@@ -53,7 +53,11 @@ pub struct BenchArgs {
     #[arg(long, default_value = "on")]
     pub tls: String,
 
-    /// Save results to JSON file
+    /// Directory for benchmark result JSON files
+    #[arg(long, default_value = r"C:\code\abixio-ui\bench-results")]
+    pub output_dir: String,
+
+    /// Save results to a specific JSON file (overrides output-dir)
     #[arg(long)]
     pub output: Option<String>,
 
@@ -154,9 +158,16 @@ pub async fn run(args: BenchArgs) {
 
     print_results(&results);
 
-    if let Some(path) = &args.output {
-        save_json(&results, path);
-    }
+    // always save results -- use --output if given, otherwise auto-generate in --output-dir
+    let output_path = args.output.unwrap_or_else(|| {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        std::fs::create_dir_all(&args.output_dir).ok();
+        format!("{}/{}.json", args.output_dir, secs)
+    });
+    save_json(&results, &output_path);
 
     if let Some(path) = &args.baseline {
         compare_baseline(&results, path);

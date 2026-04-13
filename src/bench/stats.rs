@@ -122,12 +122,10 @@ pub fn parse_size(s: &str) -> usize {
     }
 }
 
+/// 10GB total data per size tier, capped at 10k iterations for small objects.
 pub fn iters_for_size(size: usize) -> usize {
-    if size <= 4096 { 500 }
-    else if size <= 65536 { 200 }
-    else if size <= 10 * 1024 * 1024 { 50 }
-    else if size <= 100 * 1024 * 1024 { 10 }
-    else { 3 }
+    const TARGET_BYTES: usize = 10 * 1024 * 1024 * 1024; // 10GB
+    (TARGET_BYTES / size).min(10_000).max(1)
 }
 
 pub fn human_size(size: usize) -> String {

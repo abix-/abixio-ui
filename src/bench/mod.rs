@@ -1,11 +1,9 @@
 mod l1_http;
 mod l2_s3proto;
 mod l3_storage;
-mod l3_pool_internals;
 mod l4_compute;
 mod l5_disk;
 mod l6_s3storage;
-mod l6_stack_breakdown;
 mod l7_e2e;
 pub mod stats;
 pub mod tls;
@@ -26,7 +24,7 @@ pub struct BenchArgs {
     pub layers: Vec<String>,
 
     /// Write paths to test (comma-separated)
-    #[arg(long, default_value = "file,wal,log,pool", value_delimiter = ',')]
+    #[arg(long, default_value = "file,wal", value_delimiter = ',')]
     pub write_paths: Vec<String>,
 
     /// Write cache: on, off, or both
@@ -130,9 +128,6 @@ pub async fn run(args: BenchArgs) {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
             results.extend(l3_storage::run(&sizes, &wp, wc, args.iters, &args.disks).await);
         }
-        if has(&args.write_paths, "pool") {
-            results.extend(l3_pool_internals::run(args.iters).await);
-        }
     }
 
     if has(&args.layers, "L4") {
@@ -146,9 +141,6 @@ pub async fn run(args: BenchArgs) {
     if has(&args.layers, "L6") {
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
             results.extend(l6_s3storage::run(&sizes, &wp, wc, args.iters).await);
-        }
-        if has(&args.write_paths, "pool") {
-            results.extend(l6_stack_breakdown::run(args.iters).await);
         }
     }
 

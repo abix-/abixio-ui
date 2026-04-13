@@ -77,9 +77,7 @@ async fn run_disks(
         let mut volume = LocalVolume::new(path).unwrap();
         match write_path {
             "wal" => { volume.enable_wal().await.unwrap(); }
-            "log" => { volume.enable_log_store().unwrap(); }
-            "pool" => { volume.enable_write_pool(32).await.unwrap(); }
-            _ => {}
+            _ => {} // "file" = no extra wiring
         }
         backends.push(Box::new(volume));
     }

@@ -7,7 +7,7 @@
 //! - Creates a VolumePool with real LocalVolume backends on tmpdir
 //! - Calls put_object / get_object / put_object_stream / get_object_stream
 //!   directly as Rust function calls
-//! - Tests each write path (file/log/pool) and cache state (on/off)
+//! - Tests each write path (file/wal) and cache state (on/off)
 //!
 //! What this number means: the cost of storage routing, EC encoding,
 //! hashing, placement, and the actual disk write/read. This is the
@@ -120,8 +120,8 @@ async fn run_disks(
             timings,
         });
 
-        // drain pending writes for pool/wal tier before GET
-        if write_path == "pool" || write_path == "wal" {
+        // drain pending writes for wal tier before GET
+        if write_path == "wal" {
             for backend in pool.disks() {
                 backend.drain_pending_writes().await;
             }
@@ -181,7 +181,7 @@ async fn run_disks(
         });
 
         // drain + flush before streaming GET
-        if write_path == "pool" || write_path == "wal" {
+        if write_path == "wal" {
             for backend in pool.disks() {
                 backend.drain_pending_writes().await;
             }

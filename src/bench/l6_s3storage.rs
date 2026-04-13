@@ -7,7 +7,7 @@
 //! - Creates a full s3s service with real VolumePool backends
 //! - Spins up a hyper server on TCP loopback
 //! - reqwest client sends real S3 PUT/GET requests
-//! - Tests each write path (file/log/pool) and cache state (on/off)
+//! - Tests each write path (file/wal) and cache state (on/off)
 //!
 //! What this number means: the total in-process cost of an S3
 //! request with real storage, but without the SDK client overhead
@@ -137,8 +137,8 @@ pub async fn run(
             timings,
         });
 
-        // drain pool/wal + flush cache before GET
-        if write_path == "pool" || write_path == "wal" {
+        // drain wal + flush cache before GET
+        if write_path == "wal" {
             for backend in pool.disks() {
                 backend.drain_pending_writes().await;
             }

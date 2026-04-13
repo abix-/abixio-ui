@@ -26,7 +26,7 @@ pub struct BenchArgs {
     pub layers: Vec<String>,
 
     /// Write paths to test (comma-separated)
-    #[arg(long, default_value = "file,log,pool", value_delimiter = ',')]
+    #[arg(long, default_value = "file,wal,log,pool", value_delimiter = ',')]
     pub write_paths: Vec<String>,
 
     /// Write cache: on, off, or both
@@ -65,8 +65,8 @@ pub struct BenchArgs {
     #[arg(long, default_value = "1", value_delimiter = ',')]
     pub disks: Vec<usize>,
 
-    /// Temp directory for benchmark files (exclude from antivirus for accurate results)
-    #[arg(long)]
+    /// Temp directory for benchmark files (must be Defender-excluded for accurate results)
+    #[arg(long, default_value = r"C:\code\bench-tmp")]
     pub tmp_dir: Option<String>,
 }
 

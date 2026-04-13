@@ -44,6 +44,7 @@ pub async fn run(
 
     let mut volume = LocalVolume::new(&disk_path).unwrap();
     match write_path {
+        "wal" => { volume.enable_wal().await.unwrap(); }
         "log" => { volume.enable_log_store().unwrap(); }
         "pool" => { volume.enable_write_pool(32).await.unwrap(); }
         _ => {}
@@ -138,8 +139,8 @@ pub async fn run(
             timings,
         });
 
-        // drain pool + flush cache before GET
-        if write_path == "pool" {
+        // drain pool/wal + flush cache before GET
+        if write_path == "pool" || write_path == "wal" {
             for backend in pool.disks() {
                 backend.drain_pending_writes().await;
             }

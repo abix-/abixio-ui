@@ -76,6 +76,7 @@ async fn run_disks(
     for path in &disk_paths {
         let mut volume = LocalVolume::new(path).unwrap();
         match write_path {
+            "wal" => { volume.enable_wal().await.unwrap(); }
             "log" => { volume.enable_log_store().unwrap(); }
             "pool" => { volume.enable_write_pool(32).await.unwrap(); }
             _ => {}
@@ -121,8 +122,8 @@ async fn run_disks(
             timings,
         });
 
-        // drain pending writes for pool tier before GET
-        if write_path == "pool" {
+        // drain pending writes for pool/wal tier before GET
+        if write_path == "pool" || write_path == "wal" {
             for backend in pool.disks() {
                 backend.drain_pending_writes().await;
             }
@@ -182,7 +183,7 @@ async fn run_disks(
         });
 
         // drain + flush before streaming GET
-        if write_path == "pool" {
+        if write_path == "pool" || write_path == "wal" {
             for backend in pool.disks() {
                 backend.drain_pending_writes().await;
             }

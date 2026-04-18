@@ -23,17 +23,21 @@ pub struct BenchArgs {
     #[arg(long, default_value = "L1,L2,L3,L4,L5,L6,L7", value_delimiter = ',')]
     pub layers: Vec<String>,
 
-    /// Write paths to test (comma-separated)
-    #[arg(long, default_value = "file,wal", value_delimiter = ',')]
+    /// Write paths to test (comma-separated). Default is `wal` --
+    /// the production small-object path. Pass `file,wal` to run
+    /// ablation rows for the file-only tier.
+    #[arg(long, default_value = "wal", value_delimiter = ',')]
     pub write_paths: Vec<String>,
 
-    /// Write cache: on, off, or both
-    #[arg(long, default_value = "both")]
+    /// Write cache: on, off, or both. Default `on` matches the
+    /// production stack. Pass `both` for ablation runs.
+    #[arg(long, default_value = "on")]
     pub write_cache: String,
 
     /// Read cache: on, off, or both. Applies to abixio only.
-    /// When off, spawns abixio with --read-cache 0.
-    #[arg(long, default_value = "both")]
+    /// Default `on` matches the production stack. Pass `both` for
+    /// ablation runs. `off` spawns abixio with `--read-cache 0`.
+    #[arg(long, default_value = "on")]
     pub read_cache: String,
 
     /// Servers to benchmark (comma-separated)

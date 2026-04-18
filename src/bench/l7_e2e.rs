@@ -59,43 +59,48 @@ pub async fn run(sizes: &[usize], args: &BenchArgs) -> Vec<BenchResult> {
 
         // -- AbixIO configs --
         if has(&args.servers, "abixio") {
-            let cache_states: Vec<bool> = match args.write_cache.to_lowercase().as_str() {
+            let wc_states: Vec<bool> = match args.write_cache.to_lowercase().as_str() {
                 "on" => vec![true],
                 "off" => vec![false],
                 _ => vec![false, true],
             };
+            let rc_states = super::read_cache_states(&args.read_cache);
 
             for wp in &args.write_paths {
-                for &wc in &cache_states {
-                    let label = if wc {
-                        format!("AbixIO-{}+wc{}", wp, tls_label)
-                    } else {
-                        format!("AbixIO-{}{}", wp, tls_label)
-                    };
-                    eprintln!("--- L7: {} ---", label);
+                for &wc in &wc_states {
+                    for &rc in &rc_states {
+                        let mut tag = String::from("AbixIO-");
+                        tag.push_str(wp);
+                        if wc { tag.push_str("+wc"); }
+                        if rc { tag.push_str("+rc"); }
+                        tag.push_str(tls_label);
+                        let label = tag;
+                        eprintln!("--- L7: {} ---", label);
 
-                    let mut builder = AbixioServer::builder()
-                        .volume_count(1)
-                        .no_auth(false)
-                        .write_tier(wp)
-                        .write_cache(if wc { 256 } else { 0 });
-                    if let Some(t) = &tls {
-                        builder = builder.tls(t);
+                        let mut builder = AbixioServer::builder()
+                            .volume_count(1)
+                            .no_auth(false)
+                            .write_tier(wp)
+                            .write_cache(if wc { 256 } else { 0 })
+                            .read_cache(if rc { 256 } else { 0 });
+                        if let Some(t) = &tls {
+                            builder = builder.tls(t);
+                        }
+                        let abixio = builder.start();
+
+                        let cfg = ServerConfig {
+                            name: label,
+                            client: abixio.s3_client(),
+                            endpoint: abixio.endpoint(),
+                            ca_cert_pem: tls.as_ref().map(|t| t.ca_cert_pem.clone()).unwrap_or_default(),
+                            access_key: "test".into(),
+                            secret_key: "testsecret".into(),
+                        };
+
+                        results.extend(
+                            run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
+                        );
                     }
-                    let abixio = builder.start();
-
-                    let cfg = ServerConfig {
-                        name: label,
-                        client: abixio.s3_client(),
-                        endpoint: abixio.endpoint(),
-                        ca_cert_pem: tls.as_ref().map(|t| t.ca_cert_pem.clone()).unwrap_or_default(),
-                        access_key: "test".into(),
-                        secret_key: "testsecret".into(),
-                    };
-
-                    results.extend(
-                        run_server(&cfg, sizes, args, &aws_path, &rclone_bin).await,
-                    );
                 }
             }
         }
@@ -236,7 +241,7 @@ async fn run_server(
                 }
                 results.push(BenchResult {
                     layer: "L7".into(), op: "put".into(), size, iters,
-                    write_path: None, write_cache: None,
+                    write_path: None, write_cache: None, read_cache: None,
                     server: Some(cfg.name.clone()), client: Some("sdk".into()),
                     timings,
                 });
@@ -254,7 +259,7 @@ async fn run_server(
                 }
                 results.push(BenchResult {
                     layer: "L7".into(), op: "put_signed".into(), size, iters,
-                    write_path: None, write_cache: None,
+                    write_path: None, write_cache: None, read_cache: None,
                     server: Some(cfg.name.clone()), client: Some("sdk".into()),
                     timings,
                 });
@@ -272,10 +277,42 @@ async fn run_server(
                 }
                 results.push(BenchResult {
                     layer: "L7".into(), op: "get".into(), size, iters,
-                    write_path: None, write_cache: None,
+                    write_path: None, write_cache: None, read_cache: None,
                     server: Some(cfg.name.clone()), client: Some("sdk".into()),
                     timings,
                 });
+
+                // GET HOT: re-read a small working set K times so every
+                // iteration except the first per key is a cache hit.
+                // Only meaningful for size <= 64KB (the read cache
+                // ceiling). Larger sizes skip silently.
+                if size <= 65536 {
+                    let hot_keys = 50usize.min(iters);
+                    let hot_rounds = 20usize;
+                    // one untimed populate round so all hot keys are warm
+                    for k in 0..hot_keys {
+                        let _ = cfg.client.download_object_to_file(
+                            bucket, &format!("sdk_{}_{}", label, k), &sinkpath,
+                        ).await;
+                    }
+                    let mut timings = Vec::with_capacity(hot_keys * hot_rounds);
+                    for _ in 0..hot_rounds {
+                        for k in 0..hot_keys {
+                            let t = Instant::now();
+                            let _ = cfg.client.download_object_to_file(
+                                bucket, &format!("sdk_{}_{}", label, k), &sinkpath,
+                            ).await;
+                            timings.push(t.elapsed());
+                        }
+                    }
+                    results.push(BenchResult {
+                        layer: "L7".into(), op: "get_hot".into(), size,
+                        iters: hot_keys * hot_rounds,
+                        write_path: None, write_cache: None, read_cache: None,
+                        server: Some(cfg.name.clone()), client: Some("sdk".into()),
+                        timings,
+                    });
+                }
             }
 
             eprintln!("  sdk {} done ({} iters)", label, iters);
@@ -309,7 +346,7 @@ async fn run_server(
             }
             results.push(BenchResult {
                 layer: "L7".into(), op: "head".into(), size: 0, iters,
-                write_path: None, write_cache: None,
+                write_path: None, write_cache: None, read_cache: None,
                 server: Some(cfg.name.clone()), client: Some("sdk".into()),
                 timings,
             });
@@ -327,7 +364,7 @@ async fn run_server(
             }
             results.push(BenchResult {
                 layer: "L7".into(), op: "list".into(), size: 0, iters,
-                write_path: None, write_cache: None,
+                write_path: None, write_cache: None, read_cache: None,
                 server: Some(cfg.name.clone()), client: Some("sdk".into()),
                 timings,
             });
@@ -345,7 +382,7 @@ async fn run_server(
             }
             results.push(BenchResult {
                 layer: "L7".into(), op: "delete".into(), size: 0, iters,
-                write_path: None, write_cache: None,
+                write_path: None, write_cache: None, read_cache: None,
                 server: Some(cfg.name.clone()), client: Some("sdk".into()),
                 timings,
             });
@@ -385,7 +422,7 @@ async fn run_server(
                     }
                     results.push(BenchResult {
                         layer: "L7".into(), op: "put".into(), size, iters,
-                        write_path: None, write_cache: None,
+                        write_path: None, write_cache: None, read_cache: None,
                         server: Some(cfg.name.clone()), client: Some("aws-cli".into()),
                         timings,
                     });
@@ -405,7 +442,7 @@ async fn run_server(
                     }
                     results.push(BenchResult {
                         layer: "L7".into(), op: "get".into(), size, iters,
-                        write_path: None, write_cache: None,
+                        write_path: None, write_cache: None, read_cache: None,
                         server: Some(cfg.name.clone()), client: Some("aws-cli".into()),
                         timings,
                     });
@@ -470,7 +507,7 @@ async fn run_server(
                     }
                     results.push(BenchResult {
                         layer: "L7".into(), op: "put".into(), size, iters,
-                        write_path: None, write_cache: None,
+                        write_path: None, write_cache: None, read_cache: None,
                         server: Some(cfg.name.clone()), client: Some("rclone".into()),
                         timings,
                     });
@@ -497,7 +534,7 @@ async fn run_server(
                     }
                     results.push(BenchResult {
                         layer: "L7".into(), op: "get".into(), size, iters,
-                        write_path: None, write_cache: None,
+                        write_path: None, write_cache: None, read_cache: None,
                         server: Some(cfg.name.clone()), client: Some("rclone".into()),
                         timings,
                     });

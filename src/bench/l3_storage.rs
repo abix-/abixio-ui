@@ -34,6 +34,7 @@ pub async fn run(
     sizes: &[usize],
     write_path: &str,
     write_cache: bool,
+    read_cache: bool,
     iters_override: Option<usize>,
     disks: &[usize],
 ) -> Vec<BenchResult> {
@@ -41,7 +42,7 @@ pub async fn run(
 
     for &disk_count in disks {
         results.extend(
-            run_disks(sizes, write_path, write_cache, iters_override, disk_count).await,
+            run_disks(sizes, write_path, write_cache, read_cache, iters_override, disk_count).await,
         );
     }
 
@@ -52,6 +53,7 @@ async fn run_disks(
     sizes: &[usize],
     write_path: &str,
     write_cache: bool,
+    read_cache: bool,
     iters_override: Option<usize>,
     disk_count: usize,
 ) -> Vec<BenchResult> {
@@ -64,11 +66,10 @@ async fn run_disks(
         disk_paths.push(p);
     }
 
-    let wp_label = if write_cache {
-        format!("{}+wc {}disk", write_path, disk_count)
-    } else {
-        format!("{} {}disk", write_path, disk_count)
-    };
+    let mut tag = String::from(write_path);
+    if write_cache { tag.push_str("+wc"); }
+    if read_cache { tag.push_str("+rc"); }
+    let wp_label = format!("{} {}disk", tag, disk_count);
     eprintln!("--- L3: Storage pipeline ({}) ---", wp_label);
 
     // build LocalVolumes with the requested tier
@@ -84,6 +85,9 @@ async fn run_disks(
     let mut pool = VolumePool::new(backends).unwrap();
     if write_cache {
         pool.enable_write_cache(256 * 1024 * 1024);
+    }
+    if read_cache {
+        pool.enable_read_cache(256 * 1024 * 1024, 65536);
     }
     pool.make_bucket("bench").await.unwrap();
 
@@ -115,6 +119,7 @@ async fn run_disks(
             iters,
             write_path: Some(write_path.into()),
             write_cache: Some(write_cache),
+            read_cache: Some(read_cache),
             server: None,
             client: None,
             timings,
@@ -149,6 +154,7 @@ async fn run_disks(
             iters,
             write_path: Some(write_path.into()),
             write_cache: Some(write_cache),
+            read_cache: Some(read_cache),
             server: None,
             client: None,
             timings,
@@ -175,6 +181,7 @@ async fn run_disks(
             iters,
             write_path: Some(write_path.into()),
             write_cache: Some(write_cache),
+            read_cache: Some(read_cache),
             server: None,
             client: None,
             timings,
@@ -210,6 +217,7 @@ async fn run_disks(
             iters,
             write_path: Some(write_path.into()),
             write_cache: Some(write_cache),
+            read_cache: Some(read_cache),
             server: None,
             client: None,
             timings,

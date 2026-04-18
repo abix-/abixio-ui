@@ -88,6 +88,7 @@ impl AbixioServer {
             tls: None,
             write_tier: None,
             write_cache: None,
+            read_cache: None,
         }
     }
 
@@ -163,6 +164,7 @@ pub struct AbixioServerBuilder {
     tls: Option<(String, String, Vec<u8>)>,
     write_tier: Option<String>,
     write_cache: Option<u64>,
+    read_cache: Option<u64>,
 }
 
 impl AbixioServerBuilder {
@@ -183,6 +185,11 @@ impl AbixioServerBuilder {
 
     pub fn write_tier(mut self, tier: &str) -> Self {
         self.write_tier = Some(tier.to_string());
+        self
+    }
+
+    pub fn read_cache(mut self, mb: u64) -> Self {
+        self.read_cache = Some(mb);
         self
     }
 
@@ -223,6 +230,9 @@ impl AbixioServerBuilder {
         }
         if let Some(mb) = self.write_cache {
             cmd.arg("--write-cache").arg(mb.to_string());
+        }
+        if let Some(mb) = self.read_cache {
+            cmd.arg("--read-cache").arg(mb.to_string());
         }
 
         let child = cmd.spawn()

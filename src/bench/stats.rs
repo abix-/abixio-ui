@@ -33,6 +33,7 @@ pub struct BenchResult {
     pub iters: usize,
     pub write_path: Option<String>,
     pub write_cache: Option<bool>,
+    pub read_cache: Option<bool>,
     pub server: Option<String>,
     pub client: Option<String>,
     pub timings: Vec<Duration>,
@@ -46,6 +47,8 @@ pub struct JsonResult {
     pub iters: usize,
     pub write_path: Option<String>,
     pub write_cache: Option<bool>,
+    #[serde(default)]
+    pub read_cache: Option<bool>,
     pub server: Option<String>,
     pub client: Option<String>,
     pub p50_us: f64,
@@ -73,6 +76,7 @@ impl BenchResult {
             iters: self.iters,
             write_path: self.write_path.clone(),
             write_cache: self.write_cache,
+            read_cache: self.read_cache,
             server: self.server.clone(),
             client: self.client.clone(),
             p50_us: stats.p50_us,
@@ -124,8 +128,12 @@ pub fn parse_size(s: &str) -> usize {
 
 /// 10GB total data per size tier, capped at 10k iterations for small objects.
 pub fn iters_for_size(size: usize) -> usize {
-    const TARGET_BYTES: usize = 10 * 1024 * 1024 * 1024; // 10GB
-    (TARGET_BYTES / size).min(10_000).max(1)
+    // Target: enough iterations to settle p50/p95 without burning
+    // minutes on tight-loop micro-ops. 1000 is plenty for small objects
+    // at microsecond latencies; the size-scaled division caps large
+    // objects so a 1GB run does not tie up disk for an hour.
+    const TARGET_BYTES: usize = 10 * 1024 * 1024 * 1024; // 10 GB
+    (TARGET_BYTES / size).min(1_000).max(1)
 }
 
 pub fn human_size(size: usize) -> String {
@@ -184,11 +192,12 @@ pub fn print_results(results: &[BenchResult]) {
 
             let mut label = r.op.clone();
             if let Some(wp) = &r.write_path {
-                label = format!("{} ({}{})", label, wp,
-                    if let Some(wc) = r.write_cache {
-                        if wc { "+wc" } else { "" }
-                    } else { "" }
-                );
+                let wc = r.write_cache.unwrap_or(false);
+                let rc = r.read_cache.unwrap_or(false);
+                let mut tag = wp.clone();
+                if wc { tag.push_str("+wc"); }
+                if rc { tag.push_str("+rc"); }
+                label = format!("{} ({})", label, tag);
             }
             if let Some(srv) = &r.server {
                 label = format!("{} [{}]", label, srv);

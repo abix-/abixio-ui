@@ -31,6 +31,11 @@ pub struct BenchArgs {
     #[arg(long, default_value = "both")]
     pub write_cache: String,
 
+    /// Read cache: on, off, or both. Applies to abixio only.
+    /// When off, spawns abixio with --read-cache 0.
+    #[arg(long, default_value = "both")]
+    pub read_cache: String,
+
     /// Servers to benchmark (comma-separated)
     #[arg(long, default_value = "abixio,rustfs,minio", value_delimiter = ',')]
     pub servers: Vec<String>,
@@ -213,6 +218,15 @@ fn write_configs(write_paths: &[String], write_cache: &str) -> Vec<(String, bool
     configs
 }
 
+/// Parse the `--read-cache` flag into the concrete states to run.
+pub fn read_cache_states(flag: &str) -> Vec<bool> {
+    match flag.to_lowercase().as_str() {
+        "on" => vec![true],
+        "off" => vec![false],
+        _ => vec![false, true], // "both" or default
+    }
+}
+
 pub async fn run(args: BenchArgs) {
     if let Some(dir) = &args.tmp_dir {
         clean_tmp_dir(dir);
@@ -233,6 +247,7 @@ pub async fn run(args: BenchArgs) {
     eprintln!("  layers:      {:?}", args.layers);
     eprintln!("  write-paths: {:?}", args.write_paths);
     eprintln!("  write-cache: {}", args.write_cache);
+    eprintln!("  read-cache:  {}", args.read_cache);
     eprintln!("  servers:     {:?}", args.servers);
     eprintln!("  clients:     {:?}", args.clients);
     eprintln!("  ops:         {:?}", args.ops);
@@ -247,8 +262,11 @@ pub async fn run(args: BenchArgs) {
     }
 
     if has(&args.layers, "L3") {
+        let rc_states = read_cache_states(&args.read_cache);
         for (wp, wc) in write_configs(&args.write_paths, &args.write_cache) {
-            results.extend(l3_storage::run(&sizes, &wp, wc, args.iters, &args.disks).await);
+            for &rc in &rc_states {
+                results.extend(l3_storage::run(&sizes, &wp, wc, rc, args.iters, &args.disks).await);
+            }
         }
     }
 

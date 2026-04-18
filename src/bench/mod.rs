@@ -76,6 +76,126 @@ fn has(list: &[String], val: &str) -> bool {
     list.iter().any(|s| s.eq_ignore_ascii_case(val))
 }
 
+fn clean_tmp_dir(dir: &str) {
+    let path = std::path::Path::new(dir);
+    let Ok(entries) = std::fs::read_dir(path) else { return };
+    let mut freed: u64 = 0;
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let size = dir_size(&p).unwrap_or(0);
+        let res = if p.is_dir() {
+            std::fs::remove_dir_all(&p)
+        } else {
+            std::fs::remove_file(&p)
+        };
+        if res.is_ok() {
+            freed += size;
+            removed += 1;
+        } else if let Err(e) = res {
+            eprintln!("  warn: failed to remove {}: {}", p.display(), e);
+        }
+    }
+    if removed > 0 {
+        eprintln!("  cleaned {} leftover entries ({:.1} GB) from {}",
+            removed, freed as f64 / (1024.0 * 1024.0 * 1024.0), dir);
+    }
+}
+
+fn estimate_required_bytes(args: &BenchArgs) -> u64 {
+    let max_size = args
+        .sizes
+        .iter()
+        .map(|s| parse_size(s) as u64)
+        .max()
+        .unwrap_or(0);
+    // Reserve 20x the largest object size, floored at 4 GB.
+    // Rationale: L3 at 1GB x ~5 iters with 2 write-path configs both alive
+    // intermittently, plus shard + meta overhead. L7 server processes also
+    // keep their own temp trees alive. 20x covers the worst case we've seen.
+    let reserve = max_size.saturating_mul(20);
+    reserve.max(4 * 1024 * 1024 * 1024)
+}
+
+#[cfg(windows)]
+fn free_bytes(path: &std::path::Path) -> std::io::Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_avail: u64 = 0;
+    let mut total: u64 = 0;
+    let mut free_total: u64 = 0;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_avail,
+            &mut total,
+            &mut free_total,
+        )
+    };
+    if ok == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(free_avail)
+    }
+}
+
+#[cfg(not(windows))]
+fn free_bytes(_path: &std::path::Path) -> std::io::Result<u64> {
+    Ok(u64::MAX)
+}
+
+fn check_free_space(dir: &str, args: &BenchArgs) {
+    let path = std::path::Path::new(dir);
+    let required = estimate_required_bytes(args);
+    let available = match free_bytes(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("  warn: could not query free space on {}: {}", dir, e);
+            return;
+        }
+    };
+    let gb = 1024.0 * 1024.0 * 1024.0;
+    eprintln!(
+        "  free space:  {:.1} GB available, {:.1} GB required (max-size x 20, floor 4 GB)",
+        available as f64 / gb,
+        required as f64 / gb,
+    );
+    if available < required {
+        eprintln!(
+            "\nabort: not enough free space on {} for requested size set.\n\
+             available {:.1} GB < required {:.1} GB.\n\
+             free up space, or drop the largest --sizes entry.",
+            dir,
+            available as f64 / gb,
+            required as f64 / gb,
+        );
+        std::process::exit(1);
+    }
+}
+
+fn dir_size(path: &std::path::Path) -> std::io::Result<u64> {
+    let md = std::fs::symlink_metadata(path)?;
+    if md.is_file() {
+        return Ok(md.len());
+    }
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&p) else { continue };
+        for entry in entries.flatten() {
+            let Ok(md) = entry.metadata() else { continue };
+            if md.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(md.len());
+            }
+        }
+    }
+    Ok(total)
+}
+
 /// Generate write path x write cache combinations from CLI flags.
 fn write_configs(write_paths: &[String], write_cache: &str) -> Vec<(String, bool)> {
     let cache_states: Vec<bool> = match write_cache.to_lowercase().as_str() {
@@ -95,8 +215,10 @@ fn write_configs(write_paths: &[String], write_cache: &str) -> Vec<(String, bool
 
 pub async fn run(args: BenchArgs) {
     if let Some(dir) = &args.tmp_dir {
+        clean_tmp_dir(dir);
         std::fs::create_dir_all(dir).ok();
         stats::set_tmp_dir(dir);
+        check_free_space(dir, &args);
     }
 
     let sizes: Vec<usize> = args.sizes.iter().map(|s| parse_size(s)).collect();

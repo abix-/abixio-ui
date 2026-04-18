@@ -42,6 +42,7 @@ rcgen = "0.13"
 simd-json = "0.14"
 sonic-rs = "0.3"
 dashmap = "6"
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 
 [dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }

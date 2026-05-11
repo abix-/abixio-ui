@@ -68,7 +68,7 @@ pub fn free_port() -> u16 {
     listener.local_addr().expect("get local addr").port()
 }
 
-// -- AbixioServer --
+//. AbixioServer.
 
 pub struct AbixioServer {
     child: Child,
@@ -284,7 +284,7 @@ fn wait_for_ready(server: &mut AbixioServer) {
     panic!("abixio on port {} did not become ready within 15s", server.port);
 }
 
-// -- ExternalServer (RustFS, MinIO) --
+//. ExternalServer (RustFS, MinIO).
 
 pub struct ExternalServer {
     child: Child,

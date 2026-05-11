@@ -89,7 +89,7 @@ impl Connection {
     }
 }
 
-// -- persistence --
+//. Persistence.
 
 fn config_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("could not determine home directory")?;
@@ -141,7 +141,7 @@ pub fn remove_connection(settings: &mut Settings, name: &str) -> Result<(), Stri
     save(settings)
 }
 
-// -- validation --
+//. Validation.
 
 pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty()
@@ -167,7 +167,7 @@ pub fn is_valid_secret_key(key: &str) -> bool {
 mod tests {
     use super::*;
 
-    // -- is_valid_name --
+    //. Is_valid_name.
 
     #[test]
     fn valid_name_simple() {
@@ -214,7 +214,7 @@ mod tests {
         assert!(!is_valid_name("_start"));
     }
 
-    // -- is_valid_endpoint --
+    //. Is_valid_endpoint.
 
     #[test]
     fn valid_endpoint_http() {
@@ -241,7 +241,7 @@ mod tests {
         assert!(!is_valid_endpoint("localhost:10000"));
     }
 
-    // -- is_valid_access_key --
+    //. Is_valid_access_key.
 
     #[test]
     fn valid_access_key_empty() {
@@ -268,7 +268,7 @@ mod tests {
         assert!(!is_valid_access_key("X"));
     }
 
-    // -- is_valid_secret_key --
+    //. Is_valid_secret_key.
 
     #[test]
     fn valid_secret_key_empty() {
@@ -290,7 +290,7 @@ mod tests {
         assert!(!is_valid_secret_key("x"));
     }
 
-    // -- Settings serde --
+    //. Settings serde.
 
     #[test]
     fn settings_round_trip() {

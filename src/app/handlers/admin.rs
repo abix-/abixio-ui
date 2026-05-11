@@ -203,7 +203,7 @@ impl App {
         }
     }
 
-    // -- command helpers --
+    //. Command helpers.
 
     pub(crate) fn cmd_fetch_object_inspect(&self, bucket: &str, key: &str) -> Task<Message> {
         let admin = self.admin_client.clone();

@@ -283,7 +283,7 @@ impl App {
         }
     }
 
-    // -- helpers --
+    //. Helpers.
 
     pub(crate) fn bucket_delete_can_start(&self) -> bool {
         let Some(state) = &self.bucket_delete else {

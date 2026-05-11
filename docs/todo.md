@@ -30,10 +30,10 @@ Current status:
 - Phase 4 performance and filters are now shipped
 
 Implementation phases:
-- Phase 1: harden diff planning and preview -- shipped
-- Phase 2: copy execution from plan -- shipped
-- Phase 3: sync execution with guarded deletes -- shipped
-- Phase 4: concurrent transfers, rclone-style filters, throughput telemetry -- shipped
+- Phase 1: harden diff planning and preview. Shipped
+- Phase 2: copy execution from plan. Shipped
+- Phase 3: sync execution with guarded deletes. Shipped
+- Phase 4: concurrent transfers, rclone-style filters, throughput telemetry. Shipped
 - Phase 5: long-tail features (watch mode, rename tracking, prometheus, bidirectional)
 
 See `docs/sync.md` for the full design and rollout plan.

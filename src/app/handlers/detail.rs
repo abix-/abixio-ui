@@ -9,7 +9,7 @@ use crate::s3::client::VersionInfo;
 use super::super::{App, Message, Selection};
 
 impl App {
-    // -- presigned sharing --
+    //. Presigned sharing.
 
     pub(crate) fn handle_open_share_modal(&mut self) -> Task<Message> {
         self.share_modal_open = true;
@@ -54,7 +54,7 @@ impl App {
         Task::none()
     }
 
-    // -- bucket policy/lifecycle/tags --
+    //. Bucket policy/lifecycle/tags.
 
     pub(crate) fn handle_bucket_document_loaded(
         &mut self,
@@ -312,14 +312,14 @@ impl App {
         }
     }
 
-    // -- object preview --
+    //. Object preview.
 
     pub(crate) fn handle_preview_loaded(&mut self, r: Result<String, String>) -> Task<Message> {
         self.object_preview = Some(r);
         Task::none()
     }
 
-    // -- versioning --
+    //. Versioning.
 
     pub(crate) fn handle_versioning_status_loaded(
         &mut self,
@@ -459,7 +459,7 @@ impl App {
         }
     }
 
-    // -- object tags --
+    //. Object tags.
 
     pub(crate) fn handle_tags_loaded(
         &mut self,
@@ -556,7 +556,7 @@ impl App {
         }
     }
 
-    // -- command helpers --
+    //. Command helpers.
 
     pub(crate) fn cmd_fetch_versions(&self, bucket: &str, key: &str) -> Task<Message> {
         let client = self.client.clone();

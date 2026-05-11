@@ -115,16 +115,16 @@ fn no_animation_widgets() {
     // audited egui 0.34.1 source: these widgets call request_repaint()
     // continuously (every frame), not just during interaction:
     //
-    // widgets/spinner.rs:40      -- always animates
-    // widgets/progress_bar.rs:138 -- animates fill
-    // context.rs:3236,3262       -- animate_bool/animate_value
+    // widgets/spinner.rs:40     . Always animates
+    // widgets/progress_bar.rs:138. Animates fill
+    // context.rs:3236,3262      . Animate_bool/animate_value
     //
-    // conditional repainters (ok to use -- only repaint during interaction):
-    // collapsing_header -- open/close transition only
-    // scroll_area      -- scroll deceleration only
-    // tooltip          -- show delay timer only
-    // grid             -- one extra frame for layout stabilization
-    // menu             -- open/close transition only
+    // conditional repainters (ok to use. Only repaint during interaction):
+    // collapsing_header. Open/close transition only
+    // scroll_area     . Scroll deceleration only
+    // tooltip         . Show delay timer only
+    // grid            . One extra frame for layout stabilization
+    // menu            . Open/close transition only
     let forbidden = [
         "spinner()",
         ".spinner()",

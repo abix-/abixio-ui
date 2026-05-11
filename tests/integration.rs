@@ -44,7 +44,7 @@ async fn full_e2e_default_config() {
     run_and_assert(&server).await;
 }
 
-/// 2 volumes -- minimal multi-volume setup
+/// 2 volumes. Minimal multi-volume setup
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn e2e_two_volumes() {
@@ -52,7 +52,7 @@ async fn e2e_two_volumes() {
     run_and_assert(&server).await;
 }
 
-/// 8 volumes -- high volume count
+/// 8 volumes. High volume count
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn e2e_eight_volumes() {
@@ -60,7 +60,7 @@ async fn e2e_eight_volumes() {
     run_and_assert(&server).await;
 }
 
-/// 1 volume -- single disk, no erasure possible
+/// 1 volume. Single disk, no erasure possible
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn e2e_single_volume() {
@@ -68,7 +68,7 @@ async fn e2e_single_volume() {
     run_and_assert(&server).await;
 }
 
-/// 6 volumes -- odd non-power-of-two count
+/// 6 volumes. Odd non-power-of-two count
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn e2e_six_volumes() {

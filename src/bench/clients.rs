@@ -28,7 +28,7 @@ pub fn measure_cli_overhead(bin: &str, args: &[&str], n: usize) -> Duration {
     start.elapsed() / n as u32
 }
 
-// -- AWS CLI --
+//. AWS CLI.
 
 pub struct AwsCliHarness {
     aws: String,
@@ -116,7 +116,7 @@ impl AwsCliHarness {
     }
 }
 
-// -- rclone --
+//. Rclone.
 
 pub fn rclone_args(
     endpoint: &str,

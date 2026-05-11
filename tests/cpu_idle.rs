@@ -5,7 +5,7 @@
 //! these tests catch that by asserting <2.5% CPU during idle periods.
 //!
 //! MUST run single-threaded (GetProcessTimes measures entire process):
-//!   cargo test --test cpu_idle -- --ignored --test-threads=1
+//!   cargo test --test cpu_idle. --ignored --test-threads=1
 
 mod support;
 
@@ -47,11 +47,11 @@ fn measure_cpu_ms(f: impl FnOnce()) -> f64 {
 }
 
 const IDLE_SECS: u64 = 2;
-// 50ms of CPU over 2 seconds = 2.5% -- generous for CI, catches render loops
+// 50ms of CPU over 2 seconds = 2.5%. Generous for CI, catches render loops
 const MAX_IDLE_CPU_MS: f64 = 50.0;
 
 #[test]
-#[ignore] // must run single-threaded: cargo test --test cpu_idle -- --ignored --test-threads=1
+#[ignore] // must run single-threaded: cargo test --test cpu_idle. --ignored --test-threads=1
 fn perf_stats_idle_near_zero_cpu() {
     let _stats = abixio_ui::perf::PerfStats::new();
 
@@ -105,7 +105,7 @@ fn async_op_idle_after_completion_near_zero_cpu() {
     op.poll();
     assert!(!op.pending, "op should have completed by now");
 
-    // NOW measure idle -- no pending work, runtime should sleep
+    // NOW measure idle. No pending work, runtime should sleep
     let cpu = measure_cpu_ms(|| {
         thread::sleep(Duration::from_secs(IDLE_SECS));
     });
@@ -137,7 +137,7 @@ fn async_op_multiple_requests_then_idle() {
         assert!(!op.pending);
     }
 
-    // all done -- idle period
+    // all done. Idle period
     let cpu = measure_cpu_ms(|| {
         thread::sleep(Duration::from_secs(IDLE_SECS));
     });
@@ -180,7 +180,7 @@ fn perf_stats_after_recording_then_idle() {
 fn async_op_created_but_never_used_idle() {
     let _ = &*support::RUNTIME;
 
-    // create ops but never fire them -- should be zero overhead
+    // create ops but never fire them. Should be zero overhead
     let _op1 = support::AsyncOp::<String>::new();
     let _op2 = support::AsyncOp::<Vec<u8>>::new();
     let _op3 = support::AsyncOp::<()>::new();
@@ -209,7 +209,7 @@ fn polling_completed_ops_does_not_spin() {
     op.poll();
     assert!(!op.pending);
 
-    // repeatedly poll a completed op -- should be cheap/no-op
+    // repeatedly poll a completed op. Should be cheap/no-op
     let cpu = measure_cpu_ms(|| {
         for _ in 0..1000 {
             op.poll();

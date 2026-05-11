@@ -38,7 +38,7 @@ pub use types::{
     TransferStepResult,
 };
 
-// -- messages --
+//. Messages.
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -311,7 +311,7 @@ pub enum Selection {
     Object { bucket: String, key: String },
 }
 
-// -- state --
+//. State.
 
 pub struct App {
     pub client: Arc<S3Client>,
@@ -596,7 +596,7 @@ impl App {
         self.perf.record_frame();
 
         match message {
-            // -- navigation --
+            //. Navigation.
             Message::SelectSection(s) => {
                 self.section = s;
                 Task::none()
@@ -606,7 +606,7 @@ impl App {
             Message::SelectObject(key) => self.handle_select_object(key),
             Message::ClearSelection => self.handle_clear_selection(),
 
-            // -- data loaded --
+            //. Data loaded.
             Message::BucketsLoaded(r) => self.handle_buckets_loaded(r),
             Message::ObjectsLoaded(r) => self.handle_objects_loaded(r),
             Message::DetailLoaded(r) => self.handle_detail_loaded(r),
@@ -617,7 +617,7 @@ impl App {
             }
             Message::DownloadDone(r) => self.handle_download_done(r),
 
-            // -- browse actions --
+            //. Browse actions.
             Message::Refresh => self.handle_refresh(),
             Message::RefreshAll => self.handle_refresh_all(),
             Message::Upload => self.handle_upload(),
@@ -635,7 +635,7 @@ impl App {
             Message::CloseCreateBucketModal => self.handle_close_create_bucket_modal(),
             Message::CreateBucket => self.handle_create_bucket(),
 
-            // -- transfer --
+            //. Transfer.
             Message::OpenCopyObject => self.handle_open_copy_object(),
             Message::OpenMoveObject => self.handle_open_move_object(),
             Message::OpenRenameObject => self.handle_open_rename_object(),
@@ -662,7 +662,7 @@ impl App {
             Message::TransferConflictOverwriteAll => self.handle_transfer_conflict_overwrite_all(),
             Message::TransferConflictSkipAll => self.handle_transfer_conflict_skip_all(),
 
-            // -- delete --
+            //. Delete.
             Message::OpenBulkDeleteModal => self.handle_open_bulk_delete_modal(),
             Message::CloseBulkDeleteModal => self.handle_close_bulk_delete_modal(),
             Message::ConfirmBulkDelete => self.handle_confirm_bulk_delete(),
@@ -683,7 +683,7 @@ impl App {
             Message::ConfirmDeleteBucket => self.handle_confirm_delete_bucket(),
             Message::BucketDeleteStepFinished(r) => self.handle_bucket_delete_step_finished(r),
 
-            // -- connection manager --
+            //. Connection manager.
             Message::ConnectTo(name) => self.handle_connect_to(name),
             Message::AddConnection => self.handle_add_connection(),
             Message::EditConnection(name) => self.handle_edit_connection(name),
@@ -698,7 +698,7 @@ impl App {
             Message::NewConnAccessKeyChanged(v) => self.handle_new_conn_access_key_changed(v),
             Message::NewConnSecretKeyChanged(v) => self.handle_new_conn_secret_key_changed(v),
 
-            // -- admin --
+            //. Admin.
             Message::AbixioDetected(status) => self.handle_abixio_detected(status),
             Message::DisksLoaded(r) => self.handle_disks_loaded(r),
             Message::HealStatusLoaded(r) => self.handle_heal_status_loaded(r),
@@ -722,7 +722,7 @@ impl App {
             Message::ClusterNodesLoaded(r) => self.handle_cluster_nodes_loaded(r),
             Message::BucketFttLoaded(r) => self.handle_bucket_ftt_loaded(r),
 
-            // -- detail panel --
+            //. Detail panel.
             Message::OpenShareModal => self.handle_open_share_modal(),
             Message::CloseShareModal => self.handle_close_share_modal(),
             Message::ShareExpiryChanged(s) => self.handle_share_expiry_changed(s),
@@ -765,7 +765,7 @@ impl App {
             Message::RemoveTag(k) => self.handle_remove_tag(k),
             Message::TagsSaved(r) => self.handle_tags_saved(r),
 
-            // -- settings --
+            //. Settings.
             Message::SetTheme(t) => {
                 self.theme = t;
                 Task::none()
@@ -775,7 +775,7 @@ impl App {
                 Task::none()
             }
 
-            // -- sync --
+            //. Sync.
             Message::OpenSync => self.handle_open_sync(),
             Message::CloseSync => self.handle_close_sync(),
             Message::SyncModeChanged(mode) => self.handle_sync_mode_changed(mode),
@@ -882,13 +882,13 @@ impl App {
             Message::ConfirmSyncDeleteRun => self.handle_confirm_sync_delete_run(),
             Message::SyncDeleteBatchFinished(r) => self.handle_sync_delete_batch_finished(r),
 
-            // -- testing --
+            //. Testing.
             Message::RunTests => self.handle_run_tests(),
             Message::TestsComplete(r) => self.handle_tests_complete(r),
             Message::AutoStartTests => self.handle_auto_start_tests(),
             Message::TestReportWritten(r) => self.handle_test_report_written(r),
 
-            // -- server launcher --
+            //. Server launcher.
             Message::ServerBinaryPathChanged(v) => self.handle_server_binary_path_changed(v),
             Message::ServerListenChanged(v) => self.handle_server_listen_changed(v),
             Message::ServerNoAuthToggled(v) => self.handle_server_no_auth_toggled(v),
@@ -1022,7 +1022,7 @@ impl App {
         }
     }
 
-    // -- helpers that stay in mod.rs --
+    //. Helpers that stay in mod.rs.
 
     pub(crate) fn current_selected_object(&self) -> Option<(String, String)> {
         match &self.selection {

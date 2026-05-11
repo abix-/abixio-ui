@@ -122,7 +122,7 @@ impl PerfStats {
         }
     }
 
-    // -- accessors --
+    //. Accessors.
 
     pub fn current_fps(&self) -> f64 {
         self.fps.last()
@@ -144,7 +144,7 @@ impl PerfStats {
         self.repaints.count()
     }
 
-    // -- network (live from S3 client atomics) --
+    //. Network (live from S3 client atomics).
 
     pub fn total_requests(&self) -> u64 {
         self.s3_stats

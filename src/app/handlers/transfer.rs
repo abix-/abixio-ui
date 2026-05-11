@@ -364,7 +364,7 @@ impl App {
         self.resolve_transfer_conflict(true, true)
     }
 
-    // -- helpers --
+    //. Helpers.
 
     pub fn transfer_can_start(&self) -> bool {
         let Some(transfer) = &self.transfer else {

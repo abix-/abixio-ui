@@ -167,7 +167,7 @@ impl AdminClient {
     }
 }
 
-// -- Sig V4 signing (same approach as rust-s3 signing.rs) --
+//. Sig V4 signing (same approach as rust-s3 signing.rs).
 
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 

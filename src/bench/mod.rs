@@ -23,7 +23,7 @@ pub struct BenchArgs {
     #[arg(long, default_value = "L1,L2,L3,L4,L5,L6,L7", value_delimiter = ',')]
     pub layers: Vec<String>,
 
-    /// Write paths to test (comma-separated). Default is `wal` --
+    /// Write paths to test (comma-separated). Default is `wal`.
     /// the production small-object path. Pass `file,wal` to run
     /// ablation rows for the file-only tier.
     #[arg(long, default_value = "wal", value_delimiter = ',')]
@@ -294,7 +294,7 @@ pub async fn run(args: BenchArgs) {
 
     print_results(&results);
 
-    // always save results -- use --output if given, otherwise auto-generate in --output-dir
+    // always save results. Use --output if given, otherwise auto-generate in --output-dir
     let output_path = args.output.unwrap_or_else(|| {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

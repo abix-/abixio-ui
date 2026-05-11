@@ -103,7 +103,7 @@ impl App {
     }
 }
 
-// -- test runner logic --
+//. Test runner logic.
 
 struct TestRunner {
     results: Vec<TestResult>,
@@ -586,7 +586,7 @@ async fn test_admin(
             Err(e) => t.check("admin heal status", false, e),
         }
 
-        // object inspect -- upload a test object first
+        // object inspect. Upload a test object first
         let _ = client
             .put_object(
                 &bucket,

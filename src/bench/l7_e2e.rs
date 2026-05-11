@@ -57,7 +57,7 @@ pub async fn run(sizes: &[usize], args: &BenchArgs) -> Vec<BenchResult> {
         let tls = if *use_tls { Some(TlsMaterial::generate()) } else { None };
         let tls_label = if *use_tls { "" } else { " (HTTP)" };
 
-        // -- AbixIO configs --
+        //. AbixIO configs.
         if has(&args.servers, "abixio") {
             let wc_states: Vec<bool> = match args.write_cache.to_lowercase().as_str() {
                 "on" => vec![true],
@@ -105,7 +105,7 @@ pub async fn run(sizes: &[usize], args: &BenchArgs) -> Vec<BenchResult> {
             }
         }
 
-        // -- RustFS --
+        //. RustFS.
         if has(&args.servers, "rustfs") {
             if let Some(bin) = &rustfs_bin {
                 eprintln!("--- L7: RustFS{} ---", tls_label);
@@ -134,7 +134,7 @@ pub async fn run(sizes: &[usize], args: &BenchArgs) -> Vec<BenchResult> {
             }
         }
 
-        // -- MinIO --
+        //. MinIO.
         if has(&args.servers, "minio") {
             if let Some(bin) = &minio_bin {
                 eprintln!("--- L7: MinIO{} ---", tls_label);
@@ -180,7 +180,7 @@ async fn run_server(
     let ca_path = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(ca_path.path(), &cfg.ca_cert_pem).unwrap();
 
-    // -- sdk client --
+    //. Sdk client.
     if has(&args.clients, "sdk") {
         let bucket = "bench-sdk";
         let _ = cfg.client.create_bucket(bucket).await;
@@ -390,7 +390,7 @@ async fn run_server(
         }
     }
 
-    // -- aws-cli --
+    //. Aws-cli.
     if has(&args.clients, "aws-cli") {
         if let Some(aws) = aws_path {
             let harness = AwsCliHarness::new(
@@ -455,7 +455,7 @@ async fn run_server(
         }
     }
 
-    // -- rclone --
+    //. Rclone.
     if has(&args.clients, "rclone") {
         if let Some(rclone) = rclone_bin {
             rclone_mkdir(

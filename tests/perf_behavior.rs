@@ -14,7 +14,7 @@ use std::time::Duration;
 #[test]
 fn idle_records_zero_frames() {
     let stats = abixio_ui::perf::PerfStats::new();
-    // don't call record_frame -- simulates idle
+    // don't call record_frame. Simulates idle
     assert_eq!(stats.total_frames(), 0);
     assert_eq!(stats.current_fps(), 0.0);
     assert_eq!(stats.repaints_5m(), 0);
@@ -75,7 +75,7 @@ fn no_frames_while_sleeping() {
     stats.record_frame(); // initial frame
     let frames_before = stats.total_frames();
 
-    // simulate "idle" -- just sleep, don't call record_frame
+    // simulate "idle". Just sleep, don't call record_frame
     thread::sleep(Duration::from_millis(50));
 
     // frames should not have increased

@@ -843,7 +843,7 @@ impl S3Client {
         Ok(())
     }
 
-    // -- versioning --
+    //. Versioning.
 
     pub async fn get_bucket_versioning(&self, bucket: &str) -> Result<String, String> {
         let resp = self
@@ -972,7 +972,7 @@ impl S3Client {
         Ok(())
     }
 
-    // -- presigned URLs --
+    //. Presigned URLs.
 
     pub async fn presign_get_object(
         &self,
@@ -998,7 +998,7 @@ impl S3Client {
         Ok(presigned.uri().to_string())
     }
 
-    // -- bucket policy --
+    //. Bucket policy.
 
     pub async fn get_bucket_policy(&self, bucket: &str) -> Result<Option<String>, String> {
         let resp = self.client.get_bucket_policy().bucket(bucket).send().await;
@@ -1035,7 +1035,7 @@ impl S3Client {
         Ok(())
     }
 
-    // -- bucket lifecycle --
+    //. Bucket lifecycle.
 
     pub async fn get_bucket_lifecycle(&self, bucket: &str) -> Result<Option<String>, String> {
         let resp = self
@@ -1093,7 +1093,7 @@ impl S3Client {
         Ok(())
     }
 
-    // -- bucket tags --
+    //. Bucket tags.
 
     pub async fn get_bucket_tags(&self, bucket: &str) -> Result<HashMap<String, String>, String> {
         let resp = self
@@ -1196,7 +1196,7 @@ pub struct ListObjectsResult {
 mod tests {
     use super::*;
 
-    // -- S3Stats --
+    //. S3Stats.
 
     #[test]
     fn s3_stats_default_is_zero() {
@@ -1225,7 +1225,7 @@ mod tests {
         assert_eq!(stats.requests.load(Ordering::Relaxed), 1);
     }
 
-    // -- S3Client constructors --
+    //. S3Client constructors.
 
     #[test]
     fn new_client_with_creds() {
@@ -1277,7 +1277,7 @@ mod tests {
         assert_eq!(client.stats().bytes_in.load(Ordering::Relaxed), 3000);
     }
 
-    // -- data types --
+    //. Data types.
 
     #[test]
     fn object_info_clone() {

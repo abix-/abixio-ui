@@ -365,7 +365,7 @@ impl App {
         )
     }
 
-    // -- command helpers --
+    //. Command helpers.
 
     pub(crate) fn cmd_fetch_buckets(&self) -> Task<Message> {
         let client = self.client.clone();

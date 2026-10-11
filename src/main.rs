@@ -1,3 +1,7 @@
+// One window, the default for every program: no console window beside it.
+// Debug builds keep the console for their output.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -31,7 +35,23 @@ enum Command {
     Bench(BenchArgs),
 }
 
+/// A windowed program has no console of its own, so when it is started from
+/// a terminal (`--run-tests`, `bench`) it writes to that terminal, as
+/// Alacritty does.
+#[cfg(windows)]
+fn attach_console() {
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+    unsafe extern "system" {
+        fn AttachConsole(process_id: u32) -> i32;
+    }
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+}
+
+#[cfg(not(windows))]
+fn attach_console() {}
+
 fn main() -> iced::Result {
+    attach_console();
     let args = Args::parse();
 
     if let Some(Command::Bench(bench_args)) = args.command {

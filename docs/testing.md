@@ -2,6 +2,22 @@
 
 How to test abixio-ui with a local AbixIO server.
 
+## Certificate distrust regression
+
+The locked certificate packages reject the compromised eMudhra intermediate
+chains (CVE-2026-111943): webpki-roots 1.0.10 and rustls-webpki 0.103.16.
+The obsolete AWS SDK `rustls` feature is disabled; the SDK still uses its
+current default HTTPS client. Rebuild executables after updating Cargo.lock.
+
+```powershell
+k3sc cargo-lock test --release --locked --test certificate_distrust -- --ignored
+```
+
+These opt-in network tests exercise reqwest and AWS SDK rejection of the
+direct and Sectigo cross-signed chains documented at
+https://emudhra.we-have-a-problem.com/. Only dummy SDK credentials are used;
+a valid HTTPS control must connect successfully.
+
 ## Prerequisites
 
 Build both binaries:
